@@ -429,17 +429,39 @@ class EventProducerApp:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    import json
+def create_app():
+    """Create and return the FastAPI application.
 
-    app = EventProducerApp()
-    result = app.run_event(
-        brief="Networking event for industry professionals",
-        budget_cap="50000",
-        contingency_pct="15",
-        attendees=200,
-        event_type="networking",
-        venue_type="indoor",
-        date="2026-08-15",
+    This is a thin re-export that delegates to ``event_producer.api.create_app``
+    so that ``main.py`` can serve as an alternative entry point.
+    """
+    from event_producer.api import create_app as _create_app
+
+    return _create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Run the FastAPI app via uvicorn on port 8080
+    uvicorn.run(
+        "event_producer.api:create_app",
+        host="0.0.0.0",
+        port=8080,
+        factory=True,
     )
-    print(json.dumps(result, indent=2, default=str))
+
+    # The block below is kept for backwards compatibility when running
+    # the pipeline without the API server. Uncomment to use:
+    #
+    # app = EventProducerApp()
+    # result = app.run_event(
+    #     brief="Networking event for industry professionals",
+    #     budget_cap="50000",
+    #     contingency_pct="15",
+    #     attendees=200,
+    #     event_type="networking",
+    #     venue_type="indoor",
+    #     date="2026-08-15",
+    # )
+    # print(json.dumps(result, indent=2, default=str))

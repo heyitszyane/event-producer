@@ -1,0 +1,20 @@
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Project-local (not needed in image)
+project_documents/
+temp/
+tests/
+changelogs/
+docs/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

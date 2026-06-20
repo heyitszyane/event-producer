@@ -1,0 +1,95 @@
+# Cloud Build pipeline for Event Producer
+# Builds and deploys the backend (Cloud Run) and frontend (Firebase Hosting).
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: event-producer-api
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_MEDIUM
+
+steps:
+  # ---------------------------------------------------------------
+  # 1. Build backend Docker image
+  # ---------------------------------------------------------------
+  - id: build-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file=deploy/Dockerfile
+      - --tag=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+      - --tag=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:latest
+      - .
+    timeout: 600s
+
+  # ---------------------------------------------------------------
+  # 2. Push to Artifact Registry
+  # ---------------------------------------------------------------
+  - id: push-backend
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+    waitFor: [build-backend]
+    timeout: 300s
+
+  # ---------------------------------------------------------------
+  # 3. Deploy to Cloud Run
+  # ---------------------------------------------------------------
+  - id: deploy-cloudrun
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --port=8080
+      - --memory=512Mi
+      - --max-instances=1
+      - --set-env-vars=PYTHONUNBUFFERED=1
+      - --service-account=event-producer-runtime@$PROJECT_ID.iam.gserviceaccount.com
+    waitFor: [push-backend]
+    timeout: 300s
+
+  # ---------------------------------------------------------------
+  # 4. Build frontend (Next.js) — placeholder until web/ exists
+  # ---------------------------------------------------------------
+  - id: build-frontend
+    name: node:20
+    dir: web
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -f package.json ]; then
+          npm ci
+          npm run build
+        else
+          echo "web/ not yet created — skipping frontend build."
+        fi
+    waitFor: []
+    timeout: 600s
+
+  # ---------------------------------------------------------------
+  # 5. Deploy frontend to Firebase Hosting — placeholder
+  # ---------------------------------------------------------------
+  - id: deploy-firebase
+    name: gcr.io/$PROJECT_ID/firebase
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -f web/.next/BUILD_ID ]; then
+          firebase deploy --only hosting --project $PROJECT_ID
+        else
+          echo "Frontend build artifact not found — skipping Firebase deploy."
+        fi
+    waitFor: [build-frontend]
+    timeout: 300s
+
+timeout: 1200s
