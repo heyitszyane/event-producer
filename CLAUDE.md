@@ -225,6 +225,43 @@ handover briefs, go under `project_documents/` — never in public docs.
 - Handovers are self-contained: a new agent should be able to pick up the
   project from a handover without reading prior conversations.
 
+### 9a. Subagent Output Visibility (HARD RULE)
+
+Every subagent spawn (planner, generator, evaluator) produces output that must
+be saved to disk. The orchestrator's context is ephemeral — saved files are the
+only persistent record. Without these files, there is no audit trail, no
+debugging history, and no way for the human to see what was decided.
+
+**After every subagent spawn returns**, save its output to:
+```
+project_documents/result-artifacts/<phase>/subagents/<role>/<description>.md
+```
+
+Where:
+- `<phase>` = `p0`, `p1`, `p2`, `p3`, etc.
+- `<role>` = `planner`, `generator`, `evaluator`
+- `<description>` = e.g., `loop1-round1-plan`, `task3-fx-rates`, `task5-verdict`
+
+**What to save:**
+- **Planner:** the full plan for each round (including revision notes and what changed)
+- **Generator:** summary of what was done, files created, verification results
+- **Evaluator:** the full structured verdict (JSON), findings, remediation priorities
+
+**Directory convention:**
+```
+project_documents/result-artifacts/
+└── p1/
+    ├── subagents/
+    │   ├── planner/     (loop1-round{1..N}-plan.md)
+    │   ├── generator/   (task{N}-{name}.md)
+    │   └── evaluator/   (loop1-round{N}-verdict.md, task{N}-verdict.md)
+    └── p1-budget-engine-complete-20260621.md
+```
+
+This is NOT optional. The human cannot see subagent output unless it is saved to
+disk. The orchestrator saves subagent output as it arrives — do not wait until
+the end of the phase.
+
 ---
 
 ## 10. High-Risk Files (inspect before editing)
