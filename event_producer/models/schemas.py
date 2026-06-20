@@ -1,11 +1,12 @@
-"""Typed Pydantic contracts for the Budget Engine.
+"""Typed Pydantic contracts for the Budget Engine and CPM Scheduler.
 
-All monetary fields use Decimal — never float. Every model runs in strict mode
-so that float-to-Decimal coercion is rejected at the boundary.
+All monetary/time fields use Decimal — never float. Every model runs in strict
+mode so that float-to-Decimal coercion is rejected at the boundary.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -205,3 +206,125 @@ class Receipt(BaseModel):
     def validate_amount(cls, v: Decimal, info) -> Decimal:
         _reject_float(info.field_name, v)
         return v
+
+
+# ---------------------------------------------------------------------------
+# CPM Scheduler Models
+# ---------------------------------------------------------------------------
+
+class ScheduleTask(BaseModel):
+    """Input model for a single task in the CPM Scheduler."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    name: str
+    duration: Decimal
+    dependencies: list[str] = []
+    lead_time: Decimal | None = None
+    anchor: datetime | None = None
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("lead_time")
+    @classmethod
+    def validate_lead_time(cls, v: Decimal | None, info) -> Decimal | None:
+        if v is not None:
+            _reject_float(info.field_name, v)
+            if v < 0:
+                raise ValueError(f"{info.field_name} must be >= 0")
+        return v
+
+
+class ScheduledTask(BaseModel):
+    """A ScheduleTask with computed scheduling fields."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    name: str
+    duration: Decimal
+    dependencies: list[str] = []
+    lead_time: Decimal | None = None
+    anchor: datetime | None = None
+    earliest_start: datetime
+    earliest_finish: datetime
+    latest_start: datetime
+    latest_finish: datetime
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("lead_time")
+    @classmethod
+    def validate_lead_time(cls, v: Decimal | None, info) -> Decimal | None:
+        if v is not None:
+            _reject_float(info.field_name, v)
+            if v < 0:
+                raise ValueError(f"{info.field_name} must be >= 0")
+        return v
+
+
+class ScheduleResult(BaseModel):
+    """Successful schedule output from the CPM Scheduler."""
+
+    model_config = ConfigDict(strict=True)
+
+    ordered_tasks: list[ScheduledTask]
+    critical_path: list[str]
+
+
+class Conflict(BaseModel):
+    """Individual scheduling conflict entry."""
+
+    model_config = ConfigDict(strict=True)
+
+    task_id: str
+    conflict_type: Literal["lead_time", "anchor", "cycle"]
+    message: str
+
+
+class SchedulerConflictReport(BaseModel):
+    """Conflict report returned when the scheduler detects infeasibilities."""
+
+    model_config = ConfigDict(strict=True)
+
+    lead_time_conflicts: list[Conflict] = []
+    anchor_conflicts: list[Conflict] = []
+    cycle: list[str] = []
+
+
+class CallSheetEntry(BaseModel):
+    """A single entry in a derived call sheet."""
+
+    model_config = ConfigDict(strict=True)
+
+    task_name: str
+    start_time: datetime
+    end_time: datetime
+    is_anchor: bool
