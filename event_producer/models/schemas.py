@@ -328,3 +328,293 @@ class CallSheetEntry(BaseModel):
     start_time: datetime
     end_time: datetime
     is_anchor: bool
+
+
+# ---------------------------------------------------------------------------
+# P3 — Event Spec, Scope, Vendor, Task, Risk, Approval, Run-of-Show
+# ---------------------------------------------------------------------------
+
+class EventSpec(BaseModel):
+    """Parsed event brief produced by the configurator agent."""
+
+    model_config = ConfigDict(strict=True)
+
+    name: str
+    description: str
+    event_type: str
+    attendees: int
+    venue_type: str
+    duration_hours: Decimal
+    date: str
+    missing_fields: list[str] = []
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("attendees")
+    @classmethod
+    def validate_attendees(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("duration_hours")
+    @classmethod
+    def validate_duration_hours(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        # Validate ISO date format YYYY-MM-DD
+        try:
+            datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(
+                f"{info.field_name} must be a valid ISO date string (YYYY-MM-DD)"
+            )
+        return v
+
+
+class ScopeItem(BaseModel):
+    """A single scope item proposed for the event."""
+
+    model_config = ConfigDict(strict=True)
+
+    name: str
+    description: str
+    category: str
+    tier: _TIER_LITERAL
+    estimated_cost: Decimal
+    currency: str
+    qty: Decimal = Decimal("1")
+    selected: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, v: str, info) -> str:
+        if len(v) != 3 or v.upper() != v:
+            raise ValueError(
+                f"{info.field_name} must be a 3-letter uppercase ISO 4217 code"
+            )
+        if v not in ISO_4217_ALLOWLIST:
+            raise ValueError(
+                f"{info.field_name} '{v}' is not in the supported currency allowlist"
+            )
+        return v
+
+    @field_validator("estimated_cost")
+    @classmethod
+    def validate_estimated_cost(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v < 0:
+            raise ValueError(f"{info.field_name} must be >= 0")
+        return v
+
+    @field_validator("qty")
+    @classmethod
+    def validate_qty(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+
+class Vendor(BaseModel):
+    """A vendor record."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    name: str
+    category: str
+    contact_email: str = ""
+    contact_phone: str = ""
+    rating: Decimal = Decimal("0.00")
+    notes: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, v: Decimal, info) -> Decimal:
+        _reject_float(info.field_name, v)
+        if v < 0 or v > 5:
+            raise ValueError(f"{info.field_name} must be between 0 and 5")
+        return v
+
+
+class VendorMessage(BaseModel):
+    """A message from/to a vendor."""
+
+    model_config = ConfigDict(strict=True)
+
+    vendor_id: str
+    direction: Literal["inbound", "outbound"]
+    channel: str
+    body: str
+    timestamp: str = ""
+    is_quarantined: bool = False
+    injection_flags: list[str] = []
+
+    @field_validator("vendor_id")
+    @classmethod
+    def validate_vendor_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, v: str, info) -> str:
+        if v:
+            try:
+                datetime.fromisoformat(v)
+            except ValueError:
+                raise ValueError(
+                    f"{info.field_name} must be a valid ISO datetime string"
+                )
+        return v
+
+
+class Task(BaseModel):
+    """An action item."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    title: str
+    description: str = ""
+    assigned_to: str = ""
+    status: Literal["pending", "in_progress", "done", "blocked"] = "pending"
+    due_date: str = ""
+    priority: Literal["low", "medium", "high"] = "medium"
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("due_date")
+    @classmethod
+    def validate_due_date(cls, v: str, info) -> str:
+        if v:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(
+                    f"{info.field_name} must be a valid ISO date string (YYYY-MM-DD)"
+                )
+        return v
+
+
+class RiskFlag(BaseModel):
+    """A risk or gap identified by the Risk/Gap Flagger."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    category: Literal["budget", "schedule", "vendor", "security", "coverage", "compliance"]
+    severity: Literal["info", "warning", "critical"]
+    message: str
+    related_items: list[str] = []
+    resolved: bool = False
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+
+class Approval(BaseModel):
+    """A human approval record for the action-gate."""
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    action: str
+    requested_by: str
+    approved_by: str = ""
+    status: Literal["pending", "approved", "rejected"] = "pending"
+    timestamp: str = ""
+    notes: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, v: str, info) -> str:
+        if v:
+            try:
+                datetime.fromisoformat(v)
+            except ValueError:
+                raise ValueError(
+                    f"{info.field_name} must be a valid ISO datetime string"
+                )
+        return v
+
+
+class RunOfShow(BaseModel):
+    """The full run-of-show output tying together all planning artifacts."""
+
+    model_config = ConfigDict(strict=True)
+
+    event_spec: EventSpec
+    scope_items: list[ScopeItem]
+    budget_summary: BudgetSummary
+    schedule_result: ScheduleResult | None = None
+    call_sheet: list[CallSheetEntry] = []
+    vendors: list[Vendor] = []
+    risk_flags: list[RiskFlag] = []
+    approvals: list[Approval] = []

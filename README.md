@@ -38,6 +38,49 @@ _(Filled in P1 — the QA gate: typecheck + lint + tests/eval + build)_
 
 > **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON. These are gitignored.
 
+## Running the Agent Crew
+
+The agent crew can be invoked via the CLI:
+
+```bash
+python -m event_producer.main
+```
+
+This runs a sample networking event through the full pipeline:
+1. **Brief/Scope** — parses the brief and proposes scope items
+2. **Budget** — computes a reconciled budget with tier gating
+3. **Production** — generates a run-of-show schedule via CPM
+4. **Risk** — flags budget, schedule, vendor, and security risks
+5. **Vendor** — drafts vendor RFPs (with action-gate enforcement)
+6. **Compose** — assembles a complete RunOfShow
+
+### Eval Cases
+
+Eval cases are written in Gherkin format under `tests/eval_cases/`:
+
+- `orchestrator.feature` — Orchestrator routing and gate enforcement
+- `brief_scope.feature` — Brief parsing and scope proposal
+- `budget_manager.feature` — Budget computation and tier gating
+- `production_manager.feature` — CPM scheduling and conflict detection
+- `vendor_coordinator.feature` — Vendor coordination and security
+- `risk_flagger.feature` — Risk and gap detection
+- `security.feature` — Action-gate, injection flag, and audit log
+
+### Architecture
+
+```
+event_producer/
+├── agents/          # Role agents + reason→formatter splits
+├── engines/         # Deterministic cores (budget, scheduler)
+├── models/          # Pydantic schemas
+├── providers/       # Moat-seam interfaces
+├── security/        # Action-gate, injection flag, audit log
+├── mcp/             # MCP wrapper over event-store
+└── main.py          # ADK composition root
+```
+
+The Budget Engine and Scheduler are **plain Python called from code** — never registered as LLM tools. Agents that both reason and emit typed JSON use a **reason→formatter split** to maintain this boundary.
+
 ## Repo Map
 
 See [docs/REPO_SITEMAP.md](docs/REPO_SITEMAP.md) for the full folder-by-folder breakdown.
