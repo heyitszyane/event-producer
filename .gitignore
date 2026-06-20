@@ -1,0 +1,35 @@
+# === Secrets — never commit ===
+.env
+.env*
+*.key
+*service-account*.json
+*service-account*.json
+*google*token*
+*telegram*token*
+
+# === Python ===
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# === Node ===
+node_modules/
+.next/
+out/
+
+# === Build / Dist ===
+build/
+dist/
+
+# === Gitignored working directories ===
+project_documents/
+temp/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === IDE ===
+.idea/
+.vscode/
