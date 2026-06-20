@@ -121,6 +121,8 @@ These are structural constraints that must never be violated.
   JSON, Gemini API keys, Telegram tokens, and any other credential.
 - `.env*` is in `.gitignore` — keep it that way.
 - **Never force-push** to any branch, especially `main`.
+- **Git identity:** `user.name = heyitszyane`, `user.email = zyanetan@gmail.com`
+  (set locally in this repo for portfolio credit on heyitszyane's contribution graph).
 
 ---
 
