@@ -76,7 +76,7 @@ class TestRunEvent:
         assert "run_of_show" in data
 
     def test_run_event_without_auth(self) -> None:
-        """POST /run without X-Demo-User header returns 401."""
+        """POST /run without X-Demo-User header returns 401 with error envelope."""
         app = create_app()
         c = TestClient(app)
         body = {
@@ -90,6 +90,11 @@ class TestRunEvent:
         }
         response = c.post("/run", json=body)
         assert response.status_code == 401
+        data = response.json()
+        assert "error" in data
+        assert "detail" not in data
+        assert data["error"]["code"] == "401"
+        assert data["error"]["message"] == "Missing X-Demo-User header"
 
     def test_budget_reconciles_to_zero(self, client: TestClient) -> None:
         """Budget summary from /run reconciles: cap - contingency - spendable == 0."""
@@ -130,12 +135,17 @@ class TestChat:
         assert "Hello, what is the status?" in data["reply"]
 
     def test_chat_without_auth(self) -> None:
-        """POST /chat without X-Demo-User header returns 401."""
+        """POST /chat without X-Demo-User header returns 401 with error envelope."""
         app = create_app()
         c = TestClient(app)
         body = {"message": "Hello"}
         response = c.post("/chat", json=body)
         assert response.status_code == 401
+        data = response.json()
+        assert "error" in data
+        assert "detail" not in data
+        assert data["error"]["code"] == "401"
+        assert data["error"]["message"] == "Missing X-Demo-User header"
 
 
 # ---------------------------------------------------------------------------

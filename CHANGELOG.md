@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-21
+
+### P5B — Submission-Readiness Cleanup
+
+**Scope:** Fix public-submission and clean-room reproducibility defects. No new features.
+
+#### Reproducibility
+- Added `pytest==9.1.1` to `requirements.txt` so Cloud Build QA gates can install test runner in a clean environment
+- Replaced `npm ci` with `pnpm -C web install --frozen-lockfile` in `deploy/cloudbuild.yaml` (repo uses pnpm lockfile, not npm)
+
+#### Documentation Honesty
+- README "Concepts Demonstrated" table: replaced "Agent skills | Each role ships as a reusable ADK skill" with honest "Skill-like role agents — reusable role modules with typed inputs/outputs; formal Agents CLI skill packaging is deferred."
+- README "Concepts Demonstrated" table: replaced "Model routing | Flash-Lite for formatters, Flash for reasoning" with honest "Model-routing seam — reason/formatter split is represented structurally; live Gemini/Flash routing is deferred."
+
+#### API Consistency
+- Auth middleware error response changed from `{"detail": "Missing X-Demo-User header"}` to `{"error": {"code": "401", "message": "Missing X-Demo-User header"}}` to match the standard app-level error envelope
+
+---
+
 ## [0.5.0] - 2026-06-21
 
 ### P5A -- Audit-Fix Pass: Correctiveness Hardening, MCP Honesty, HITL Wiring, API Stabilization, Frontend/Deploy Coherence, Docs Honesty

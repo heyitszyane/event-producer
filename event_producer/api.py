@@ -74,7 +74,12 @@ def create_app() -> FastAPI:
             if "x-demo-user" not in request.headers:
                 return JSONResponse(
                     status_code=401,
-                    content={"detail": "Missing X-Demo-User header"},
+                    content={
+                        "error": {
+                            "code": "401",
+                            "message": "Missing X-Demo-User header",
+                        }
+                    },
                 )
             return await call_next(request)
 

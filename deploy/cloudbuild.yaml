@@ -104,17 +104,13 @@ steps:
   # ---------------------------------------------------------------
   - id: build-frontend
     name: node:20
-    dir: web
     entrypoint: bash
     args:
       - -c
       - |
-        if [ -f package.json ]; then
-          npm ci
-          npm run build
-        else
-          echo "web/ not yet created -- skipping frontend build."
-        fi
+        corepack enable &&
+        pnpm -C web install --frozen-lockfile &&
+        pnpm -C web run build
     waitFor: [qa-typecheck, qa-lint, qa-test]
     timeout: 600s
 
