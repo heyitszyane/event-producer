@@ -33,3 +33,7 @@ Thumbs.db
 # === IDE ===
 .idea/
 .vscode/
+
+# === Others ===
+CLAUDE.md
+AGENTS.md
