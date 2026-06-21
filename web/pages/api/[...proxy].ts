@@ -1,3 +1,5 @@
+// Dev-only proxy -- not included in static export. In production, the frontend
+// calls the backend directly via NEXT_PUBLIC_API_BASE_URL.
 import type { NextApiRequest, NextApiResponse } from 'next'
 
 const BACKEND_URL = 'http://localhost:8080'

@@ -100,8 +100,8 @@ def compute_budget(
 
     for line in lines:
         rate = fx_provider.get_rate(line.currency, reporting_currency)
-        normalized_unit_cost = (line.unit_cost * rate).quantize(_CENT)
-        normalized_total = (normalized_unit_cost * line.qty).quantize(_CENT)
+        normalized_total = (line.unit_cost * line.qty * rate).quantize(_CENT)
+        normalized_unit_cost = (normalized_total / line.qty).quantize(_CENT) if line.qty != Decimal("0") else Decimal("0.00")
 
         # Build a new BudgetLine with normalized (reporting-currency) costs
         normalized_lines.append(
@@ -226,7 +226,8 @@ def _compute_variance(
     for idx, line in enumerate(lines):
         planned_by_label[line.label] = normalized_totals[idx]
 
-    receipt_vs_plan: dict[str, Decimal] = {}
+    # First pass: aggregate receipts by label
+    actual_by_label: dict[str, Decimal] = {}
     running_burn = Decimal("0.00")
 
     for receipt in receipts:
@@ -236,10 +237,21 @@ def _compute_variance(
 
         running_burn = (running_burn + receipt_amount).quantize(_CENT)
 
-        # Match receipt to budget line by label
         label = receipt.line_item_label
-        planned = planned_by_label.get(label, Decimal("0.00"))
-        receipt_vs_plan[label] = (receipt_amount - planned).quantize(_CENT)
+        actual_by_label[label] = (
+            actual_by_label.get(label, Decimal("0.00")) + receipt_amount
+        ).quantize(_CENT)
+
+    # Second pass: compute variance per label
+    receipt_vs_plan: dict[str, Decimal] = {}
+    for label, planned in planned_by_label.items():
+        actual = actual_by_label.get(label, Decimal("0.00"))
+        receipt_vs_plan[label] = (actual - planned).quantize(_CENT)
+
+    # Include labels that have receipts but no planned line
+    for label in actual_by_label:
+        if label not in planned_by_label:
+            receipt_vs_plan[label] = actual_by_label[label]
 
     # Projection: current burn IS the projection (simple extrapolation)
     projected_total = running_burn

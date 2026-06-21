@@ -1,5 +1,8 @@
 # Cloud Build pipeline for Event Producer
 # Builds and deploys the backend (Cloud Run) and frontend (Firebase Hosting).
+#
+# QA gates (typecheck + lint + tests/eval + build) must all pass before
+# any build or deploy step runs.
 
 substitutions:
   _REGION: us-central1
@@ -11,6 +14,45 @@ options:
 
 steps:
   # ---------------------------------------------------------------
+  # QA Gate 1: Type check (mypy)
+  # ---------------------------------------------------------------
+  - id: qa-typecheck
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install -r requirements.txt &&
+        python -m mypy event_producer --no-error-summary
+    timeout: 120s
+
+  # ---------------------------------------------------------------
+  # QA Gate 2: Lint (ruff)
+  # ---------------------------------------------------------------
+  - id: qa-lint
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install ruff &&
+        ruff check .
+    timeout: 60s
+
+  # ---------------------------------------------------------------
+  # QA Gate 3: Tests (pytest)
+  # ---------------------------------------------------------------
+  - id: qa-test
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install -r requirements.txt &&
+        python -m pytest --tb=short -q
+    timeout: 120s
+
+  # ---------------------------------------------------------------
   # 1. Build backend Docker image
   # ---------------------------------------------------------------
   - id: build-backend
@@ -21,6 +63,7 @@ steps:
       - --tag=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
       - --tag=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:latest
       - .
+    waitFor: [qa-typecheck, qa-lint, qa-test]
     timeout: 600s
 
   # ---------------------------------------------------------------
@@ -57,7 +100,7 @@ steps:
     timeout: 300s
 
   # ---------------------------------------------------------------
-  # 4. Build frontend (Next.js) — placeholder until web/ exists
+  # 4. Build frontend (Next.js static export)
   # ---------------------------------------------------------------
   - id: build-frontend
     name: node:20
@@ -70,24 +113,27 @@ steps:
           npm ci
           npm run build
         else
-          echo "web/ not yet created — skipping frontend build."
+          echo "web/ not yet created -- skipping frontend build."
         fi
-    waitFor: []
+    waitFor: [qa-typecheck, qa-lint, qa-test]
     timeout: 600s
 
   # ---------------------------------------------------------------
-  # 5. Deploy frontend to Firebase Hosting — placeholder
+  # 5. Deploy frontend to Firebase Hosting (static export)
   # ---------------------------------------------------------------
+  # NOTE: Uses gcr.io/$PROJECT_ID/firebase as the deployment image.
+  # This image must be available in the target GCP project. If not, use
+  # gcr.io/cloud-builders/gcloud with `firebase deploy --only hosting` instead.
   - id: deploy-firebase
     name: gcr.io/$PROJECT_ID/firebase
     entrypoint: bash
     args:
       - -c
       - |
-        if [ -f web/.next/BUILD_ID ]; then
+        if [ -f web/out/index.html ]; then
           firebase deploy --only hosting --project $PROJECT_ID
         else
-          echo "Frontend build artifact not found — skipping Firebase deploy."
+          echo "Frontend build artifact not found (web/out/index.html) -- skipping Firebase deploy."
         fi
     waitFor: [build-frontend]
     timeout: 300s

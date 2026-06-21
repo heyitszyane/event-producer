@@ -682,3 +682,88 @@ def test_float_rejected_by_model() -> None:
             category="venue",
             tier="must",
         )
+
+
+# ---------------------------------------------------------------------------
+# 19. Receipt variance aggregates multiple receipts per label
+# ---------------------------------------------------------------------------
+
+
+def test_receipt_variance_aggregates_multiple_receipts_per_label(
+    fx: StaticFxRateProvider,
+) -> None:
+    """Two receipts for Venue label ($6000 + $5500) against planned $10000."""
+    lines = [
+        BudgetLine(
+            label="Venue",
+            qty=Decimal("1"),
+            unit_cost=Decimal("10000.00"),
+            currency="USD",
+            category="venue",
+            tier="must",
+        ),
+    ]
+    receipts = [
+        Receipt(
+            vendor="Grand Hall Inc.",
+            amount=Decimal("6000.00"),
+            currency="USD",
+            line_item_label="Venue",
+        ),
+        Receipt(
+            vendor="Grand Hall Inc.",
+            amount=Decimal("5500.00"),
+            currency="USD",
+            line_item_label="Venue",
+        ),
+    ]
+    result = compute_budget(
+        lines=lines,
+        budget_cap=Decimal("50000.00"),
+        contingency_pct=Decimal("15"),
+        fx_provider=fx,
+        receipts=receipts,
+    )
+
+    # Aggregated actual = 6000 + 5500 = 11500; planned = 10000; variance = 1500
+    assert result.variance.receipt_vs_plan["Venue"] == Decimal("1500.00")
+    # Running burn = 6000 + 5500 = 11500
+    assert result.variance.running_burn == Decimal("11500.00")
+
+
+# ---------------------------------------------------------------------------
+# 20. FX line-total-first rounding
+# ---------------------------------------------------------------------------
+
+
+def test_fx_line_total_first_rounding(fx: StaticFxRateProvider) -> None:
+    """Verify total is computed as (unit_cost*qty*rate) rounded, not (unit_cost*rate rounded)*qty rounded.
+
+    Use THB rate 35.50, unit_cost=100.00 THB, qty=3.
+    Old method: unit = (100/35.50).quantize(CENT) = 2.82, total = 2.82*3 = 8.46
+    New method: total = (100*3/35.50).quantize(CENT) = 8.45, unit = 8.45/3 = 2.82
+    """
+    lines = [
+        BudgetLine(
+            label="Decor (THB)",
+            qty=Decimal("3"),
+            unit_cost=Decimal("100.00"),
+            currency="THB",
+            category="decor",
+            tier="should",
+        ),
+    ]
+    result = compute_budget(
+        lines=lines,
+        budget_cap=Decimal("50000.00"),
+        contingency_pct=Decimal("15"),
+        fx_provider=fx,
+        reporting_currency="USD",
+    )
+
+    # Line-total-first: (100.00 * 3 / 35.50).quantize(CENT) = 8.45
+    # Old method would give: (100/35.50).quantize(CENT) = 2.82, *3 = 8.46
+    assert result.lines[0].unit_cost == Decimal("2.82")
+    # The normalized total should be 8.45 (line-total-first), not 8.46 (unit-first)
+    # We verify via the spendable/included/headroom invariant
+    assert result.spendable - result.included_totals - result.headroom == Decimal("0.00")

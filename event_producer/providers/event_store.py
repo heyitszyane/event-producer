@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 from event_producer.models.schemas import (
+    Approval,
     BudgetSummary,
     EventSpec,
     RunOfShow,
@@ -89,4 +90,24 @@ class EventStore(ABC):
     @abstractmethod
     def get_run_of_show(self, event_id: str) -> Optional[RunOfShow]:
         """Retrieve the full run-of-show."""
+        ...
+
+    @abstractmethod
+    def list_events(self) -> list[str]:
+        """Return all event IDs currently in the store."""
+        ...
+
+    @abstractmethod
+    def delete_event(self, event_id: str) -> bool:
+        """Delete an event and all associated data. Returns True if found."""
+        ...
+
+    @abstractmethod
+    def save_approval(self, event_id: str, approval: Approval) -> None:
+        """Persist an approval record."""
+        ...
+
+    @abstractmethod
+    def get_approvals(self, event_id: str) -> list[Approval]:
+        """Retrieve all approvals for an event."""
         ...

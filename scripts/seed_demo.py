@@ -49,9 +49,11 @@ def seed_demo_event() -> dict:
         body = exc.read().decode("utf-8", errors="replace")
         print(f"HTTP error {exc.code}: {body}", file=sys.stderr)
         sys.exit(1)
-    except urllib.error.URLError as exc:
-        print(f"Connection error: {exc.reason}", file=sys.stderr)
-        print("Is the API server running on http://localhost:8080?", file=sys.stderr)
+    except urllib.error.URLError:
+        print(f"Cannot connect to the API server at {API_BASE}.", file=sys.stderr)
+        print("Please start the server first:", file=sys.stderr)
+        print("    python -m event_producer.main", file=sys.stderr)
+        print("Or: uvicorn event_producer.api:create_app --factory --port 8080", file=sys.stderr)
         sys.exit(1)
 
 

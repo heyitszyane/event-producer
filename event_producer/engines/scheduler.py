@@ -167,8 +167,39 @@ def compute_schedule(
     if not tasks:
         return ScheduleResult(ordered_tasks=[], critical_path=[])
 
+    # -- Duplicate task ID validation ----------------------------------------
+    seen_ids: set[str] = set()
+    dupes: list[str] = []
+    for t in tasks:
+        if t.id in seen_ids:
+            dupes.append(t.id)
+        seen_ids.add(t.id)
+    if dupes:
+        return SchedulerConflictReport(
+            cycle=[],
+            lead_time_conflicts=[],
+            anchor_conflicts=[
+                Conflict(task_id=d, conflict_type="duplicate_id",
+                         message=f"Duplicate task ID '{d}' detected")
+                for d in dupes
+            ],
+        )
+
     # -- Build lookup --------------------------------------------------------
     tasks_by_id: dict[str, ScheduleTask] = {t.id: t for t in tasks}
+
+    # -- Missing dependency validation ---------------------------------------
+    missing_deps = sorted({dep for task in tasks for dep in task.dependencies if dep not in tasks_by_id})
+    if missing_deps:
+        return SchedulerConflictReport(
+            cycle=[],
+            lead_time_conflicts=[],
+            anchor_conflicts=[
+                Conflict(task_id="", conflict_type="missing_dependency",
+                         message=f"Dependency ID '{d}' not found in task list")
+                for d in missing_deps
+            ],
+        )
 
     # -- Step 1: Cycle detection ---------------------------------------------
     cycle = _detect_cycle(tasks_by_id)

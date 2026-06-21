@@ -9,7 +9,7 @@ production pipeline from brief to run-of-show.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -32,6 +32,7 @@ from event_producer.agents.vendor_coordinator import (
     VendorCoordinatorReasonAgent,
 )
 from event_producer.models.schemas import (
+    Approval,
     BudgetSummary,
     EventSpec,
     RiskFlag,
@@ -68,6 +69,7 @@ class InMemoryEventStore(EventStore):
         self._vendors: dict[str, list[Vendor]] = {}
         self._messages: dict[str, list[VendorMessage]] = {}
         self._run_of_shows: dict[str, RunOfShow] = {}
+        self._approvals: dict[str, list[Approval]] = {}
 
     def save_event(self, event_id: str, event_spec: EventSpec) -> None:
         self._events[event_id] = event_spec
@@ -116,6 +118,33 @@ class InMemoryEventStore(EventStore):
 
     def get_run_of_show(self, event_id: str) -> Optional[RunOfShow]:
         return self._run_of_shows.get(event_id)
+
+    def list_events(self) -> list[str]:
+        return sorted(self._events.keys())
+
+    def delete_event(self, event_id: str) -> bool:
+        if event_id not in self._events:
+            return False
+        del self._events[event_id]
+        self._scopes.pop(event_id, None)
+        self._budgets.pop(event_id, None)
+        self._schedules.pop(event_id, None)
+        self._vendors.pop(event_id, None)
+        self._messages.pop(event_id, None)
+        self._run_of_shows.pop(event_id, None)
+        self._approvals.pop(event_id, None)
+        return True
+
+    def save_approval(self, event_id: str, approval: Approval) -> None:
+        approvals = self._approvals.setdefault(event_id, [])
+        for i, a in enumerate(approvals):
+            if a.id == approval.id:
+                approvals[i] = approval
+                return
+        approvals.append(approval)
+
+    def get_approvals(self, event_id: str) -> list[Approval]:
+        return list(self._approvals.get(event_id, []))
 
 
 class InMemoryVendorSourcer(VendorSourcer):
@@ -328,17 +357,14 @@ class EventProducerApp:
         # ------------------------------------------------------------------
         # Step 3: Production (Schedule)
         # ------------------------------------------------------------------
-        start_time = datetime(
-            year=event_spec.date.year if hasattr(event_spec.date, "year") else 2026,
-            month=8,
-            day=15,
-            hour=8,
-            minute=0,
-            tzinfo=timezone.utc,
-        )
-        # Parse the date properly
+        # Start 30 days before the event so that vendor lead times (e.g.,
+        # catering 7 days, staging 5 days, AV 3 days, security 3 days) are
+        # feasible.  Using the event date itself as the project start would
+        # cause every lead-time check to flag a conflict.
         event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
-        start_time = event_date.replace(hour=8, minute=0, second=0, tzinfo=timezone.utc)
+        start_time = event_date.replace(
+            hour=8, minute=0, second=0, tzinfo=timezone.utc,
+        ) - timedelta(days=30)
 
         production_request = {
             "event_spec": brief_validated["event_spec"],
@@ -412,12 +438,14 @@ class EventProducerApp:
         # ------------------------------------------------------------------
         # Return result dict
         # ------------------------------------------------------------------
+        conflict_report = production_validated.get("conflict_report")
         return {
             "event_id": event_id,
             "event_spec": event_spec.model_dump(),
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_summary": budget_summary.model_dump(),
             "schedule_result": schedule_result.model_dump() if schedule_result else None,
+            "conflict_report": conflict_report,
             "call_sheet": [c.model_dump() for c in call_sheet],
             "risk_flags": [f.model_dump() for f in risk_flags],
             "vendor_draft": vendor_draft,

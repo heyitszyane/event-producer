@@ -1,3 +1,12 @@
-pydantic
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
+# Pinned dependencies as of P5A (2026-06-21).
+# Re-pin before production deploy: pip freeze > requirements.txt
+pydantic==2.13.4
+pydantic-core==2.46.4
+fastapi==0.138.0
+starlette==1.3.1
+uvicorn[standard]==0.49.0
+anyio==4.14.0
+httpx==0.28.1
+mypy==2.1.0
+mypy-extensions==1.1.0
+ruff==0.15.18

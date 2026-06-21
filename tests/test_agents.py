@@ -6,7 +6,6 @@ injection handling, action-gate enforcement, and the full pipeline.
 All monetary values use Decimal("...") string literals — never float.
 """
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -395,7 +394,7 @@ class TestBudgetManagerAgent:
             {
                 "name": "AV Setup",
                 "description": "AV",
-                "category": "av",
+                "category": "av_equipment",
                 "tier": "should",
                 "estimated_cost": Decimal("5000.00"),
                 "currency": "USD",
@@ -787,7 +786,7 @@ class TestRiskFlaggerAgent:
             "vendors": [
                 {"id": "v1", "name": "Venue Co", "category": "venue"},
                 {"id": "v2", "name": "Catering Co", "category": "catering"},
-                {"id": "v3", "name": "AV Co", "category": "av"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
             ],
             "vendor_messages": [],
         }
@@ -811,7 +810,7 @@ class TestRiskFlaggerAgent:
             "vendors": [
                 {"id": "v1", "name": "Venue Co", "category": "venue"},
                 {"id": "v2", "name": "Catering Co", "category": "catering"},
-                {"id": "v3", "name": "AV Co", "category": "av"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
             ],
             "vendor_messages": [],
         }
@@ -842,7 +841,7 @@ class TestRiskFlaggerAgent:
             "vendors": [
                 {"id": "v1", "name": "Venue Co", "category": "venue"},
                 {"id": "v2", "name": "Catering Co", "category": "catering"},
-                {"id": "v3", "name": "AV Co", "category": "av"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
             ],
             "vendor_messages": [],
         }
@@ -862,7 +861,7 @@ class TestRiskFlaggerAgent:
             "vendors": [
                 {"id": "v1", "name": "Venue Co", "category": "venue"},
                 {"id": "v2", "name": "Catering Co", "category": "catering"},
-                {"id": "v3", "name": "AV Co", "category": "av"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
             ],
             "vendor_messages": [
                 {
@@ -894,7 +893,7 @@ class TestRiskFlaggerAgent:
         }
         flags = risk_flagger.run(state)
         vendor_flags = [f for f in flags if f["category"] == "vendor"]
-        assert len(vendor_flags) == 2  # catering and av missing
+        assert len(vendor_flags) == 2  # catering and av_equipment missing
         assert all(f["severity"] == "warning" for f in vendor_flags)
 
     def test_risk_flagger_low_headroom(
@@ -912,7 +911,7 @@ class TestRiskFlaggerAgent:
             "vendors": [
                 {"id": "v1", "name": "Venue Co", "category": "venue"},
                 {"id": "v2", "name": "Catering Co", "category": "catering"},
-                {"id": "v3", "name": "AV Co", "category": "av"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
             ],
             "vendor_messages": [],
         }
@@ -921,6 +920,58 @@ class TestRiskFlaggerAgent:
         assert len(budget_flags) == 1
         assert budget_flags[0]["severity"] == "warning"
         assert "headroom" in budget_flags[0]["message"].lower()
+
+    def test_risk_flagger_deterministic_ids(
+        self,
+        risk_flagger: RiskFlaggerAgent,
+    ) -> None:
+        """Running twice with same input produces same flag IDs."""
+        state = {
+            "budget_summary": {
+                "over_budget": True,
+                "headroom": Decimal("5000"),
+                "spendable": Decimal("42500"),
+            },
+            "conflict_report": None,
+            "vendors": [
+                {"id": "v1", "name": "Venue Co", "category": "venue"},
+                {"id": "v2", "name": "Catering Co", "category": "catering"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
+            ],
+            "vendor_messages": [],
+        }
+        flags_1 = risk_flagger.run(state)
+        flags_2 = risk_flagger.run(state)
+        ids_1 = [f["id"] for f in flags_1]
+        ids_2 = [f["id"] for f in flags_2]
+        assert ids_1 == ids_2
+        # Also verify IDs are not UUIDs (should be 12-char hex hashes)
+        for flag_id in ids_1:
+            assert len(flag_id) == 12
+            assert all(c in "0123456789abcdef" for c in flag_id)
+
+    def test_risk_flagger_av_category_coverage(
+        self,
+        risk_flagger: RiskFlaggerAgent,
+    ) -> None:
+        """Vendor with category 'av_equipment' should not trigger AV risk flag."""
+        state = {
+            "budget_summary": {
+                "over_budget": False,
+                "headroom": Decimal("10000"),
+                "spendable": Decimal("50000"),
+            },
+            "conflict_report": None,
+            "vendors": [
+                {"id": "v1", "name": "Venue Co", "category": "venue"},
+                {"id": "v2", "name": "Catering Co", "category": "catering"},
+                {"id": "v3", "name": "AV Co", "category": "av_equipment"},
+            ],
+            "vendor_messages": [],
+        }
+        flags = risk_flagger.run(state)
+        vendor_flags = [f for f in flags if f["category"] == "vendor"]
+        assert vendor_flags == []
 
 
 # ===========================================================================
