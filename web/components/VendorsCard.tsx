@@ -8,6 +8,7 @@ export interface Vendor {
   contact_phone: string
   rating: string
   notes: string
+  locked?: boolean
 }
 
 interface VendorsCardProps {
@@ -20,103 +21,86 @@ function renderStars(rating: string | number): React.ReactNode {
   const stars = []
   for (let i = 1; i <= 5; i++) {
     stars.push(
-      <span key={i} style={{ color: i <= Math.floor(r) ? '#f59e0b' : '#d1d5db' }}>
+      <span key={i} style={{ color: i <= Math.floor(r) ? 'var(--status-warn)' : 'var(--border-subtle)' }}>
         ★
       </span>
     )
   }
-  return <span>{stars} <span style={{ color: '#6b7280', fontSize: 12 }}>({String(rating)})</span></span>
+  return <span>{stars} <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-xs)' }}>({String(rating)})</span></span>
 }
 
 export default function VendorsCard({ vendors }: VendorsCardProps) {
   if (!vendors || vendors.length === 0) {
     return (
-      <div style={cardStyle}>
-        <h2 style={headingStyle}>Vendors</h2>
-        <p style={emptyStyle}>No vendors</p>
-      </div>
+      <section className="card" id="vendors" aria-labelledby="vendors-heading">
+        <div className="card__header">
+          <h2 id="vendors-heading">Vendors</h2>
+        </div>
+        <div className="empty-state">
+          No vendors configured &mdash; Add vendors via chat command.
+        </div>
+      </section>
     )
   }
 
   return (
-    <div style={cardStyle}>
-      <h2 style={headingStyle}>Vendors</h2>
+    <section className="card" id="vendors" aria-labelledby="vendors-heading">
+      <div className="card__header">
+        <h2 id="vendors-heading">Vendors</h2>
+        <span className="badge badge--info">{vendors.length}</span>
+      </div>
 
       <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-        {vendors.map((vendor) => (
-          <div key={vendor.id} style={vendorItemStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={vendorNameStyle}>{vendor.name}</div>
-                <div style={vendorCategoryStyle}>{vendor.category}</div>
+        {vendors.map((vendor) => {
+          const isLocked = vendor.locked === true
+          const isPending = !isLocked
+
+          return (
+            <div
+              key={vendor.id}
+              style={{
+                padding: 'var(--space-2) var(--space-3)',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: 'var(--space-2)',
+                backgroundColor: 'var(--surface-tertiary)',
+                borderLeft: `3px solid ${isLocked ? 'var(--status-ok)' : 'var(--status-warn)'}`,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
+                    {vendor.name}
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', textTransform: 'capitalize' }}>
+                    {vendor.category}
+                    {isLocked && <span style={{ marginLeft: 'var(--space-2)', color: 'var(--status-ok)' }}>Locked</span>}
+                    {isPending && <span style={{ marginLeft: 'var(--space-2)', color: 'var(--status-warn)' }}>Pending</span>}
+                  </div>
+                </div>
+                <div style={{ marginLeft: 'var(--space-2)', flexShrink: 0 }}>
+                  {renderStars(vendor.rating)}
+                </div>
               </div>
-              <div style={{ marginLeft: 8 }}>{renderStars(vendor.rating)}</div>
+
+              {vendor.contact_email && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+                  ✉ <a href={`mailto:${vendor.contact_email}`}>{vendor.contact_email}</a>
+                </div>
+              )}
+              {vendor.contact_phone && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+                  ☎ {vendor.contact_phone}
+                </div>
+              )}
+              {vendor.notes && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)', fontStyle: 'italic' }}>
+                  {vendor.notes}
+                </div>
+              )}
             </div>
-            {vendor.contact_email && (
-              <div style={contactStyle}>
-                ✉ <a href={`mailto:${vendor.contact_email}`} style={linkStyle}>{vendor.contact_email}</a>
-              </div>
-            )}
-            {vendor.contact_phone && (
-              <div style={contactStyle}>
-                ☎ {vendor.contact_phone}
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </div>
-    </div>
+    </section>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: 16,
-  marginBottom: 16,
-  backgroundColor: '#ffffff',
-}
-
-const headingStyle: React.CSSProperties = {
-  margin: '0 0 12px 0',
-  fontSize: 18,
-  fontWeight: 600,
-  color: '#111827',
-}
-
-const emptyStyle: React.CSSProperties = {
-  color: '#6b7280',
-  fontSize: 14,
-  margin: 0,
-}
-
-const vendorItemStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderRadius: 6,
-  marginBottom: 6,
-  backgroundColor: '#f9fafb',
-  border: '1px solid #e5e7eb',
-}
-
-const vendorNameStyle: React.CSSProperties = {
-  fontWeight: 600,
-  fontSize: 14,
-  color: '#111827',
-}
-
-const vendorCategoryStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  textTransform: 'capitalize',
-}
-
-const contactStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#4b5563',
-  marginTop: 2,
-}
-
-const linkStyle: React.CSSProperties = {
-  color: '#2563eb',
-  textDecoration: 'none',
 }

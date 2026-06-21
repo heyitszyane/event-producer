@@ -1,282 +1,193 @@
-import { useState } from 'react'
-import ChatPane from '../components/ChatPane'
+import { useState, type FormEvent } from 'react'
+import Head from 'next/head'
+import EventCommandHeader from '../components/EventCommandHeader'
 import ApprovalInbox from '../components/ApprovalInbox'
-import ScopeCard, { ScopeItem } from '../components/ScopeCard'
-import BudgetCard, { BudgetSummary } from '../components/BudgetCard'
-import RunOfShowCard, { ScheduleResult, CallSheetEntry } from '../components/RunOfShowCard'
-import VendorsCard, { Vendor } from '../components/VendorsCard'
-import RiskCard, { RiskFlag } from '../components/RiskCard'
+import ScopeCard, { type ScopeItem } from '../components/ScopeCard'
+import BudgetCard, { type BudgetSummary } from '../components/BudgetCard'
+import RunOfShowCard, { type ScheduleResult, type CallSheetEntry } from '../components/RunOfShowCard'
+import VendorsCard, { type Vendor } from '../components/VendorsCard'
+import RiskCard, { type RiskFlag } from '../components/RiskCard'
+import ChatPane from '../components/ChatPane'
+import ConflictReportCard, { type ConflictReport } from '../components/ConflictReportCard'
 
 // In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
 
-export interface Conflict {
-	task_id: string
-	conflicting_task_id: string
-	conflict_type: string
-	message: string
-}
-
-export interface ConflictReport {
-	lead_time_conflicts: Conflict[]
-	anchor_conflicts: Conflict[]
-	cycle: string[]
-	conflicts?: Conflict[]
-}
-
 export interface RunEventResponse {
-	event_id?: string
-	status?: string
-	event_spec?: Record<string, unknown>
-	scope_items?: ScopeItem[]
-	budget_summary?: BudgetSummary
-	schedule_result?: ScheduleResult | null
-	conflict_report?: ConflictReport | null
-	call_sheet?: CallSheetEntry[]
-	vendors?: Vendor[]
-	risk_flags?: RiskFlag[]
-	vendor_draft?: unknown
-	run_of_show?: unknown
-}
-
-function conflictTypeLabel(type: string): string {
-	switch (type) {
-		case 'lead_time': return 'Lead Time Conflict'
-		case 'anchor': return 'Anchor Conflict'
-		case 'cycle': return 'Dependency Cycle'
-		case 'missing_dependency': return 'Missing Dependency'
-		case 'duplicate_id': return 'Duplicate Task ID'
-		default: return type
-	}
-}
-
-function ConflictReportCard({ report }: { report: ConflictReport }) {
-	const allConflicts = [
-		...(report.conflicts || []),
-		...report.lead_time_conflicts,
-		...report.anchor_conflicts,
-	]
-
-	return (
-		<div style={{
-			border: '1px solid #f87171',
-			borderRadius: 8,
-			padding: 16,
-			marginBottom: 16,
-			backgroundColor: '#fef2f2',
-		}}>
-			<h2 style={{ margin: '0 0 12px 0', fontSize: 18, fontWeight: 600, color: '#991b1b' }}>
-				Schedule Conflicts Detected
-			</h2>
-
-			{allConflicts.length > 0 && (
-				<div style={{ marginBottom: 12 }}>
-					{allConflicts.map((c, idx) => (
-						<div key={idx} style={{
-							padding: '8px 12px',
-							borderRadius: 6,
-							marginBottom: 6,
-							border: '1px solid #fecaca',
-							backgroundColor: '#ffffff',
-						}}>
-							<div style={{ fontWeight: 600, fontSize: 14, color: '#991b1b' }}>
-								{conflictTypeLabel(c.conflict_type)}
-							</div>
-							<div style={{ fontSize: 13, color: '#374151', marginTop: 2 }}>
-								Task: <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{c.task_id}</code>
-								{c.conflicting_task_id && (
-									<> &rarr; <code style={{ backgroundColor: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>{c.conflicting_task_id}</code></>
-								)}
-							</div>
-							{c.message && (
-								<div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-									{c.message}
-								</div>
-							)}
-						</div>
-					))}
-				</div>
-			)}
-
-			{report.cycle.length > 0 && (
-				<div style={{ marginBottom: 8 }}>
-					<div style={{ fontWeight: 600, fontSize: 14, color: '#991b1b', marginBottom: 4 }}>
-						Circular Dependency Detected
-					</div>
-					<div style={{ fontSize: 13, color: '#374151' }}>
-						Cycle path: {report.cycle.join(' → ')} → {report.cycle[0]}
-					</div>
-				</div>
-			)}
-
-			<p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-				Adjust task dependencies, lead times, or remove duplicate IDs and re-run.
-			</p>
-		</div>
-	)
+  event_id?: string
+  status?: string
+  event_spec?: Record<string, unknown>
+  scope_items?: ScopeItem[]
+  budget_summary?: BudgetSummary
+  schedule_result?: ScheduleResult | null
+  conflict_report?: ConflictReport | null
+  call_sheet?: CallSheetEntry[]
+  vendors?: Vendor[]
+  risk_flags?: RiskFlag[]
+  run_of_show?: {
+    vendors?: Vendor[]
+  }
 }
 
 export default function Dashboard() {
-	const [brief, setBrief] = useState('')
-	const [budgetCap, setBudgetCap] = useState('')
-	const [contingencyPct, setContingencyPct] = useState('10')
-	const [attendees, setAttendees] = useState(50)
-	const [eventType, setEventType] = useState('corporate')
-	const [venueType, setVenueType] = useState('indoor')
-	const [date, setDate] = useState('')
-	const [result, setResult] = useState<RunEventResponse | null>(null)
-	const [loading, setLoading] = useState(false)
-	const [error, setError] = useState<string | null>(null)
+  const [brief, setBrief] = useState('')
+  const [budgetCap, setBudgetCap] = useState('')
+  const [contingencyPct, setContingencyPct] = useState('10')
+  const [attendees, setAttendees] = useState(50)
+  const [eventType, setEventType] = useState('corporate')
+  const [venueType, setVenueType] = useState('indoor')
+  const [date, setDate] = useState('')
+  const [result, setResult] = useState<RunEventResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [hasRun, setHasRun] = useState(false)
 
-	async function handleRun() {
-		setLoading(true)
-		setError(null)
-		try {
-			const res = await fetch(`${API_BASE}/run`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					brief,
-					budget_cap: budgetCap,
-					contingency_pct: contingencyPct,
-					attendees,
-					event_type: eventType,
-					venue_type: venueType,
-					date,
-				}),
-			})
-			if (!res.ok) {
-				const text = await res.text()
-				throw new Error(`HTTP ${res.status}: ${text}`)
-			}
-			const data: RunEventResponse = await res.json()
-			setResult(data)
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err))
-		} finally {
-			setLoading(false)
-		}
-	}
+  async function handleRun(e: FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE}/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User': 'demo-user',
+        },
+        body: JSON.stringify({
+          brief,
+          budget_cap: budgetCap,
+          contingency_pct: contingencyPct,
+          attendees,
+          event_type: eventType,
+          venue_type: venueType,
+          date,
+        }),
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(`HTTP ${res.status}: ${text}`)
+      }
+      const data: RunEventResponse = await res.json()
+      setResult(data)
+      setHasRun(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
 
-	return (
-		<div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 800, margin: '0 auto', padding: 24 }}>
-			<h1>Event Producer Dashboard</h1>
+  // Fix: read vendors from run_of_show.vendors (not result.vendors)
+  const vendors = result?.run_of_show?.vendors || result?.vendors || []
 
-			<div style={{ display: 'grid', gap: 12, marginBottom: 24 }}>
-				<label>
-					Brief
-					<input
-						type="text"
-						value={brief}
-						onChange={(e) => setBrief(e.target.value)}
-						placeholder="Describe the event"
-						style={{ width: '100%', padding: 8 }}
-					/>
-				</label>
+  return (
+    <>
+      <Head>
+        <title>Event Producer Dashboard</title>
+        <meta name="description" content="AI production crew for brand/experiential events" />
+      </Head>
 
-				<label>
-					Budget Cap
-					<input
-						type="text"
-						value={budgetCap}
-						onChange={(e) => setBudgetCap(e.target.value)}
-						placeholder="5000"
-						style={{ width: '100%', padding: 8 }}
-					/>
-				</label>
+      <EventCommandHeader
+        eventSpec={result?.event_spec || null}
+        formData={{
+          brief,
+          budgetCap,
+          contingencyPct,
+          attendees,
+          eventType,
+          venueType,
+          date,
+        }}
+        formHandlers={{
+          setBrief,
+          setBudgetCap,
+          setContingencyPct,
+          setAttendees,
+          setEventType,
+          setVenueType,
+          setDate,
+        }}
+        onRun={handleRun}
+        loading={loading}
+        running={hasRun}
+      />
 
-				<label>
-					Contingency %
-					<input
-						type="number"
-						value={contingencyPct}
-						onChange={(e) => setContingencyPct(e.target.value)}
-						style={{ width: '100%', padding: 8 }}
-					/>
-				</label>
+      <main>
+        {/* Error bar */}
+        {error && (
+          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-3) var(--space-6)' }}>
+            <div className="error-bar" role="alert">
+              <span>Error: {error}</span>
+              <button
+                onClick={() => setError(null)}
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 'var(--text-md)', lineHeight: 1 }}
+                aria-label="Dismiss error"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
 
-				<label>
-					Attendees
-					<input
-						type="number"
-						value={attendees}
-						onChange={(e) => setAttendees(Number(e.target.value))}
-						style={{ width: '100%', padding: 8 }}
-					/>
-				</label>
+        {/* Pre-run empty state */}
+        {!result && !error && !loading && (
+          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-8) var(--space-6)' }}>
+            <div className="empty-state" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
+              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)' }}>
+                Configure your event above and click <strong>Run Event</strong> to begin.
+              </p>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
+                The AI production crew will generate scope, budget, run-of-show, vendor coordination, and risk assessments.
+              </p>
+            </div>
+          </div>
+        )}
 
-				<label>
-					Event Type
-					<select value={eventType} onChange={(e) => setEventType(e.target.value)} style={{ width: '100%', padding: 8 }}>
-						<option value="corporate">Corporate</option>
-						<option value="wedding">Wedding</option>
-						<option value="conference">Conference</option>
-						<option value="social">Social</option>
-					</select>
-				</label>
+        {/* Loading state */}
+        {loading && (
+          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-8) var(--space-6)' }}>
+            <div className="empty-state loading-pulse" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-inverse)' }}>
+                Running event production pipeline...
+              </p>
+            </div>
+          </div>
+        )}
 
-				<label>
-					Venue Type
-					<select value={venueType} onChange={(e) => setVenueType(e.target.value)} style={{ width: '100%', padding: 8 }}>
-						<option value="indoor">Indoor</option>
-						<option value="outdoor">Outdoor</option>
-						<option value="hybrid">Hybrid</option>
-					</select>
-				</label>
+        {/* Two-column grid layout */}
+        {result && (
+          <div className="grid-2col" style={{ paddingTop: 'var(--space-5)', paddingBottom: 'var(--space-8' }}>
+            {/* LEFT COLUMN: Budget, Scope, RunOfShow, ConflictReport */}
+            <div className="stack">
+              <BudgetCard budget={result.budget_summary || null} />
+              <ScopeCard items={result.scope_items || []} />
 
-				<label>
-					Date
-					<input
-						type="date"
-						value={date}
-						onChange={(e) => setDate(e.target.value)}
-						style={{ width: '100%', padding: 8 }}
-					/>
-				</label>
+              {result.schedule_result === null && result.conflict_report ? (
+                <ConflictReportCard report={result.conflict_report} />
+              ) : (
+                <RunOfShowCard
+                  schedule={result.schedule_result}
+                  callSheet={result.call_sheet || []}
+                />
+              )}
+            </div>
 
-				<button
-					onClick={handleRun}
-					disabled={loading}
-					style={{ padding: '12px 24px', fontSize: 16, cursor: loading ? 'wait' : 'pointer' }}
-				>
-					{loading ? 'Running...' : 'Run Event'}
-				</button>
-			</div>
+            {/* RIGHT COLUMN: Approvals, Risks, Vendors, Chat */}
+            <div className="stack">
+              <ApprovalInbox />
+              <RiskCard risks={result.risk_flags || []} />
+              <VendorsCard vendors={vendors} />
+              <ChatPane />
+            </div>
+          </div>
+        )}
+      </main>
 
-			{error && (
-				<div style={{ color: 'red', marginBottom: 16 }}>Error: {error}</div>
-			)}
-
-			{!result && !error && (
-				<p style={{ color: '#6b7280', fontSize: 14 }}>
-					Run the seeded networking event to generate scope, budget, run-of-show, vendor draft, approvals, and risks.
-				</p>
-			)}
-
-			{result && (
-				<div>
-					<h2>Results</h2>
-
-					<ScopeCard items={result.scope_items || []} />
-					{result.budget_summary && <BudgetCard budget={result.budget_summary} />}
-
-					{result.schedule_result === null && result.conflict_report ? (
-						<ConflictReportCard report={result.conflict_report} />
-					) : (
-						<RunOfShowCard
-							schedule={result.schedule_result}
-							callSheet={result.call_sheet || []}
-						/>
-					)}
-
-					<VendorsCard vendors={result.vendors || []} />
-					<RiskCard risks={result.risk_flags || []} />
-				</div>
-			)}
-
-			<ChatPane />
-
-			<ApprovalInbox />
-		</div>
-	)
+      <footer className="footer">
+        <span>
+          Event Producer &mdash; AI Production Crew &mdash; Last run: {hasRun ? new Date().toLocaleTimeString() : 'Never'}
+        </span>
+      </footer>
+    </>
+  )
 }
