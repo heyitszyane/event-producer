@@ -221,10 +221,11 @@ class TestP6dDefaultDemoContract:
 
     # -- Security Beat --
 
-    def test_security_beat_deferred(self, default_run_response: dict) -> None:
-        """security_beat is honestly deferred to P6F."""
+    def test_security_beat_no_longer_deferred(self, default_run_response: dict) -> None:
+        """security_beat is no longer deferred — P6F replaced it with scripted demo."""
         sb = default_run_response.get("security_beat", {})
-        assert sb.get("status") == "deferred_to_p6f"
+        assert sb.get("status") != "deferred_to_p6f"
+        assert sb.get("status") == "scripted_demo_ready"
 
     # -- Existing event types still work --
 
