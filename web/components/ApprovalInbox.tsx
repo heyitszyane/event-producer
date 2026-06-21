@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 
+// In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
+
 interface Approval {
   id: string
   action: string
@@ -18,7 +21,7 @@ export default function ApprovalInbox() {
 
   const fetchApprovals = async () => {
     try {
-      const res = await fetch('/api/approvals')
+      const res = await fetch(`${API_BASE}/approvals`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: Approval[] = await res.json()
       setApprovals(data)
@@ -37,7 +40,7 @@ export default function ApprovalInbox() {
     setActing(id)
     setError(null)
     try {
-      const res = await fetch(`/api/approvals/${id}`, {
+      const res = await fetch(`${API_BASE}/approvals/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
@@ -55,7 +58,6 @@ export default function ApprovalInbox() {
     <div style={cardStyle}>
       <div style={headerRowStyle}>
         <h2 style={headingStyle}>Approval Inbox</h2>
-        <span style={demoBadgeStyle}>DEMO / STUB</span>
       </div>
 
       {loading && <p style={mutedStyle}>Loading...</p>}
@@ -124,17 +126,6 @@ const headingStyle: React.CSSProperties = {
   fontSize: 18,
   fontWeight: 600,
   color: '#111827',
-}
-
-const demoBadgeStyle: React.CSSProperties = {
-  fontSize: 10,
-  fontWeight: 700,
-  letterSpacing: 1,
-  color: '#92400e',
-  backgroundColor: '#fef3c7',
-  padding: '2px 8px',
-  borderRadius: 4,
-  border: '1px solid #fbbf24',
 }
 
 const mutedStyle: React.CSSProperties = {

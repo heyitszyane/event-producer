@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -119,7 +119,7 @@ class BudgetVariance(BaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    receipt_vs_plan: dict[str, Decimal] = {}
+    receipt_vs_plan: dict[str, Decimal] = Field(default_factory=dict)
     running_burn: Decimal = Decimal("0.00")
     projected_total: Decimal = Decimal("0.00")
     projected_over_under: Decimal = Decimal("0.00")
@@ -220,7 +220,7 @@ class ScheduleTask(BaseModel):
     id: str
     name: str
     duration: Decimal
-    dependencies: list[str] = []
+    dependencies: list[str] = Field(default_factory=list)
     lead_time: Decimal | None = None
     anchor: datetime | None = None
 
@@ -257,7 +257,7 @@ class ScheduledTask(BaseModel):
     id: str
     name: str
     duration: Decimal
-    dependencies: list[str] = []
+    dependencies: list[str] = Field(default_factory=list)
     lead_time: Decimal | None = None
     anchor: datetime | None = None
     earliest_start: datetime
@@ -305,7 +305,7 @@ class Conflict(BaseModel):
     model_config = ConfigDict(strict=True)
 
     task_id: str
-    conflict_type: Literal["lead_time", "anchor", "cycle"]
+    conflict_type: Literal["lead_time", "anchor", "cycle", "missing_dependency", "duplicate_id"]
     message: str
 
 
@@ -314,9 +314,9 @@ class SchedulerConflictReport(BaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    lead_time_conflicts: list[Conflict] = []
-    anchor_conflicts: list[Conflict] = []
-    cycle: list[str] = []
+    lead_time_conflicts: list[Conflict] = Field(default_factory=list)
+    anchor_conflicts: list[Conflict] = Field(default_factory=list)
+    cycle: list[str] = Field(default_factory=list)
 
 
 class CallSheetEntry(BaseModel):
@@ -346,7 +346,7 @@ class EventSpec(BaseModel):
     venue_type: str
     duration_hours: Decimal
     date: str
-    missing_fields: list[str] = []
+    missing_fields: list[str] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -476,7 +476,7 @@ class VendorMessage(BaseModel):
     body: str
     timestamp: str = ""
     is_quarantined: bool = False
-    injection_flags: list[str] = []
+    injection_flags: list[str] = Field(default_factory=list)
 
     @field_validator("vendor_id")
     @classmethod
@@ -547,7 +547,7 @@ class RiskFlag(BaseModel):
     category: Literal["budget", "schedule", "vendor", "security", "coverage", "compliance"]
     severity: Literal["info", "warning", "critical"]
     message: str
-    related_items: list[str] = []
+    related_items: list[str] = Field(default_factory=list)
     resolved: bool = False
 
     @field_validator("id")
@@ -614,7 +614,7 @@ class RunOfShow(BaseModel):
     scope_items: list[ScopeItem]
     budget_summary: BudgetSummary
     schedule_result: ScheduleResult | None = None
-    call_sheet: list[CallSheetEntry] = []
-    vendors: list[Vendor] = []
-    risk_flags: list[RiskFlag] = []
-    approvals: list[Approval] = []
+    call_sheet: list[CallSheetEntry] = Field(default_factory=list)
+    vendors: list[Vendor] = Field(default_factory=list)
+    risk_flags: list[RiskFlag] = Field(default_factory=list)
+    approvals: list[Approval] = Field(default_factory=list)

@@ -48,28 +48,11 @@ class McpServer:
 
     def list_events(self) -> list[str]:
         """Return all event IDs currently in the store."""
-        # The EventStore interface has no explicit list_events method, so we
-        # rely on the fact that at least one of the typed get_* calls will
-        # work as a proxy. We collect IDs by probing save_event's event_id.
-        # Because the abstract interface does not expose an index, this
-        # best-effort returns IDs from the scope index as a proxy.
-        return sorted(
-            {
-                eid
-                for method in (
-                    lambda: sorted(self._event_store.__dict__.get("_events", {}).keys()),  # type: ignore[union-attr]
-                )
-                for eid in method()
-            }
-        )
+        return self._event_store.list_events()
 
     def delete_event(self, event_id: str) -> bool:
         """Remove an event from the store. Returns ``True`` if it existed."""
-        if self._event_store.get_event(event_id) is None:
-            return False
-        # InMemoryEventStore has no explicit delete; overwrite with None
-        # is not supported by the interface. Signal success best-effort.
-        return True
+        return self._event_store.delete_event(event_id)
 
     def health(self) -> dict:
         """Health-check payload."""
@@ -93,7 +76,7 @@ class McpServer:
             """Small mixin so every handler method can serialize with one call."""
 
             @staticmethod
-            def _json(handler_self, payload: dict, status: int = 200) -> None:
+            def _json(handler_self, payload: object, status: int = 200) -> None:
                 body = json.dumps(payload).encode()
                 handler_self.send_response(status)
                 handler_self.send_header("Content-Type", "application/json")
@@ -102,7 +85,7 @@ class McpServer:
                 handler_self.wfile.write(body)
 
             @staticmethod
-            def _read_body(handler_self) -> dict:
+            def _read_body(handler_self: BaseHTTPRequestHandler) -> dict:  # type: ignore[override]
                 raw = handler_self.rfile.read(
                     int(handler_self.headers.get("Content-Length", 0))
                 )
@@ -156,7 +139,7 @@ class McpServer:
                     event_id = parts[1]
                     from event_producer.models.schemas import EventSpec
 
-                    data = self._read_body()
+                    data = self._read_body()  # type: ignore[call-arg]
                     _event_store.save_event(event_id, EventSpec(**data))
                     self._json(self, {"saved": True})
                     return
@@ -170,11 +153,11 @@ class McpServer:
 
                 if len(parts) == 2 and parts[0] == "events":
                     event_id = parts[1]
-                    spec = _event_store.get_event(event_id)
-                    if spec is None:
-                        self._json(self, {"error": "not found"}, 404)
-                    else:
+                    deleted = _event_store.delete_event(event_id)
+                    if deleted:
                         self._json(self, {"deleted": True})
+                    else:
+                        self._json(self, {"error": "not found"}, 404)
                     return
 
                 self._json(self, {"error": "not found"}, 404)
@@ -208,13 +191,8 @@ def create_app(event_store: EventStore) -> McpServer:
 
 
 def list_response(store: EventStore) -> list[str]:
-    """Best-effort event-ID listing using scope index introspection."""
-    # Access the internal _scopes dict if available (InMemoryEventStore);
-    # returns an empty list for stores that don't expose it.
-    try:
-        return sorted(store.__dict__.get("_scopes", {}).keys())  # type: ignore[union-attr]
-    except Exception:
-        return []
+    """Return all event IDs via the provider seam."""
+    return store.list_events()
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # REPO_SITEMAP.md -- Event Producer Folder Map
 
-> This file describes the **intended** repository layout. The application is not yet built; this map serves as the canonical reference for where every class of artifact belongs.
+> This file describes the **current** repository layout as of P5A (capstone ready).
 
 ---
 
@@ -13,6 +13,7 @@
 | `CHANGELOG.md` | Top-level changelog following the Keep-a-Changelog convention |
 | `LICENSE` | CC-BY-4.0 license |
 | `.gitignore` | Secrets-first ignore rules (see Gitignored section below) |
+| `requirements.txt` | Pinned Python dependencies |
 
 ---
 
@@ -25,7 +26,7 @@ Long-form documentation that does not belong in code-level docstrings. Currently
 Per-phase detailed change logs that feed into the top-level `CHANGELOG.md`. Each phase (P0, P1, ...) gets its own file or subdirectory. This keeps the root changelog readable while preserving granular history.
 
 ### `project_documents/` *(GITIGNORED)*
-Handover briefs, spec copies, and other working documents that should not be committed to version control. Subdirectory `handover-briefs/` is the default landing zone for phase-transition documents.
+Handover briefs, spec copies, and other working documents that should not be committed to version control. Subdirectory `handover-briefs/` is the default landing zone for phase-transition documents. `result-artifacts/` stores subagent output from the planner/generator/evaluator pipeline.
 
 > **This entire directory is gitignored.** Do not commit files from here.
 
@@ -34,7 +35,7 @@ Scratch space for experiments, one-off scripts, and transient artifacts. Safe to
 
 > **This entire directory is gitignored.** Do not commit files from here.
 
-### `event_producer/` -- Main Python Package (ADK Backend)
+### `event_producer/` -- Main Python Package (Backend)
 
 The core application code. Organized by architectural layer:
 
@@ -42,7 +43,10 @@ The core application code. Organized by architectural layer:
 Package marker. Exports top-level symbols if needed.
 
 #### `event_producer/main.py`
-ADK application entry point. Wires agents, engines, and providers into a runnable app. This is the file the deployment target invokes.
+Application entry point. Wires agents, engines, and providers into a runnable app. Contains `InMemoryEventStore` (full CRUD implementation of the `EventStore` ABC) and `EventProducerApp` (composition root).
+
+#### `event_producer/api.py`
+FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Consistent error envelope.
 
 #### `event_producer/agents/`
 Role-based agents plus reasoner/formatter splits. Each agent file owns a single responsibility:
@@ -56,16 +60,18 @@ Role-based agents plus reasoner/formatter splits. Each agent file owns a single 
 | `vendor_coordinator.py` | Handles vendor selection and communication |
 | `risk_flagger.py` | Identifies and surfaces risks across all domains |
 
+All agents are rule-based (deterministic). Live Gemini integration is deferred.
+
 #### `event_producer/engines/`
 Deterministic, pure-Python cores with no external dependencies. These are the "math" layer -- fully testable in isolation.
 
 | File | Engine |
 |---|---|
-| `budget.py` | Budget allocation, tracking, and variance calculations |
-| `scheduler.py` | Run-of-show CPM scheduler; produces time-coded production schedules |
+| `budget.py` | Budget allocation, tracking, and variance calculations. Decimal-only. Tier-gating. Multi-currency with line-total-first FX rounding. Receipt aggregation. |
+| `scheduler.py` | Run-of-show CPM scheduler; produces time-coded production schedules. Dependency resolution, lead-time validation, anchor constraints, cycle detection, conflict reporting. |
 
 #### `event_producer/models/`
-Pydantic schemas shared across the codebase. Single file `schemas.py` for now; split into submodules only when the surface area demands it.
+Pydantic schemas shared across the codebase. Single file `schemas.py`. All monetary fields use `Decimal` (strict mode rejects float). Mutable defaults use `Field(default_factory=...)`.
 
 #### `event_producer/security/`
 Action-gate enforcement, prompt-injection flagging, and audit logging. These modules form the trust boundary for all agent actions.
@@ -77,53 +83,62 @@ Action-gate enforcement, prompt-injection flagging, and audit logging. These mod
 | `audit_log.py` | Immutable append-only audit trail for all gated actions |
 
 #### `event_producer/providers/` -- Moat-Seam Boundary
-Abstract interfaces that define the **seam** between the agent layer and external systems. See the Moat-Seam Boundary section below for the full explanation.
+Abstract interfaces that define the **seam** between the agent layer and external systems.
 
 | File | Interface |
 |---|---|
-| `event_store.py` | Persistence for event data (CRUD contract) |
-| `rate_card.py` | Vendor rate lookup and caching |
+| `event_store.py` | Persistence for event data (CRUD contract). Includes `list_events()`, `delete_event()`, `save_approval()`, `get_approvals()`. |
+| `rate_card.py` | Vendor rate lookup and caching (FX rates) |
 | `vendor_sourcer.py` | Vendor discovery and qualification |
 
 #### `event_producer/mcp/`
-MCP (Model Context Protocol) server implementation. Exposes agent capabilities as MCP tools for external consumers.
+MCP (Model Context Protocol) server implementation. Exposes EventStore operations through a uniform MCP-style interface. All CRUD goes through the `EventStore` provider ABC -- no private introspection.
 
 | File | Purpose |
 |---|---|
-| `server.py` | MCP server entry point and tool registration |
-
-#### `event_producer/webhook/`
-Optional webhook relays. Currently scoped to Telegram.
-
-| File | Purpose |
-|---|---|
-| `telegram.py` | Telegram bot relay for notifications and commands (if-time deliverable) |
+| `server.py` | MCP server with honest CRUD/list/delete via provider seam. Includes `McpHttpHandler` for HTTP access. |
 
 ---
 
 ### `web/` -- Next.js Frontend
 
-Browser-based UI for the event producer system.
+Browser-based UI for the event producer system. Static export (`output: 'export'`) served by Firebase Hosting.
 
 | Path | Purpose |
 |---|---|
 | `web/package.json` | Node dependencies and scripts |
+| `web/next.config.js` | Next.js config (static export) |
 | `web/pages/` | Next.js page components (file-system routing) |
-| `web/components/` | Shared UI components |
-| `web/public/` | Static assets (images, fonts, etc.) |
+| `web/pages/index.tsx` | Main dashboard page |
+| `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
+| `web/components/` | Shared UI components (ApprovalInbox, BudgetCard, ChatPane, RiskCard, RunOfShowCard, ScopeCard, VendorsCard) |
+| `web/public/` | Static assets |
+| `web/out/` | Static export output (gitignored) |
 
 ---
 
 ### `tests/` -- Eval Framework and Test Suite
 
-All test code lives here, mirroring the package structure where practical.
+All test code lives here.
 
 | File | Coverage |
 |---|---|
-| `test_budget_engine.py` | Deterministic budget engine unit tests |
-| `test_scheduler.py` | CPM scheduler unit tests |
+| `test_budget_engine.py` | Deterministic budget engine unit tests (FX rounding, tier gating, contingency, receipt variance) |
+| `test_cpm_scheduler.py` | CPM scheduler unit tests (dependencies, lead times, anchors, cycles, conflicts) |
+| `test_agents.py` | Agent tests (brief/scope, budget manager, production manager, vendor coordinator, risk flagger) |
+| `test_api.py` | REST API tests (run, event state, approvals, HITL flow, error shapes) |
 | `test_security.py` | Action-gate, injection flag, and audit log tests |
+| `test_mcp.py` | MCP server tests (CRUD, list, delete via provider seam) |
+| `test_fx_rates.py` | FX rate provider tests |
 | `eval_cases/` | Red-team eval set written in Gherkin (`*.feature` files) |
+
+---
+
+### `scripts/`
+
+| File | Purpose |
+|---|---|
+| `seed_demo.py` | Seeds a demo networking event via the REST API |
 
 ---
 
@@ -134,8 +149,8 @@ Infrastructure-as-code for deployment targets.
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Container image definition for Cloud Run |
-| `cloudbuild.yaml` | Google Cloud Build pipeline config |
-| `firebase.json` | Firebase Hosting config (serves the Next.js frontend) |
+| `cloudbuild.yaml` | Google Cloud Build pipeline config (includes all 4 QA gates: mypy + ruff + pytest + build) |
+| `firebase.json` | Firebase Hosting config (serves `web/out` from static export) |
 
 ---
 
@@ -147,9 +162,9 @@ The `event_producer/providers/` directory defines the **moat-seam boundary** -- 
 
 1. Each provider file contains an **abstract interface** (Python ABC or Protocol class) that defines a contract: method signatures, input/output types, and error semantics.
 2. The agent layer (`event_producer/agents/`) imports and depends **only** on these abstract interfaces. Agents never import concrete implementations directly.
-3. Concrete implementations (e.g., FirestoreEventStore, SheetsRateCard) are injected at the composition root (`event_producer/main.py`) or via a factory.
+3. Concrete implementations (e.g., `InMemoryEventStore`) are injected at the composition root (`event_producer/main.py`).
 4. This seam makes it possible to:
-   - Swap backends without touching agent code (e.g., replace Firestore with PostgreSQL).
+   - Swap backends without touching agent code (e.g., replace in-memory store with Firestore).
    - Test agents in-memory with fake providers.
    - Deploy to different environments with different provider configs.
 
@@ -163,15 +178,17 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 | # | File | Why It Is High-Risk |
 |---|---|---|
-| 1 | `event_producer/main.py` | Composition root. Changing wiring or initialization order can break every agent and provider binding. |
+| 1 | `event_producer/main.py` | Composition root. Contains `InMemoryEventStore` and `EventProducerApp`. Changing wiring or initialization order can break every agent and provider binding. |
 | 2 | `event_producer/models/schemas.py` | Shared Pydantic schemas. A field rename or type change propagates to every agent, engine, and provider that consumes the model. |
-| 3 | `event_producer/providers/*.py` (all) | Moat-seam interfaces. Changing a method signature requires updating every concrete implementation and every agent that calls it. |
+| 3 | `event_producer/providers/event_store.py` | Moat-seam interface. Changing a method signature requires updating every concrete implementation and every agent that calls it. |
 | 4 | `event_producer/security/action_gate.py` | Trust boundary enforcement. A logic error here can either block legitimate actions or allow unauthorized ones. |
 | 5 | `event_producer/engines/budget.py` | Deterministic financial core. Silent rounding or allocation errors compound across an entire event budget. |
-| 6 | `event_producer/agents/orchestrator.py` | Top-level routing agent. A routing change can starve specialist agents or create circular delegation loops. |
-| 7 | `deploy/Dockerfile` | Production container definition. A broken layer or missing dependency takes down the entire deployed service. |
-| 8 | `.gitignore` | Secrets-first policy. Accidentally un-ignoring a pattern can expose credentials or large binaries to version control. |
+| 6 | `event_producer/engines/scheduler.py` | Deterministic scheduling core. Dependency/lead-time/anchor validation changes affect all schedule outputs. |
+| 7 | `event_producer/api.py` | REST API surface. Error shape or endpoint contract changes affect frontend and all API consumers. |
+| 8 | `deploy/Dockerfile` | Production container definition. A broken layer or missing dependency takes down the entire deployed service. |
+| 9 | `deploy/cloudbuild.yaml` | CI/CD pipeline. A broken gate or missing QA step can deploy broken code. |
+| 10 | `.gitignore` | Secrets-first policy. Accidentally un-ignoring a pattern can expose credentials or large binaries to version control. |
 
 ---
 
-*Last updated: 2026-06-21*
+*Last updated: 2026-06-21 (P5A)*

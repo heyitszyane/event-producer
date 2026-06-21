@@ -128,21 +128,19 @@ These are structural constraints that must never be violated.
 
 ## 5. Commands
 
-> **TODO: Pin versions once P1 lands.** Placeholder for now.
-
 ### Python
 
 ```bash
-pytest            # run test suite
-mypy              # type checking
-ruff              # linting
+python3 -m pytest            # run test suite
+python3 -m mypy event_producer  # type checking
+python3 -m ruff check .      # linting
 ```
 
 ### Node / TypeScript
 
 ```bash
-pnpm build        # production build
-pnpm lint         # linting
+cd web && npm run build      # production build (static export)
+cd web && npm run lint       # linting
 ```
 
 ### QA gate (must pass before "done")

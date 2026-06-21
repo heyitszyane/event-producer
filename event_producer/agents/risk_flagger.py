@@ -7,7 +7,8 @@ a list of risks or gaps that need human attention.
 
 from __future__ import annotations
 
-import uuid
+import hashlib
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 from event_producer.security.injection_flag import is_flagged as has_injection_flags
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 # Required vendor categories for a complete event
-_REQUIRED_VENDOR_CATEGORIES = ["venue", "catering", "av"]
+_REQUIRED_VENDOR_CATEGORIES = ["venue", "catering", "av_equipment"]
 
 
 class RiskFlaggerAgent:
@@ -87,15 +88,15 @@ class RiskFlaggerAgent:
         spendable = budget_summary.get("spendable", 0)
         if spendable and headroom is not None:
             try:
-                headroom_val = float(headroom)
-                spendable_val = float(spendable)
-                if spendable_val > 0 and (headroom_val / spendable_val) < 0.10:
+                headroom_val = Decimal(str(headroom))
+                spendable_val = Decimal(str(spendable))
+                if spendable_val > 0 and (headroom_val / spendable_val) < Decimal("0.10"):
                     flags.append(self._make_flag(
                         category="budget",
                         severity="warning",
                         message="Low headroom",
                     ))
-            except (TypeError, ValueError, ZeroDivisionError):
+            except (TypeError, ValueError, ZeroDivisionError, InvalidOperation):
                 pass
 
         return flags
@@ -201,7 +202,7 @@ class RiskFlaggerAgent:
     ) -> dict:
         """Create a RiskFlag dict."""
         return {
-            "id": str(uuid.uuid4()),
+            "id": hashlib.sha256(f"{category}:{severity}:{message}:{','.join(sorted(related_items or []))}".encode()).hexdigest()[:12],
             "category": category,
             "severity": severity,
             "message": message,

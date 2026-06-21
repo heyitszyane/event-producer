@@ -1,5 +1,8 @@
 import { useState } from 'react'
 
+// In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
+
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -22,7 +25,7 @@ export default function ChatPane() {
     setError(null)
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed }),

@@ -7,7 +7,8 @@ and HTTP concerns.
 
 from __future__ import annotations
 
-from typing import Any
+import os
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from event_producer.main import EventProducerApp
+from event_producer.models.schemas import Approval
+from event_producer.security.action_gate import enforce
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -43,7 +46,7 @@ class ChatRequest(BaseModel):
 class ApprovalAction(BaseModel):
     """Request body for the ``POST /approvals/{approval_id}`` endpoint."""
 
-    action: str  # "approve" or "reject"
+    action: Literal["approve", "reject"]
 
 
 # ---------------------------------------------------------------------------
@@ -77,12 +80,16 @@ def create_app() -> FastAPI:
 
     app.add_middleware(DemoAuthMiddleware)
 
-    # ---- CORS middleware (demo: allow all origins) -----------------------
+    # ---- CORS middleware (env-driven origins) ----------------------------
     # Added last so it is the outermost middleware and can respond to
     # OPTIONS preflight requests before auth blocks them.
+    # Set ALLOWED_ORIGINS env var in production (comma-separated list).
+    _allowed_origins = os.environ.get(
+        "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[o.strip() for o in _allowed_origins.split(",") if o.strip()],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -90,6 +97,15 @@ def create_app() -> FastAPI:
     # Store the EventProducerApp instance on app.state so endpoints can
     # access it without re-instantiating on every request.
     app.state.event_producer = EventProducerApp()
+
+    # ---- Global error handler ---------------------------------------------
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        """Return consistent error envelope for all HTTP exceptions."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"code": str(exc.status_code), "message": exc.detail}},
+        )
 
     # ---- Routes ----------------------------------------------------------
 
@@ -110,70 +126,119 @@ def create_app() -> FastAPI:
 
     @app.get("/event/{event_id}")
     async def get_event(event_id: str) -> dict[str, Any]:
-        """Retrieve a previously produced event by its ID."""
+        """Retrieve full event state by its ID."""
         producer: EventProducerApp = app.state.event_producer
         event_spec = producer.event_store.get_event(event_id)
         if event_spec is None:
             raise HTTPException(status_code=404, detail="Event not found")
-        return event_spec.model_dump()
+
+        budget = producer.event_store.get_budget(event_id)
+        schedule = producer.event_store.get_schedule(event_id)
+        ros = producer.event_store.get_run_of_show(event_id)
+
+        return {
+            "event_id": event_id,
+            "event_spec": event_spec.model_dump(),
+            "scope_items": [s.model_dump() for s in producer.event_store.get_scope(event_id)],
+            "budget_summary": budget.model_dump() if budget else None,
+            "schedule_result": schedule.model_dump() if schedule else None,
+            "vendors": [v.model_dump() for v in producer.event_store.get_vendors(event_id)],
+            "risk_flags": [f.model_dump() for f in ros.risk_flags] if ros else [],
+            "approvals": [a.model_dump() for a in producer.event_store.get_approvals(event_id)],
+        }
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         """Liveness probe."""
         return {"status": "ok"}
 
-    # ---- Sample approvals (demo stub) ------------------------------------
-    _SAMPLE_APPROVALS: list[dict[str, Any]] = [
-        {
-            "id": "aprv-001",
-            "action": "send_vendor_message",
-            "requested_by": "producer@example.com",
-            "approved_by": "",
-            "status": "pending",
-            "timestamp": "2026-06-21T10:30:00",
-            "notes": "Send RFP to Grand Ballroom Co. for venue booking.",
-        },
-        {
-            "id": "aprv-002",
-            "action": "confirm_budget_line",
-            "requested_by": "budget-agent",
-            "approved_by": "",
-            "status": "pending",
-            "timestamp": "2026-06-21T11:00:00",
-            "notes": "Confirm catering budget line of $5,000 for 200 attendees.",
-        },
-        {
-            "id": "aprv-003",
-            "action": "execute_payment",
-            "requested_by": "finance-agent",
-            "approved_by": "",
-            "status": "pending",
-            "timestamp": "2026-06-21T11:15:00",
-            "notes": "Release 50% deposit to AV vendor ($2,500).",
-        },
+    # ---- Demo approvals (persisted via EventStore) -----------------------
+    _DEMO_EVENT_ID = "demo-event"
+
+    _SAMPLE_APPROVALS: list[Approval] = [
+        Approval(
+            id="aprv-001",
+            action="send_vendor_message",
+            requested_by="producer@example.com",
+            approved_by="",
+            status="pending",
+            timestamp="2026-06-21T10:30:00",
+            notes="Send RFP to Grand Ballroom Co. for venue booking.",
+        ),
+        Approval(
+            id="aprv-002",
+            action="confirm_budget_line",
+            requested_by="budget-agent",
+            approved_by="",
+            status="pending",
+            timestamp="2026-06-21T11:00:00",
+            notes="Confirm catering budget line of $5,000 for 200 attendees.",
+        ),
+        Approval(
+            id="aprv-003",
+            action="execute_payment",
+            requested_by="finance-agent",
+            approved_by="",
+            status="pending",
+            timestamp="2026-06-21T11:15:00",
+            notes="Release 50% deposit to AV vendor ($2,500).",
+        ),
     ]
+
+    # Persist sample approvals to EventStore on startup
+    for _ap in _SAMPLE_APPROVALS:
+        app.state.event_producer.event_store.save_approval(_DEMO_EVENT_ID, _ap)
 
     @app.get("/approvals")
     async def list_approvals() -> list[dict[str, Any]]:
-        """List pending approvals (demo stub — returns sample data)."""
-        return _SAMPLE_APPROVALS
+        """List pending approvals (retrieved from EventStore)."""
+        producer: EventProducerApp = app.state.event_producer
+        approvals = producer.event_store.get_approvals(_DEMO_EVENT_ID)
+        return [a.model_dump() for a in approvals]
 
     @app.post("/approvals/{approval_id}")
     async def update_approval(
         approval_id: str,
         body: ApprovalAction,
     ) -> dict[str, Any]:
-        """Approve or reject a pending approval (demo stub).
+        """Approve or reject a pending approval through the action-gate.
 
-        Returns the updated approval with status set to the requested action.
-        This is a stub — real action-gate integration is future work.
+        When approving a gated action (e.g., send_vendor_message), the
+        action-gate enforce() is called to demonstrate the structural
+        security boundary. Rejected approvals do not execute.
         """
-        for ap in _SAMPLE_APPROVALS:
-            if ap["id"] == approval_id:
-                ap["status"] = body.action == "approve" and "approved" or "rejected"
-                ap["approved_by"] = "demo-user"
-                return ap
-        raise HTTPException(status_code=404, detail="Approval not found")
+        producer: EventProducerApp = app.state.event_producer
+        approvals = producer.event_store.get_approvals(_DEMO_EVENT_ID)
+        approval = next((a for a in approvals if a.id == approval_id), None)
+        if approval is None:
+            raise HTTPException(status_code=404, detail="Approval not found")
+
+        if body.action == "reject":
+            approval.status = "rejected"
+            approval.approved_by = "demo-user"
+            producer.event_store.save_approval(_DEMO_EVENT_ID, approval)
+            return approval.model_dump()
+
+        # body.action == "approve"
+        approval.status = "approved"
+        approval.approved_by = "demo-user"
+
+        # Enforce the action-gate for gated actions
+        if approval.action in {"send_vendor_message", "change_payment_details",
+                               "mark_paid", "reschedule", "change_scope",
+                               "approve_budget", "lock_scope", "release_funds"}:
+            enforce(approval.action, approval)
+            # Simulated vendor send: log to audit
+            producer.audit_log.log(
+                action="vendor_send_simulated",
+                actor="demo-user",
+                details=f"Simulated send for approval {approval_id}",
+                approval_id=approval_id,
+                event_id=_DEMO_EVENT_ID,
+            )
+
+        producer.event_store.save_approval(_DEMO_EVENT_ID, approval)
+        return approval.model_dump()
 
     @app.post("/chat")
     async def chat(req: ChatRequest) -> dict[str, str]:

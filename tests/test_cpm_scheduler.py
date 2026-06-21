@@ -368,3 +368,43 @@ def test_conflict_report_not_schedule_result(start_time: datetime) -> None:
     assert isinstance(result, SchedulerConflictReport)
     assert not isinstance(result, ScheduleResult)
     assert len(result.cycle) > 0
+
+
+# ---------------------------------------------------------------------------
+# 14. Missing dependency returns conflict report
+# ---------------------------------------------------------------------------
+
+
+def test_missing_dependency_returns_conflict(start_time: datetime) -> None:
+    """Task with a dependency on a nonexistent task ID returns conflict."""
+    tasks = [
+        ScheduleTask(
+            id="A", name="Task A", duration=Decimal("1.0"),
+            dependencies=["nonexistent"],
+        ),
+    ]
+    result = compute_schedule(tasks, start_time)
+
+    assert isinstance(result, SchedulerConflictReport)
+    assert len(result.anchor_conflicts) >= 1
+    assert result.anchor_conflicts[0].conflict_type == "missing_dependency"
+    assert "nonexistent" in result.anchor_conflicts[0].message
+
+
+# ---------------------------------------------------------------------------
+# 15. Duplicate task IDs returns conflict report
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_task_ids_returns_conflict(start_time: datetime) -> None:
+    """Two tasks with the same ID returns conflict."""
+    tasks = [
+        ScheduleTask(id="A", name="Task A1", duration=Decimal("1.0")),
+        ScheduleTask(id="A", name="Task A2", duration=Decimal("2.0")),
+    ]
+    result = compute_schedule(tasks, start_time)
+
+    assert isinstance(result, SchedulerConflictReport)
+    assert len(result.anchor_conflicts) >= 1
+    assert result.anchor_conflicts[0].conflict_type == "duplicate_id"
+    assert "A" in result.anchor_conflicts[0].message
