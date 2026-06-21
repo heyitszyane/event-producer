@@ -1,5 +1,3 @@
-import React from 'react'
-
 export interface ScheduledTask {
   id: string
   name: string
@@ -34,8 +32,9 @@ function formatTime(isoString: string | undefined): string {
   if (!isoString) return '—'
   try {
     return new Date(isoString).toLocaleTimeString([], {
-      hour: '2-digit',
+      hour: 'numeric',
       minute: '2-digit',
+      hour12: true,
     })
   } catch {
     return isoString
@@ -55,58 +54,101 @@ function formatDate(isoString: string | undefined): string {
 }
 
 export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProps) {
-  if (!schedule && (!callSheet || callSheet.length === 0)) {
-    return (
-      <div style={cardStyle}>
-        <h2 style={headingStyle}>Run of Show</h2>
-        <p style={emptyStyle}>No schedule data</p>
-      </div>
-    )
-  }
-
   const tasks = schedule?.ordered_tasks || []
+  const criticalPath = schedule?.critical_path || []
+  const criticalCount = criticalPath.length
   const sheetEntries = (callSheet || []).filter((entry) => {
     if (!schedule) return true
     return !tasks.some((t) => t.name === entry.task_name)
   })
 
+  const hasConflicts = false // Conflict report is handled separately
+  const totalTasks = tasks.length + sheetEntries.length
+
   if (tasks.length === 0 && sheetEntries.length === 0) {
     return (
-      <div style={cardStyle}>
-        <h2 style={headingStyle}>Run of Show</h2>
-        <p style={emptyStyle}>No tasks scheduled</p>
-      </div>
+      <section className="card" id="schedule" aria-labelledby="schedule-heading">
+        <div className="card__header">
+          <h2 id="schedule-heading">Run of Show</h2>
+        </div>
+        <div className="empty-state">
+          No schedule data &mdash; Run the event to generate.
+        </div>
+      </section>
     )
   }
 
   return (
-    <div style={cardStyle}>
-      <h2 style={headingStyle}>Run of Show</h2>
+    <section className="card" id="schedule" aria-labelledby="schedule-heading">
+      <div className="card__header">
+        <h2 id="schedule-heading">Run of Show</h2>
+        <div className="cluster" style={{ gap: 'var(--space-1)' }}>
+          <span className="badge badge--info">{totalTasks} tasks</span>
+          {criticalCount > 0 && (
+            <span className="badge badge--critical">{criticalCount} critical</span>
+          )}
+        </div>
+      </div>
 
-      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+      {/* Status banner */}
+      <div
+        style={{
+          padding: 'var(--space-2) var(--space-3)',
+          borderRadius: 'var(--radius-md)',
+          textAlign: 'center',
+          fontWeight: 700,
+          fontSize: 'var(--text-sm)',
+          letterSpacing: '0.05em',
+          backgroundColor: hasConflicts ? 'var(--status-critical-bg)' : 'var(--status-ok-bg)',
+          color: hasConflicts ? 'var(--status-critical)' : 'var(--status-ok)',
+          marginBottom: 'var(--space-3)',
+        }}
+      >
+        <span className="sr-only">Schedule status:</span>
+        {hasConflicts ? 'Conflicts Detected' : 'Schedule Valid'}
+      </div>
+
+      {/* Task list */}
+      <div style={{ maxHeight: 360, overflowY: 'auto' }}>
         {tasks.map((task, idx) => {
-          const onCriticalPath = schedule?.critical_path.includes(task.id)
+          const onCriticalPath = criticalPath.includes(task.id)
+          const isAnchor = task.anchor !== null
+
+          let bgColor = 'var(--surface-primary)'
+          let borderLeftColor = 'transparent'
+          let borderLeftWidth = '0px'
+
+          if (onCriticalPath) {
+            bgColor = 'var(--status-critical-bg)'
+            borderLeftColor = 'var(--status-critical)'
+            borderLeftWidth = '3px'
+          } else if (isAnchor) {
+            bgColor = 'var(--status-info-bg)'
+            borderLeftColor = 'var(--status-info)'
+            borderLeftWidth = '3px'
+          }
 
           return (
             <div
               key={task.id || idx}
               style={{
-                ...taskStyle,
-                backgroundColor: onCriticalPath ? '#fef2f2' : '#f9fafb',
+                padding: 'var(--space-2) var(--space-3)',
+                borderRadius: 'var(--radius-sm)',
+                marginBottom: 'var(--space-1)',
+                backgroundColor: bgColor,
+                borderLeft: `${borderLeftWidth} solid ${borderLeftColor}`,
+                borderTop: onCriticalPath || isAnchor ? 'none' : '1px solid var(--border-subtle)',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={taskNameStyle}>
+                <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
                   {task.name}
-                  {onCriticalPath && (
-                    <span style={{ ...criticalBadge, marginLeft: 6 }}>critical</span>
-                  )}
                 </span>
-                <span style={timeStyle}>
-                  {formatTime(task.earliest_start)} – {formatTime(task.earliest_finish)}
+                <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                  {formatTime(task.earliest_start)} &ndash; {formatTime(task.earliest_finish)}
                 </span>
               </div>
-              <div style={metaStyle}>
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
                 {formatDate(task.earliest_start)} &middot; {String(task.duration)}h
                 {task.dependencies.length > 0 && (
                   <span> &middot; deps: {task.dependencies.join(', ')}</span>
@@ -116,87 +158,39 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
           )
         })}
 
-        {sheetEntries.map((entry, idx) => (
-          <div key={`sheet-${idx}`} style={{ ...taskStyle, backgroundColor: entry.is_anchor ? '#eff6ff' : '#f9fafb' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={taskNameStyle}>
-                {entry.task_name}
-                {entry.is_anchor && <span style={{ ...anchorBadge, marginLeft: 6 }}>anchor</span>}
-              </span>
-              <span style={timeStyle}>
-                {formatTime(entry.start_time)} – {formatTime(entry.end_time)}
-              </span>
-            </div>
-            <div style={metaStyle}>{formatDate(entry.start_time)}</div>
-          </div>
-        ))}
+        {/* Call sheet entries */}
+        {sheetEntries.length > 0 && (
+          <>
+            {tasks.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border-subtle)', margin: 'var(--space-2) 0' }} />
+            )}
+            {sheetEntries.map((entry, idx) => (
+              <div
+                key={`sheet-${idx}`}
+                style={{
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-sm)',
+                  marginBottom: 'var(--space-1)',
+                  backgroundColor: entry.is_anchor ? 'var(--status-info-bg)' : 'var(--surface-primary)',
+                  borderLeft: entry.is_anchor ? '3px solid var(--status-info)' : 'none',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
+                    {entry.task_name}
+                  </span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                    {formatTime(entry.start_time)} &ndash; {formatTime(entry.end_time)}
+                  </span>
+                </div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
+                  {formatDate(entry.start_time)}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
       </div>
-    </div>
+    </section>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: 16,
-  marginBottom: 16,
-  backgroundColor: '#ffffff',
-}
-
-const headingStyle: React.CSSProperties = {
-  margin: '0 0 12px 0',
-  fontSize: 18,
-  fontWeight: 600,
-  color: '#111827',
-}
-
-const emptyStyle: React.CSSProperties = {
-  color: '#6b7280',
-  fontSize: 14,
-  margin: 0,
-}
-
-const taskStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderRadius: 6,
-  marginBottom: 6,
-  border: '1px solid #e5e7eb',
-}
-
-const taskNameStyle: React.CSSProperties = {
-  fontWeight: 600,
-  fontSize: 14,
-  color: '#111827',
-}
-
-const timeStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: '#374151',
-  fontFamily: 'monospace',
-}
-
-const metaStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#6b7280',
-  marginTop: 4,
-}
-
-const criticalBadge: React.CSSProperties = {
-  display: 'inline-block',
-  backgroundColor: '#dc2626',
-  color: '#ffffff',
-  fontSize: 10,
-  padding: '1px 6px',
-  borderRadius: 4,
-  fontWeight: 600,
-}
-
-const anchorBadge: React.CSSProperties = {
-  display: 'inline-block',
-  backgroundColor: '#2563eb',
-  color: '#ffffff',
-  fontSize: 10,
-  padding: '1px 6px',
-  borderRadius: 4,
-  fontWeight: 600,
 }

@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-21
+
+### P6 — Frontend Redesign: Mission Control Dashboard
+
+**Scope:** Complete frontend redesign for capstone demo credibility. No backend changes.
+
+#### Layout & Architecture
+- Replaced single-column stack with two-column grid layout (60/40) with max-width 1200px
+- Added sticky event command header with event identity, nav jump links, and Run button
+- Extracted `ConflictReportCard` to standalone component
+- Created new `EventCommandHeader` component with collapsible form panel
+- Added footer status line
+
+#### Visual System
+- Introduced complete CSS custom property design token system (surface, text, accent, status, tier, spacing, typography, radii, shadows)
+- Replaced all inline style objects with CSS class references
+- Rewrote `globals.css` from scratch with token-driven architecture
+- Added numeric formatting: currency (`$50,000.00`), percentages, dates, durations
+- Added category rollup bar chart to BudgetCard
+- Added tier inclusion pills to BudgetCard
+- Added collapsible variance details to BudgetCard
+- Improved RunOfShowCard with status banner and critical/anchor path highlighting
+- Added approval confirmation flow (prevents accidental approve/reject)
+- Added collapsed-by-default panels for Approvals, Risks, Chat
+- Added loading pulse animation on Run button
+
+#### Data Fixes
+- Fixed vendors data path: reads from `result.run_of_show.vendors` (was `result.vendors`)
+- Added `X-Demo-User` header to all `fetch()` calls (fixes 401 in production)
+- Added `event_spec` rendering in header (event name, type, date, headcount, venue)
+- Added vendor lock status indicators and notes rendering
+
+#### Responsive Design
+- Desktop (≥1024px): two-column grid
+- Tablet (768–1023px): single column
+- Mobile (<768px): full-width, table-to-card conversion via `data-label` attributes
+- No horizontal scroll at any breakpoint
+
+#### Accessibility
+- Semantic landmarks: `<header>`, `<nav>`, `<main>`, `<section>`, `<footer>`
+- Heading hierarchy: h1 (event name) → h2 (card headings)
+- `aria-labelledby` on sections, `aria-label` on metrics and buttons
+- `aria-live="polite"` on chat messages container
+- `:focus-visible` styles with 2px accent outline
+- `@media (prefers-reduced-motion: reduce)` disables all animations
+- `.sr-only` class for screen-reader-only text
+
+---
+
 ## [0.5.1] - 2026-06-21
 
 ### P5B — Submission-Readiness Cleanup

@@ -18,10 +18,14 @@ export default function ApprovalInbox() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [acting, setActing] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const [confirming, setConfirming] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
 
   const fetchApprovals = async () => {
     try {
-      const res = await fetch(`${API_BASE}/approvals`)
+      const res = await fetch(`${API_BASE}/approvals`, {
+        headers: { 'X-Demo-User': 'demo-user' },
+      })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: Approval[] = await res.json()
       setApprovals(data)
@@ -39,10 +43,14 @@ export default function ApprovalInbox() {
   const handleAction = async (id: string, action: 'approve' | 'reject') => {
     setActing(id)
     setError(null)
+    setConfirming(null)
     try {
       const res = await fetch(`${API_BASE}/approvals/${id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Demo-User': 'demo-user',
+        },
         body: JSON.stringify({ action }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -54,174 +62,151 @@ export default function ApprovalInbox() {
     }
   }
 
+  const pendingCount = approvals.filter((a) => a.status === 'pending').length
+
   return (
-    <div style={cardStyle}>
-      <div style={headerRowStyle}>
-        <h2 style={headingStyle}>Approval Inbox</h2>
+    <section className="card" id="approvals" aria-labelledby="approvals-heading">
+      <div className="card__header">
+        <h2 id="approvals-heading">Approvals</h2>
+        {pendingCount > 0 && (
+          <span className="badge badge--warn">{pendingCount} pending</span>
+        )}
       </div>
 
-      {loading && <p style={mutedStyle}>Loading...</p>}
-
-      {error && (
-        <div style={errorStyle}>Error: {error}</div>
+      {/* Collapsed: count line */}
+      {!expanded && (
+        <button
+          onClick={() => setExpanded(true)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            fontSize: 'var(--text-sm)',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+          aria-expanded={expanded}
+        >
+          {pendingCount > 0
+            ? `${pendingCount} pending approvals`
+            : approvals.length > 0
+              ? `${approvals.length} processed`
+              : 'No Approvals'}{' '}
+          &middot; Expand
+        </button>
       )}
 
-      {!loading && !error && approvals.length === 0 && (
-        <p style={mutedStyle}>No pending approvals.</p>
-      )}
+      {/* Expanded: full list */}
+      {expanded && (
+        <>
+          <button
+            onClick={() => setExpanded(false)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-tertiary)',
+              fontSize: 'var(--text-xs)',
+              cursor: 'pointer',
+              padding: 0,
+              marginBottom: 'var(--space-2)',
+            }}
+          >
+            Collapse
+          </button>
 
-      {approvals.map((ap) => (
-        <div key={ap.id} style={itemStyle}>
-          <div style={itemHeaderStyle}>
-            <span style={actionStyle}>{ap.action}</span>
-            <span style={statusBadgeStyle(ap.status)}>{ap.status}</span>
-          </div>
-          <div style={metaStyle}>
-            Requested by: {ap.requested_by} &middot; ID: {ap.id}
-          </div>
-          {ap.notes && (
-            <div style={notesStyle}>Notes: {ap.notes}</div>
-          )}
-          {ap.status === 'pending' && (
-            <div style={buttonRowStyle}>
+          {loading && <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)', margin: 0 }}>Loading...</p>}
+
+          {error && (
+            <div className="error-bar">
+              <span>{error}</span>
               <button
-                onClick={() => handleAction(ap.id, 'approve')}
-                disabled={acting === ap.id}
-                style={approveBtnStyle}
+                onClick={() => setError(null)}
+                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 'var(--text-md)', lineHeight: 1 }}
+                aria-label="Dismiss error"
               >
-                {acting === ap.id ? 'Processing...' : 'Approve'}
-              </button>
-              <button
-                onClick={() => handleAction(ap.id, 'reject')}
-                disabled={acting === ap.id}
-                style={rejectBtnStyle}
-              >
-                {acting === ap.id ? 'Processing...' : 'Reject'}
+                ×
               </button>
             </div>
           )}
-        </div>
-      ))}
-    </div>
+
+          {!loading && !error && approvals.length === 0 && (
+            <div className="empty-state">No approvals.</div>
+          )}
+
+          {approvals.map((ap) => (
+            <div key={ap.id} className="approval-item">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+                <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
+                  {ap.action}
+                </span>
+                <span className={`badge ${
+                  ap.status === 'approved' ? 'badge--ok' :
+                  ap.status === 'rejected' ? 'badge--critical' :
+                  'badge--warn'
+                }`}>
+                  {ap.status}
+                </span>
+              </div>
+
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
+                Requested by: {ap.requested_by} &middot; ID: {ap.id}
+                {ap.approved_by && ap.status !== 'pending' && (
+                  <span> &middot; by {ap.approved_by}</span>
+                )}
+              </div>
+
+              {ap.notes && (
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 'var(--space-1)', fontStyle: 'italic' }}>
+                  {ap.notes}
+                </div>
+              )}
+
+              {ap.status === 'pending' && !confirming && (
+                <div className="approval-actions">
+                  <button
+                    onClick={() => setConfirming({ id: ap.id, action: 'approve' })}
+                    disabled={acting === ap.id}
+                    className="btn btn--approve btn--sm"
+                    aria-label={`Approve: ${ap.action}`}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => setConfirming({ id: ap.id, action: 'reject' })}
+                    disabled={acting === ap.id}
+                    className="btn btn--reject btn--sm"
+                    aria-label={`Reject: ${ap.action}`}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+
+              {ap.status === 'pending' && confirming && confirming.id === ap.id && (
+                <div className="confirm-inline">
+                  <span>
+                    Confirm {confirming.action}: <strong>{ap.action}</strong>?
+                  </span>
+                  <button
+                    onClick={() => handleAction(ap.id, confirming.action)}
+                    disabled={acting === ap.id}
+                    className={`btn btn--${confirming.action === 'approve' ? 'approve' : 'reject'} btn--sm`}
+                  >
+                    {acting === ap.id ? 'Processing...' : 'Confirm'}
+                  </button>
+                  <button
+                    onClick={() => setConfirming(null)}
+                    className="btn btn--sm"
+                    style={{ background: 'var(--surface-primary)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+    </section>
   )
-}
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 8,
-  padding: 16,
-  marginBottom: 16,
-  backgroundColor: '#ffffff',
-}
-
-const headerRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  marginBottom: 12,
-}
-
-const headingStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 18,
-  fontWeight: 600,
-  color: '#111827',
-}
-
-const mutedStyle: React.CSSProperties = {
-  color: '#6b7280',
-  fontSize: 14,
-  margin: 0,
-}
-
-const errorStyle: React.CSSProperties = {
-  color: '#dc2626',
-  fontSize: 14,
-  marginBottom: 12,
-  padding: 8,
-  backgroundColor: '#fef2f2',
-  borderRadius: 4,
-  border: '1px solid #fecaca',
-}
-
-const itemStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 6,
-  padding: 12,
-  marginBottom: 10,
-  backgroundColor: '#f9fafb',
-}
-
-const itemHeaderStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  marginBottom: 4,
-}
-
-const actionStyle: React.CSSProperties = {
-  fontWeight: 600,
-  fontSize: 14,
-  color: '#111827',
-}
-
-function statusBadgeStyle(status: string): React.CSSProperties {
-  const colors: Record<string, { bg: string; fg: string; border: string }> = {
-    pending: { bg: '#fef3c7', fg: '#92400e', border: '#fbbf24' },
-    approved: { bg: '#dcfce7', fg: '#166534', border: '#4ade80' },
-    rejected: { bg: '#fee2e2', fg: '#991b1b', border: '#f87171' },
-  }
-  const c = colors[status] || colors.pending
-  return {
-    display: 'inline-block',
-    padding: '2px 8px',
-    borderRadius: 12,
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: 'uppercase' as const,
-    backgroundColor: c.bg,
-    color: c.fg,
-    border: `1px solid ${c.border}`,
-  }
-}
-
-const metaStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#6b7280',
-  marginBottom: 8,
-}
-
-const notesStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#374151',
-  marginBottom: 8,
-  fontStyle: 'italic',
-}
-
-const buttonRowStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: 8,
-  marginTop: 4,
-}
-
-const approveBtnStyle: React.CSSProperties = {
-  padding: '6px 16px',
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#ffffff',
-  backgroundColor: '#16a34a',
-  border: 'none',
-  borderRadius: 4,
-  cursor: 'pointer',
-}
-
-const rejectBtnStyle: React.CSSProperties = {
-  padding: '6px 16px',
-  fontSize: 13,
-  fontWeight: 600,
-  color: '#ffffff',
-  backgroundColor: '#dc2626',
-  border: 'none',
-  borderRadius: 4,
-  cursor: 'pointer',
 }

@@ -111,7 +111,8 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/pages/` | Next.js page components (file-system routing) |
 | `web/pages/index.tsx` | Main dashboard page |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (ApprovalInbox, BudgetCard, ChatPane, RiskCard, RunOfShowCard, ScopeCard, VendorsCard) |
+| `web/components/` | Shared UI components (ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader, RiskCard, RunOfShowCard, ScopeCard, VendorsCard) |
+| `web/styles/globals.css` | Design token system + component classes (single source of truth for styling) |
 | `web/public/` | Static assets |
 | `web/out/` | Static export output (gitignored) |
 
@@ -191,4 +192,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-06-21 (P5A)*
+*Last updated: 2026-06-21 (P6)*
