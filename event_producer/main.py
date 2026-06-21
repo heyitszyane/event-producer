@@ -377,7 +377,8 @@ class EventProducerApp:
         schedule_result = None
         call_sheet = []
         if "schedule_result" in production_validated and production_validated["schedule_result"] is not None:
-            schedule_result = ScheduleResult(**production_validated["schedule_result"])
+            sr = production_validated["schedule_result"]
+            schedule_result = sr if isinstance(sr, ScheduleResult) else ScheduleResult(**sr)
             self._event_store.save_schedule(event_id, schedule_result)
 
         if "call_sheet" in production_validated:
