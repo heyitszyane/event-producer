@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-22
+
+### P6C–P6F Rescue Sequence + P6G Docs/Submission Hardening
+
+**Scope:** Rescue audit, default demo contract, mission-control UI, scripted security beat, docs honesty.
+
+#### P6C — Audit + demo contract
+- Audited all 20 original capstone requirements against repo evidence
+- Defined the default demo contract (non-empty scope, budget, schedule, agent trace, approval, chat log)
+- Identified and resolved root cause: `"corporate"` event type missing from scope catalogue
+
+#### P6D — Backend demo payload
+- Added `AgentTraceStep` and `ChatLogMessage` Pydantic schemas
+- Added `"corporate"` entry to scope catalogue
+- Generated 5-step `agent_trace` and 6-message `chat_log` in default run
+- Wired real pending `Approval` creation into vendor step
+- Updated 27 contract tests
+
+#### P6E — Mission-control UI rescue
+- Added `AgentCrewTrace`, `SecurityBeat`, rewritten `ApprovalInbox`, rewritten `ChatPane`
+- Added 7 field-level validation rules, error parsing, backend-unreachable messaging
+- Two-column responsive grid, hero strip, collapsible panels
+
+#### P6F — Scripted security beat + evaluation hardening
+- 3 deterministic security fixtures (crude, subtle, image-channel) with `external_action_executed: false`
+- 31 new security demo tests
+- `SecurityBeat.tsx` component rendering fixtures, gate info, blocked actions
+
+#### P6G — Docs + submission hardening
+- Public claims matrix (25 claims classified into implemented/scripted/seam/deferred)
+- README rewritten: honest phase label, 177 tests, pnpm commands, security model, mission-control walkthrough
+- CHANGELOG, REPO_SITEMAP, CLAUDE.md updated
+- Local submission package created under `project_documents/result-artifacts/p6g/submission-package/`
+- Honesty boundaries preserved: no live Gemini/Firestore/Telegram/OCR/auth claimed
+
+#### QA
+- Tests: 177 passed (was 119 before rescue)
+- ruff: all checks passed
+- mypy: no issues in 25 source files
+- Frontend build: success
+- Deploy config (cloudbuild.yaml, firebase.json): valid
+
+---
+
 ## [0.6.0] - 2026-06-21
 
 ### P6 — Frontend Redesign: Mission Control Dashboard
