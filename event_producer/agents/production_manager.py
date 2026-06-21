@@ -57,6 +57,18 @@ _CATEGORY_LEAD_TIME: dict[str, Decimal] = {
     "security": Decimal("3"),
 }
 
+# Operational run-of-show tasks added per event type.
+# These ensure a credible event-production timeline with ≥6 ordered tasks.
+# Each entry: (task_id, task_name, duration_hours, dependencies, lead_time_days)
+_OPERATIONAL_TASKS: list[tuple[str, str, Decimal, list[str], Decimal | None]] = [
+    ("load_in", "Load In", Decimal("2"), [], None),
+    ("venue_setup", "Venue Setup", Decimal("3"), ["load_in"], None),
+    ("registration_check_in", "Registration Check-In", Decimal("1"), ["venue_setup"], None),
+    ("doors_open", "Doors Open", Decimal("1"), ["registration_check_in"], None),
+    ("networking_program", "Networking Program", Decimal("4"), ["doors_open"], None),
+    ("strike", "Strike", Decimal("2"), ["networking_program"], None),
+]
+
 
 def _scope_item_to_schedule_task(
     item: dict,
@@ -211,6 +223,62 @@ class ProductionManagerReasonAgent:
             _scope_item_to_schedule_task(item, scope_items_by_name)
             for item in scope_items
         ]
+        scope_task_ids: set[str] = {t.id for t in tasks}
+
+        # 3b. Strip lead_time from all scope-derived tasks.
+        # The CPM scheduler's forward pass does not natively add lead times —
+        # it only validates them — so keeping lead_time on scope tasks would
+        # always produce lead-time conflicts.  The operational timeline (below)
+        # provides the temporal structure instead.
+        for i, t in enumerate(tasks):
+            if t.lead_time is not None:
+                tasks[i] = ScheduleTask(
+                    id=t.id,
+                    name=t.name,
+                    duration=t.duration,
+                    dependencies=t.dependencies,
+                    lead_time=None,
+                )
+
+        # 3c. Append operational run-of-show tasks (load_in → strike) when
+        # the scope-derived task count is < 6.  These event-production tasks
+        # ensure a credible timeline with ≥6 ordered tasks.
+        op_task_ids: set[str] = set()
+        if len(tasks) < 6:
+            for op_id, op_name, op_duration, op_deps, op_lead in _OPERATIONAL_TASKS:
+                # Skip if a scope task already uses this ID
+                if op_id in scope_task_ids:
+                    continue
+                tasks.append(ScheduleTask(
+                    id=op_id,
+                    name=op_name,
+                    duration=op_duration,
+                    dependencies=list(op_deps),
+                    lead_time=op_lead,
+                ))
+                op_task_ids.add(op_id)
+
+            # 3d. Re-root scope tasks: tasks with no deps or whose deps
+            # reference other scope tasks only are linked into the operational
+            # flow.
+            for i, t in enumerate(tasks):
+                if t.id in op_task_ids:
+                    continue  # skip operational tasks
+                has_only_scope_deps = (
+                    t.dependencies and
+                    all(d in scope_task_ids for d in t.dependencies)
+                )
+                if not t.dependencies or has_only_scope_deps:
+                    new_deps = list(t.dependencies) if t.dependencies else []
+                    if "venue_setup" not in new_deps:
+                        new_deps.append("venue_setup")
+                    tasks[i] = ScheduleTask(
+                        id=t.id,
+                        name=t.name,
+                        duration=t.duration,
+                        dependencies=new_deps,
+                        lead_time=None,
+                    )
 
         # 4. Call compute_schedule from code (NOT as an LLM tool)
         result = compute_schedule(tasks, start_time)

@@ -32,8 +32,10 @@ from event_producer.agents.vendor_coordinator import (
     VendorCoordinatorReasonAgent,
 )
 from event_producer.models.schemas import (
+    AgentTraceStep,
     Approval,
     BudgetSummary,
+    ChatLogMessage,
     EventSpec,
     RiskFlag,
     RunOfShow,
@@ -297,8 +299,8 @@ class EventProducerApp:
             1. Brief/Scope — parse brief, propose scope items
             2. Budget — reconcile budget to zero
             3. Production — compute run-of-show schedule
-            4. Risk — flag risks and gaps
-            5. Vendor — draft a sample vendor RFP
+            4. Vendor — draft a sample vendor RFP + create pending approval
+            5. Risk — flag risks and gaps
             6. Compose — assemble into a RunOfShow
 
         Args:
@@ -306,15 +308,20 @@ class EventProducerApp:
             budget_cap: Maximum budget as a string (e.g. "50000").
             contingency_pct: Contingency percentage as a string (e.g. "15").
             attendees: Expected number of attendees.
-            event_type: One of "networking", "product_launch", "conference".
+            event_type: One of "networking", "product_launch", "conference",
+                "corporate".
             venue_type: Venue description (e.g. "indoor", "outdoor").
             date: Event date in YYYY-MM-DD format.
 
         Returns:
-            A dict with keys: event_spec, scope_items, budget_summary,
-            schedule_result, risk_flags, vendor_draft, run_of_show.
+            A dict with keys: event_id, event_spec, scope_items, budget_summary,
+            schedule_result, conflict_report, call_sheet, risk_flags, vendor_draft,
+            run_of_show, agent_trace, chat_log, approvals, security_beat.
         """
         event_id = str(uuid.uuid4())
+        agent_trace: list[AgentTraceStep] = []
+        chat_log: list[ChatLogMessage] = []
+        approvals: list[Approval] = []
 
         # ------------------------------------------------------------------
         # Step 1: Brief / Scope
@@ -337,6 +344,29 @@ class EventProducerApp:
         self._event_store.save_event(event_id, event_spec)
         self._event_store.save_scope(event_id, scope_items)
 
+        # Trace + chat
+        agent_trace.append(AgentTraceStep(
+            id="trace-brief-scope",
+            role="Brief/Scope Agent",
+            label="Parsed event brief and proposed initial scope",
+            status="complete",
+            input_summary=f"{brief}, {attendees} attendees, ${budget_cap} cap, {venue_type} {event_type} setting",
+            output_summary=f"Created event identity and must/should/could scope tiers ({len(scope_items)} items)",
+            artifacts=["event_spec", "scope_items"],
+            deterministic_core=None,
+            approval_required=False,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="system",
+            content=f"Event production pipeline started for '{brief}'",
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Brief/Scope Agent",
+            content=f"Parsed event brief. Proposed {len(scope_items)} scope items: "
+                    + ", ".join(s["name"] for s in brief_validated["scope_items"]),
+        ))
+
         # ------------------------------------------------------------------
         # Step 2: Budget
         # ------------------------------------------------------------------
@@ -354,13 +384,37 @@ class EventProducerApp:
         # Persist
         self._event_store.save_budget(event_id, budget_summary)
 
+        # Trace + chat
+        agent_trace.append(AgentTraceStep(
+            id="trace-budget",
+            role="Budget Manager",
+            label="Costed scope through Budget Engine",
+            status="complete",
+            input_summary=f"Scope items and ${budget_cap} budget cap with {contingency_pct}% contingency",
+            output_summary="Reserved contingency, computed spendable budget, rollups, and headroom",
+            artifacts=["budget_summary"],
+            deterministic_core="Budget Engine",
+            approval_required=False,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Budget Manager",
+            content=(
+                f"Reconciled budget: ${budget_cap} cap, "
+                f"${budget_summary.contingency_reserve} contingency ({contingency_pct}%), "
+                f"${budget_summary.spendable} spendable. "
+                f"Included ${budget_summary.included_totals}. "
+                f"Headroom: ${budget_summary.headroom}."
+            ),
+        ))
+
         # ------------------------------------------------------------------
         # Step 3: Production (Schedule)
         # ------------------------------------------------------------------
         # Start 30 days before the event so that vendor lead times (e.g.,
         # catering 7 days, staging 5 days, AV 3 days, security 3 days) are
-        # feasible.  Using the event date itself as the project start would
-        # cause every lead-time check to flag a conflict.
+        # feasible.  The production manager further adjusts the start time
+        # to account for the maximum lead time across all tasks.
         event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
         start_time = event_date.replace(
             hour=8, minute=0, second=0, tzinfo=timezone.utc,
@@ -382,13 +436,34 @@ class EventProducerApp:
             self._event_store.save_schedule(event_id, schedule_result)
 
         if "call_sheet" in production_validated:
-            from event_producer.models.schemas import CallSheetEntry
-            call_sheet = [
-                CallSheetEntry(**entry) for entry in production_validated["call_sheet"]
-            ]
+            call_sheet = list(production_validated["call_sheet"])
+
+        # Trace + chat
+        task_count = len(schedule_result.ordered_tasks) if schedule_result else 0
+        critical_path_str = (
+            ", ".join(schedule_result.critical_path)
+            if schedule_result and schedule_result.critical_path
+            else "none"
+        )
+        agent_trace.append(AgentTraceStep(
+            id="trace-production",
+            role="Production Manager",
+            label="Generated run-of-show through CPM Scheduler",
+            status="complete",
+            input_summary="EventSpec and included scope items",
+            output_summary=f"Created ordered schedule with {task_count} tasks. Critical path: {critical_path_str}",
+            artifacts=["run_of_show"],
+            deterministic_core="CPM Scheduler",
+            approval_required=False,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Production Manager",
+            content=f"Generated run-of-show with {task_count} tasks. Critical path: {critical_path_str}.",
+        ))
 
         # ------------------------------------------------------------------
-        # Step 4: Vendor (draft RFP — sample)
+        # Step 4: Vendor (draft RFP — sample) + Approval creation
         # ------------------------------------------------------------------
         # Pick a sample vendor from the sourcer for the RFP draft
         sample_vendors = self._vendor_sourcer.search("venue")
@@ -406,6 +481,38 @@ class EventProducerApp:
             vendor_validated = self._vendor_formatter.run(vendor_raw)
             vendor_draft = vendor_validated
 
+            # Create a real pending approval for the vendor draft
+            approval = Approval(
+                id=f"aprv-{event_id[:8]}-vendor",
+                action="send_vendor_message",
+                requested_by="vendor-coordinator",
+                approved_by="",
+                status="pending",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                notes=f"Send RFP to {sample_vendor.name} for {sample_vendor.category} booking.",
+            )
+            self._event_store.save_approval(event_id, approval)
+            approvals.append(approval)
+
+        # Trace + chat
+        vendor_name = sample_vendors[0].name if sample_vendors else "unknown"
+        agent_trace.append(AgentTraceStep(
+            id="trace-vendor",
+            role="Vendor Coordinator",
+            label="Drafted vendor-facing action",
+            status="pending_approval",
+            input_summary="Venue / AV / F&B needs from scope",
+            output_summary=f"Prepared outbound vendor draft to {vendor_name} blocked behind human approval",
+            artifacts=["vendors", "approvals"],
+            deterministic_core=None,
+            approval_required=True,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Vendor Coordinator",
+            content=f"Drafted RFP for {vendor_name}. Awaiting human approval before sending.",
+        ))
+
         # ------------------------------------------------------------------
         # Step 5: Risk
         # ------------------------------------------------------------------
@@ -420,6 +527,26 @@ class EventProducerApp:
         risk_flags_raw = self._risk_flagger.run(risk_state)
         risk_flags = [RiskFlag(**f) for f in risk_flags_raw]
 
+        # Trace + chat
+        risk_count = len(risk_flags)
+        risk_summary = "; ".join(f.message for f in risk_flags) if risk_flags else "No risks detected"
+        agent_trace.append(AgentTraceStep(
+            id="trace-risk",
+            role="Risk/Gap Flagger",
+            label="Reviewed operational and security risks",
+            status="warning" if risk_flags else "complete",
+            input_summary="Full event state, vendor draft, budget, schedule",
+            output_summary=f"Raised {risk_count} risk(s)/gap(s) and structural action-gate reminder",
+            artifacts=["risks", "security_events"],
+            deterministic_core="Action Gate",
+            approval_required=False,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Risk/Gap Flagger",
+            content=f"Raised {risk_count} risk(s): {risk_summary}.",
+        ))
+
         # ------------------------------------------------------------------
         # Step 6: Compose RunOfShow
         # ------------------------------------------------------------------
@@ -431,10 +558,20 @@ class EventProducerApp:
             call_sheet=call_sheet,
             vendors=sample_vendors if sample_vendors else [],
             risk_flags=risk_flags,
-            approvals=[],
+            approvals=approvals,
         )
 
         self._event_store.save_run_of_show(event_id, run_of_show)
+
+        # ------------------------------------------------------------------
+        # Security beat (P6D: honest placeholder — scripted beat deferred to P6F)
+        # ------------------------------------------------------------------
+        security_beat = {
+            "status": "deferred_to_p6f",
+            "note": "Scripted injection/security beat will be wired in P6F. "
+                    "Current P6D preserves the structural approval gate and "
+                    "does not execute vendor actions automatically.",
+        }
 
         # ------------------------------------------------------------------
         # Return result dict
@@ -451,6 +588,10 @@ class EventProducerApp:
             "risk_flags": [f.model_dump() for f in risk_flags],
             "vendor_draft": vendor_draft,
             "run_of_show": run_of_show.model_dump(),
+            "agent_trace": [step.model_dump() for step in agent_trace],
+            "chat_log": [msg.model_dump() for msg in chat_log],
+            "approvals": [a.model_dump() for a in approvals],
+            "security_beat": security_beat,
         }
 
 

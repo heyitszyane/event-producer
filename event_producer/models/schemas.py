@@ -618,3 +618,37 @@ class RunOfShow(BaseModel):
     vendors: list[Vendor] = Field(default_factory=list)
     risk_flags: list[RiskFlag] = Field(default_factory=list)
     approvals: list[Approval] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# P6D — Agent Trace
+# ---------------------------------------------------------------------------
+
+class AgentTraceStep(BaseModel):
+    """A single step in the agent crew trace.
+
+    This is a structural trace of actual rule-based role-agent steps.
+    It is NOT a live LLM reasoning transcript.
+    """
+
+    model_config = ConfigDict(strict=True)
+
+    id: str
+    role: str
+    label: str
+    status: Literal["complete", "warning", "blocked", "pending_approval"]
+    input_summary: str
+    output_summary: str
+    artifacts: list[str] = Field(default_factory=list)
+    deterministic_core: str | None = None
+    approval_required: bool = False
+
+
+class ChatLogMessage(BaseModel):
+    """A single message in the production chat log."""
+
+    model_config = ConfigDict(strict=True)
+
+    role: str
+    content: str
+    agent: str = ""

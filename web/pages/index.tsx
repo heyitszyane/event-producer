@@ -27,6 +27,10 @@ export interface RunEventResponse {
   run_of_show?: {
     vendors?: Vendor[]
   }
+  agent_trace?: Array<Record<string, unknown>>
+  chat_log?: Array<Record<string, unknown>>
+  approvals?: Array<Record<string, unknown>>
+  security_beat?: Record<string, unknown>
 }
 
 export default function Dashboard() {

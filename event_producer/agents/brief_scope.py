@@ -175,10 +175,62 @@ _CONFERENCE_SCOPE = [
     },
 ]
 
+_CORPORATE_SCOPE = [
+    {
+        "name": "Venue Rental",
+        "description": "Indoor venue rental for corporate event",
+        "category": "venue",
+        "tier": "must",
+        "cost_per_attendee": Decimal("50.00"),
+        "currency": "USD",
+    },
+    {
+        "name": "Catering",
+        "description": "Food and beverage service for attendees",
+        "category": "catering",
+        "tier": "must",
+        "cost_per_attendee": Decimal("35.00"),
+        "currency": "USD",
+    },
+    {
+        "name": "Registration Check-In",
+        "description": "On-site registration desk and check-in staff",
+        "category": "registration",
+        "tier": "must",
+        "cost_per_attendee": Decimal("12.00"),
+        "currency": "USD",
+    },
+    {
+        "name": "AV Equipment",
+        "description": "Sound system, projector, and microphones",
+        "category": "av_equipment",
+        "tier": "should",
+        "cost_per_attendee": Decimal("15.00"),
+        "currency": "USD",
+    },
+    {
+        "name": "Event Staffing",
+        "description": "On-site event staff and coordinators",
+        "category": "staffing",
+        "tier": "should",
+        "cost_per_attendee": Decimal("10.00"),
+        "currency": "USD",
+    },
+    {
+        "name": "Decor and Signage",
+        "description": "Table centerpieces, banners, and directional signage",
+        "category": "decor",
+        "tier": "could",
+        "cost_per_attendee": Decimal("8.00"),
+        "currency": "USD",
+    },
+]
+
 _SCOPE_CATALOGUE: dict[str, list[dict]] = {
     "networking": _NETWORKING_SCOPE,
     "product_launch": _PRODUCT_LAUNCH_SCOPE,
     "conference": _CONFERENCE_SCOPE,
+    "corporate": _CORPORATE_SCOPE,
 }
 
 
