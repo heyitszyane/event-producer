@@ -1,6 +1,6 @@
 # REPO_SITEMAP.md -- Event Producer Folder Map
 
-> This file describes the **current** repository layout as of P5A (capstone ready).
+> This file describes the **current** repository layout as of P6G (post-rescue, docs hardened).
 
 ---
 
@@ -111,7 +111,7 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/pages/` | Next.js page components (file-system routing) |
 | `web/pages/index.tsx` | Main dashboard page |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader, RiskCard, RunOfShowCard, ScopeCard, VendorsCard) |
+| `web/components/` | Shared UI components (AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard) |
 | `web/styles/globals.css` | Design token system + component classes (single source of truth for styling) |
 | `web/public/` | Static assets |
 | `web/out/` | Static export output (gitignored) |
@@ -131,6 +131,8 @@ All test code lives here.
 | `test_security.py` | Action-gate, injection flag, and audit log tests |
 | `test_mcp.py` | MCP server tests (CRUD, list, delete via provider seam) |
 | `test_fx_rates.py` | FX rate provider tests |
+| `test_p6d_default_demo_contract.py` | Default demo contract tests (non-empty scope, budget, schedule, agent trace, approval, chat log) |
+| `test_p6f_security_demo.py` | Scripted security beat tests (3 fixtures, no-execution guarantee, approval transitions) |
 | `eval_cases/` | Red-team eval set written in Gherkin (`*.feature` files) |
 
 ---
@@ -192,4 +194,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-06-21 (P6)*
+*Last updated: 2026-06-22 (P6G)*

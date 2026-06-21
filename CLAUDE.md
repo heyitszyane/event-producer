@@ -7,9 +7,9 @@ repository. Read this file before every session and follow its rules strictly.
 
 ## 1. Product Frame
 
-**Event Producer** is an AI production crew — a Google ADK multi-agent system
-powered by Gemini — that lets one person run a brand/experiential event
-end-to-end. It covers:
+**Event Producer** is an AI production crew — an ADK-style multi-agent system
+(rule-based, no live Gemini runtime) — that lets one person run a
+brand/experiential event end-to-end. It covers:
 
 - **Budget-gated scope configurator** — the user describes the event, the
   agent proposes scope options constrained by a hard budget.
@@ -139,8 +139,8 @@ python3 -m ruff check .      # linting
 ### Node / TypeScript
 
 ```bash
-cd web && npm run build      # production build (static export)
-cd web && npm run lint       # linting
+pnpm -C web run build      # production build (static export)
+pnpm -C web run lint       # linting
 ```
 
 ### QA gate (must pass before "done")
@@ -159,13 +159,13 @@ The full technology stack:
 
 | Layer | Technology |
 |-------|-----------|
-| Agent framework | Google ADK multi-agent (role agents + reason->formatter splits) |
-| LLM | Gemini 2.5 Flash (reasoning), Flash-Lite (formatter calls) |
-| State + audit log | Firestore |
+| Agent framework | ADK-style multi-agent (rule-based role agents + reason->formatter splits; no live Gemini runtime) |
+| LLM | Deferred (rule-based agents; no live Gemini runtime) |
+| State + audit log | InMemoryEventStore (Firestore-ready provider seam; Firestore deferred) |
 | Backend hosting | Cloud Run |
 | Frontend | Next.js on Firebase Hosting |
 | Data interface | MCP wrapper over the event-store |
-| Messaging | Telegram (scripted, not free-form) |
+| Messaging | Deferred (scripted vendor-message fixtures; no live Telegram) |
 | Contracts | Typed Pydantic JSON |
 
 **Key design decisions:**
@@ -182,14 +182,14 @@ The full technology stack:
 
 | Concept | Where |
 |---------|-------|
-| Multi-agent ADK | `agents/` — role agents + reason->formatter splits |
-| Agent skills | Each role as a reusable ADK skill (`skill.md`) |
-| Security / context hygiene | `security/` — structural action-gate + semantic injection flag |
+| ADK-style multi-agent | `agents/` — rule-based role agents + reason->formatter splits (no live ADK runtime) |
+| Skill-like role modules | Reusable role modules with typed inputs/outputs; formal ADK Agent Skills packaging is deferred |
+| Security / context hygiene | `security/` — structural action-gate + advisory injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
-| MCP | `mcp/` — wrapper over event-store + free source |
-| Eval framework | `tests/` — EDD, Gherkin, trajectory scoring, pass-to-the-K |
+| MCP | `mcp/` — wrapper over event-store via provider seam |
+| Eval framework | `tests/` — EDD, Gherkin, trajectory scoring |
 | Separated evaluation | Build itself runs planner->generator->evaluator |
-| Model routing | Flash-Lite for formatters, Flash for reasoning |
+| Model-routing seam | Reason/formatter split is represented structurally; live Gemini/Flash routing is deferred |
 
 ---
 
