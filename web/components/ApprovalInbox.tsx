@@ -1,9 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
-// In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
-
-interface Approval {
+export interface Approval {
   id: string
   action: string
   requested_by: string
@@ -13,32 +10,25 @@ interface Approval {
   notes?: string
 }
 
-export default function ApprovalInbox() {
-  const [approvals, setApprovals] = useState<Approval[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [acting, setActing] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
-  const [confirming, setConfirming] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
+interface ApprovalInboxProps {
+  approvals: Approval[]
+  defaultExpanded?: boolean
+}
 
-  const fetchApprovals = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/approvals`, {
-        headers: { 'X-Demo-User': 'demo-user' },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data: Approval[] = await res.json()
-      setApprovals(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
+export default function ApprovalInbox({ approvals, defaultExpanded = false }: ApprovalInboxProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [acting, setActing] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
+  const [localApprovals, setLocalApprovals] = useState<Approval[]>(approvals)
+
+  // Sync when props change (new run)
+  if (approvals !== localApprovals && approvals.length > 0) {
+    setLocalApprovals(approvals)
   }
 
-  useEffect(() => {
-    fetchApprovals()
-  }, [])
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
+  const pendingCount = localApprovals.filter((a) => a.status === 'pending').length
 
   const handleAction = async (id: string, action: 'approve' | 'reject') => {
     setActing(id)
@@ -54,7 +44,10 @@ export default function ApprovalInbox() {
         body: JSON.stringify({ action }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      await fetchApprovals()
+      // Update local state
+      setLocalApprovals((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: action === 'approve' ? 'approved' : 'rejected' } : a))
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -62,36 +55,37 @@ export default function ApprovalInbox() {
     }
   }
 
-  const pendingCount = approvals.filter((a) => a.status === 'pending').length
-
   return (
-    <section className="card" id="approvals" aria-labelledby="approvals-heading">
+    <section className="card card--security" id="approvals" aria-labelledby="approvals-heading">
       <div className="card__header">
-        <h2 id="approvals-heading">Approvals</h2>
+        <h2 id="approvals-heading">
+          🔒 Approvals
+        </h2>
         {pendingCount > 0 && (
           <span className="badge badge--warn">{pendingCount} pending</span>
         )}
+      </div>
+
+      {/* Structural action gate banner */}
+      <div className="security-gate-banner">
+        <span className="security-gate-banner__icon">🛡</span>
+        <span className="security-gate-banner__text">
+          Structural Action Gate — Vendor-facing actions require human approval
+        </span>
       </div>
 
       {/* Collapsed: count line */}
       {!expanded && (
         <button
           onClick={() => setExpanded(true)}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--text-secondary)',
-            fontSize: 'var(--text-sm)',
-            cursor: 'pointer',
-            padding: 0,
-          }}
+          className="approval-expand-btn"
           aria-expanded={expanded}
         >
           {pendingCount > 0
-            ? `${pendingCount} pending approvals`
-            : approvals.length > 0
-              ? `${approvals.length} processed`
-              : 'No Approvals'}{' '}
+            ? `${pendingCount} pending approval${pendingCount !== 1 ? 's' : ''}`
+            : localApprovals.length > 0
+              ? `${localApprovals.length} processed`
+              : 'No approvals'}{' '}
           &middot; Expand
         </button>
       )}
@@ -101,20 +95,10 @@ export default function ApprovalInbox() {
         <>
           <button
             onClick={() => setExpanded(false)}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-tertiary)',
-              fontSize: 'var(--text-xs)',
-              cursor: 'pointer',
-              padding: 0,
-              marginBottom: 'var(--space-2)',
-            }}
+            className="approval-collapse-btn"
           >
             Collapse
           </button>
-
-          {loading && <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-sm)', margin: 0 }}>Loading...</p>}
 
           {error && (
             <div className="error-bar">
@@ -129,11 +113,11 @@ export default function ApprovalInbox() {
             </div>
           )}
 
-          {!loading && !error && approvals.length === 0 && (
+          {localApprovals.length === 0 && (
             <div className="empty-state">No approvals.</div>
           )}
 
-          {approvals.map((ap) => (
+          {localApprovals.map((ap) => (
             <div key={ap.id} className="approval-item">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
                 <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
@@ -158,6 +142,12 @@ export default function ApprovalInbox() {
               {ap.notes && (
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 'var(--space-1)', fontStyle: 'italic' }}>
                   {ap.notes}
+                </div>
+              )}
+
+              {ap.status === 'pending' && (
+                <div className="approval-gate-reason">
+                  ⛔ Vendor-facing action blocked until approved by human
                 </div>
               )}
 
