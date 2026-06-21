@@ -10,3 +10,4 @@ httpx==0.28.1
 mypy==2.1.0
 mypy-extensions==1.1.0
 ruff==0.15.18
+pytest==9.1.1

@@ -184,13 +184,13 @@ breakdown.
 | Concept | Where |
 |---------|-------|
 | Multi-agent ADK | `event_producer/agents/` -- role agents + reason->formatter splits |
-| Agent skills | Each role ships as a reusable ADK skill |
+| Skill-like role agents | Reusable role modules with typed inputs/outputs; formal Agents CLI skill packaging is deferred. |
 | Security / context hygiene | `event_producer/security/` -- structural action-gate + injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
 | MCP | `event_producer/mcp/` -- wrapper over event-store via provider seam |
 | Eval framework | `tests/` -- EDD, Gherkin, trajectory scoring |
 | Separated evaluation | Build itself runs planner->generator->evaluator |
-| Model routing | Flash-Lite for formatters, Flash for reasoning |
+| Model-routing seam | Reason/formatter split is represented structurally; live Gemini/Flash routing is deferred. |
 
 ## QA Commands
 
