@@ -50,7 +50,31 @@ export interface RunEventResponse {
   agent_trace?: AgentTraceStep[]
   chat_log?: ChatMessage[]
   approvals?: Approval[]
-  security_beat?: { status: string; note: string }
+  security_beat?: {
+    status: string
+    title?: string
+    summary?: string
+    source?: string
+    external_action_executed?: boolean
+    state_mutation_executed?: boolean
+    blocked_actions?: string[]
+    gate?: { name: string; load_bearing_control: boolean; reason: string }
+    fixtures?: Array<{
+      id: string
+      channel: string
+      label: string
+      content: string
+      flags: string[]
+      classifier_role: string
+      blocked_by: string
+      external_action_executed: boolean
+      ocr_implemented?: boolean
+    }>
+    approval_required?: boolean
+    approval_id?: string
+    notes?: string[]
+    note?: string
+  }
 }
 
 interface ChatMessage {

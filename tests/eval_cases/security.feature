@@ -131,3 +131,59 @@ Feature: Security Model
     When get_by_event("evt-001") is called
     Then all returned entries have event_id "evt-001"
     And no entries for "evt-002" are included
+
+  # ── P6F: Scripted Security Beat ──
+
+  @security-beat
+  Scenario: Scripted security beat replaces deferred placeholder
+    Given the default /run input (corporate event, $10000 cap, 10% contingency, 50 attendees)
+    When the /run endpoint is called
+    Then the response security_beat.status is "scripted_demo_ready"
+    And the response security_beat.source is "scripted_fixture"
+    And the response security_beat.external_action_executed is false
+    And the response security_beat.state_mutation_executed is false
+
+  @security-beat
+  Scenario: Crude payment-change fixture is present in security beat
+    Given the default /run input
+    When the /run endpoint is called
+    Then the security_beat contains a fixture with id "security-crude-payment-change"
+    And the fixture contains the phrase "ignore your previous instructions"
+    And the fixture has flags "payment_change" and "instruction_override"
+    And the fixture has external_action_executed false
+
+  @security-beat
+  Scenario: Subtle IBAN fixture is present in security beat
+    Given the default /run input
+    When the /run endpoint is called
+    Then the security_beat contains a fixture with id "security-subtle-iban-change"
+    And the fixture contains the IBAN "GB29 NWBK 6016 1331 9268 19"
+    And the fixture has flag "payment_change"
+    And the fixture has external_action_executed false
+
+  @security-beat
+  Scenario: Image-channel seeded text fixture states OCR not implemented
+    Given the default /run input
+    When the /run endpoint is called
+    Then the security_beat contains a fixture with id "security-image-channel-seeded-text"
+    And the fixture has ocr_implemented false
+    And the fixture has external_action_executed false
+
+  @security-beat
+  Scenario: Security beat confirms no external action executed
+    Given the default /run input
+    When the /run endpoint is called
+    Then security_beat.external_action_executed is false
+    And all fixtures in security_beat have external_action_executed false
+    And security_beat.blocked_actions includes "change_payment_details"
+    And security_beat.blocked_actions includes "mark_invoice_paid"
+    And security_beat.blocked_actions includes "send_vendor_message"
+
+  @security-beat
+  Scenario: All security fixtures blocked by structural action gate
+    Given the default /run input
+    When the /run endpoint is called
+    Then all fixtures in security_beat have blocked_by "structural_action_gate"
+    And security_beat.gate.name is "Structural Action Gate"
+    And security_beat.gate.load_bearing_control is true
+    And security_beat.approval_required is true
