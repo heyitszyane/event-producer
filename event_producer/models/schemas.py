@@ -811,3 +811,137 @@ class RunEventRequest(BaseModel):
     event_type: str | None = None
     venue_type: str | None = None
     date: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# P7B — scope mutation + orchestrator action schemas
+# ---------------------------------------------------------------------------
+
+class ScopeItemCreate(BaseModel):
+    """Schema for creating a new scope item via API.
+
+    Uses strict=False for string coercion from JSON, then validates
+    monetary fields are Decimal (not float).
+    """
+
+    model_config = ConfigDict(strict=False)
+
+    name: str
+    description: str = ""
+    category: str
+    tier: _TIER_LITERAL = "could"
+    qty: Decimal = Decimal("1")
+    estimated_cost: Decimal
+    currency: str = "USD"
+    selected: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+    @field_validator("estimated_cost", "qty")
+    @classmethod
+    def validate_decimals(cls, v: Decimal, info) -> Decimal:
+        # String to Decimal coercion already happened; just validate
+        if v < Decimal("0"):
+            raise ValueError(f"{info.field_name} must be >= 0")
+        return v
+
+
+class ScopeItemUpdate(BaseModel):
+    """Schema for updating an existing scope item via API.
+
+    Uses strict=False for string coercion from JSON for monetary fields.
+    """
+
+    model_config = ConfigDict(strict=False)
+
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    tier: _TIER_LITERAL | None = None
+    qty: Decimal | None = None
+    estimated_cost: Decimal | None = None
+    currency: str | None = None
+    selected: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None, info) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string if provided")
+        return v
+
+    @field_validator("estimated_cost", "qty")
+    @classmethod
+    def validate_decimals(cls, v: Decimal | None, info) -> Decimal | None:
+        if v is not None and v < Decimal("0"):
+            raise ValueError(f"{info.field_name} must be >= 0")
+        return v
+
+
+class ProposedAction(BaseModel):
+    """A proposed action returned by the orchestrator (not yet applied).
+
+    Actions NEVER mutate state directly. The user must click Apply before
+    any change occurs. Vendor/payment actions route through the action-gate.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str
+    type: Literal["add_scope_item", "update_scope_item", "delete_scope_item",
+                   "retier_scope_item", "toggle_scope_item", "add_risk_flag",
+                   "request_clarification", "create_approval"]
+    title: str
+    rationale: str
+    payload: dict
+    requires_confirmation: bool = True
+    requires_approval_gate: bool = False
+    model_mode: AgentMode = "rule_based_fallback"
+    created_at: str = ""
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+
+class Proposal(BaseModel):
+    """A stored proposal object that can be applied or dismissed."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str
+    event_id: str
+    source_agent: str = "orchestrator"
+    title: str
+    rationale: str
+    proposed_actions: list[ProposedAction]
+    status: Literal["pending", "applied", "dismissed"] = "pending"
+    created_at: str = ""
+    model_mode: AgentMode = "rule_based_fallback"
+    fallback_reason: str | None = None
+
+    @field_validator("id", "event_id", "title", "rationale")
+    @classmethod
+    def validate_non_empty(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+
+class OrchestratorChatResponse(BaseModel):
+    """Response from the orchestrator chat endpoint."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    reply: str
+    proposals: list[ProposedAction] = Field(default_factory=list)
+    model_mode: AgentMode = "rule_based_fallback"
+    fallback_reason: str | None = None

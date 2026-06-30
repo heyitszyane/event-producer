@@ -110,3 +110,41 @@ export const MODE_CLASS: Record<AgentMode, string> = {
   human_approval_gate: 'badge--approval',
   not_enabled: 'badge--muted',
 }
+
+// ---------------------------------------------------------------------------
+// P7B — Proposal types (mirror backend schemas)
+// ---------------------------------------------------------------------------
+
+export interface ProposedAction {
+  id: string
+  type: 'add_scope_item' | 'update_scope_item' | 'delete_scope_item' |
+        'retier_scope_item' | 'toggle_scope_item' | 'add_risk_flag' |
+        'request_clarification' | 'create_approval'
+  title: string
+  rationale: string
+  payload: Record<string, unknown>
+  requires_confirmation: boolean
+  requires_approval_gate: boolean
+  model_mode?: AgentMode
+  created_at?: string
+}
+
+export interface Proposal {
+  id: string
+  event_id: string
+  source_agent?: string
+  title: string
+  rationale: string
+  proposed_actions: ProposedAction[]
+  status: 'pending' | 'applied' | 'dismissed'
+  created_at?: string
+  model_mode?: AgentMode
+  fallback_reason?: string | null
+}
+
+export interface OrchestratorChatResponse {
+  reply: string
+  proposals: ProposedAction[]
+  model_mode: AgentMode
+  fallback_reason?: string | null
+}

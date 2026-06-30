@@ -7,6 +7,7 @@ from event_producer.models.schemas import (
     Approval,
     BudgetSummary,
     EventSpec,
+    Proposal,
     RunOfShow,
     ScheduleResult,
     ScopeItem,
@@ -110,4 +111,23 @@ class EventStore(ABC):
     @abstractmethod
     def get_approvals(self, event_id: str) -> list[Approval]:
         """Retrieve all approvals for an event."""
+        ...
+
+    # -----------------------------------------------------------------------
+    # P7B — Proposal storage (event-scoped, in-memory for MVP)
+    # -----------------------------------------------------------------------
+
+    @abstractmethod
+    def save_proposal(self, event_id: str, proposal: Proposal) -> None:
+        """Persist a proposed action for an event."""
+        ...
+
+    @abstractmethod
+    def get_proposals(self, event_id: str) -> list[Proposal]:
+        """Retrieve all proposals for an event."""
+        ...
+
+    @abstractmethod
+    def get_proposal(self, event_id: str, proposal_id: str) -> Proposal | None:
+        """Retrieve a single proposal by its ID."""
         ...

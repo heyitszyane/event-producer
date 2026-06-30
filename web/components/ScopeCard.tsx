@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 export interface ScopeItem {
   name: string
   description: string
@@ -11,9 +13,27 @@ export interface ScopeItem {
 
 interface ScopeCardProps {
   items: ScopeItem[]
+  eventId?: string
+  onItemsChange?: (items: ScopeItem[]) => void
 }
 
-export default function ScopeCard({ items }: ScopeCardProps) {
+interface EditState {
+  editingIndex: number | null
+  tier: 'must' | 'should' | 'could' | 'wow'
+}
+
+export default function ScopeCard({
+  items,
+  eventId,
+  onItemsChange,
+}: ScopeCardProps) {
+  const [editState, setEditState] = useState<EditState>({
+    editingIndex: null,
+    tier: 'could',
+  })
+  const [loading, setLoading] = useState(false)
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
+
   if (!items || items.length === 0) {
     return (
       <section className="card" id="scope" aria-labelledby="scope-heading">
@@ -26,6 +46,60 @@ export default function ScopeCard({ items }: ScopeCardProps) {
       </section>
     )
   }
+
+  async function toggleItem(idx: number) {
+    if (!eventId) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/event/${eventId}/scope-items/${idx}/toggle`, {
+        method: 'POST',
+        headers: { 'X-Demo-User': 'demo-user' },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        onItemsChange?.(data.scope_items)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function changeTier(idx: number, newTier: 'must' | 'should' | 'could' | 'wow') {
+    if (!eventId) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/event/${eventId}/scope-items/${idx}/retier`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
+        body: JSON.stringify({ tier: newTier }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        onItemsChange?.(data.scope_items)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function deleteItem(idx: number) {
+    if (!eventId) return
+    setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/event/${eventId}/scope-items/${idx}`, {
+        method: 'DELETE',
+        headers: { 'X-Demo-User': 'demo-user' },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        onItemsChange?.(data.scope_items)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const TIER_OPTIONS: ('must' | 'should' | 'could' | 'wow')[] = ['must', 'should', 'could', 'wow']
 
   return (
     <section className="card" id="scope" aria-labelledby="scope-heading">
@@ -43,6 +117,7 @@ export default function ScopeCard({ items }: ScopeCardProps) {
             <th scope="col">Qty</th>
             <th scope="col">Cost</th>
             <th scope="col">Selected</th>
+            <th scope="col">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -51,15 +126,39 @@ export default function ScopeCard({ items }: ScopeCardProps) {
               <td data-label="Name">{item.name}</td>
               <td data-label="Category">{item.category}</td>
               <td data-label="Tier">
-                <span className={`badge badge--${item.tier}`}>
-                  {item.tier}
-                </span>
+                <select
+                  value={item.tier}
+                  onChange={(e) => changeTier(idx, e.target.value as typeof item.tier)}
+                  disabled={loading}
+                  style={{ fontSize: 'var(--text-sm)', padding: '2px 4px' }}
+                >
+                  {TIER_OPTIONS.map((tier) => (
+                    <option key={tier} value={tier}>{tier}</option>
+                  ))}
+                </select>
               </td>
               <td data-label="Qty">{String(item.qty)}</td>
               <td data-label="Cost">
                 {item.currency} {String(item.estimated_cost)}
               </td>
-              <td data-label="Selected">{item.selected ? 'Yes' : 'No'}</td>
+              <td data-label="Selected">
+                <input
+                  type="checkbox"
+                  checked={item.selected}
+                  onChange={() => toggleItem(idx)}
+                  disabled={loading}
+                />
+              </td>
+              <td data-label="Actions">
+                <button
+                  onClick={() => deleteItem(idx)}
+                  disabled={loading}
+                  className="btn btn--ghost btn--sm"
+                  title="Delete item"
+                >
+                  Delete
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

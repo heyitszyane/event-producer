@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ChangeEvent } from 'react'
 import Head from 'next/head'
 import EventCommandHeader from '../components/EventCommandHeader'
 import AgentCrewTrace from '../components/AgentCrewTrace'
@@ -18,6 +18,8 @@ import type {
   CreativeConcept as CreativeConceptData,
   ModelModeSummary,
   AgentTraceStep,
+  ProposedAction,
+  OrchestratorChatResponse,
 } from '../types/agentic'
 
 // In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
@@ -200,6 +202,10 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [hasRun, setHasRun] = useState(false)
+  // P7B — orchestrator chat state
+  const [chatInput, setChatInput] = useState('')
+  const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
+  const [chatReply, setChatReply] = useState<string | null>(null)
 
   async function handleRun(e: FormEvent) {
     e.preventDefault()
@@ -277,6 +283,76 @@ export default function Dashboard() {
   const scheduleResult = result?.schedule_result
   const criticalCount = scheduleResult?.critical_path?.length || 0
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
+
+  // P7B — orchestrator chat handler
+  async function handleOrchestratorChat(e: FormEvent) {
+    e.preventDefault()
+    if (!result?.event_id || !chatInput.trim()) return
+
+    const res = await fetch(`${API_BASE}/event/${result.event_id}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
+      body: JSON.stringify({ message: chatInput }),
+    })
+    if (res.ok) {
+      const data: OrchestratorChatResponse = await res.json()
+      setChatReply(data.reply)
+      setOrchestratorProposals(data.proposals)
+      setChatInput('')
+    }
+  }
+
+  // P7B — apply a proposal
+  async function applyProposal(proposal: ProposedAction) {
+    if (!result?.event_id) return
+    const res = await fetch(`${API_BASE}/event/${result.event_id}/proposals/${proposal.id}/apply`, {
+      method: 'POST',
+      headers: { 'X-Demo-User': 'demo-user' },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      // Update scope items and budget from response
+      setResult((prev) => ({
+        ...prev,
+        scope_items: data.scope_items,
+        budget_summary: data.budget_summary,
+        schedule_result: data.schedule_result,
+      }) as RunEventResponse)
+      setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+    }
+  }
+
+  // P7B — handle creative suggestion → add to scope
+  async function handleAddToScope(suggestion: {
+    title: string
+    description: string
+    category: string
+    estimated_cost?: string | null
+    tier?: string
+  }) {
+    if (!result?.event_id) return
+    const cost = suggestion.estimated_cost || '1000'
+    const res = await fetch(`${API_BASE}/event/${result.event_id}/scope-items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
+      body: JSON.stringify({
+        name: suggestion.title,
+        description: suggestion.description,
+        category: suggestion.category,
+        tier: (suggestion.tier as 'must' | 'should' | 'could' | 'wow') || 'could',
+        estimated_cost: cost,
+        qty: '1',
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      setResult((prev) => ({
+        ...prev,
+        scope_items: data.scope_items,
+        budget_summary: data.budget_summary,
+      }) as RunEventResponse)
+    }
+  }
 
   return (
     <>
@@ -432,8 +508,17 @@ export default function Dashboard() {
             {/* LEFT COLUMN: Extracted → Creative → Scope → Budget → Schedule */}
             <div className="stack">
               <ExtractedRequirements intake={result.brief_intake ?? null} />
-              <CreativeConcept concept={result.creative_concept ?? null} />
-              <ScopeCard items={result.scope_items || []} />
+              <CreativeConcept
+                concept={result.creative_concept ?? null}
+                onAddToScope={handleAddToScope}
+              />
+              <ScopeCard
+                items={result.scope_items || []}
+                eventId={result.event_id}
+                onItemsChange={(items) =>
+                  setResult((prev) => ({ ...prev, scope_items: items }) as RunEventResponse)
+                }
+              />
               <BudgetCard budget={result.budget_summary || null} />
               <RunOfShowCard
                 schedule={result.schedule_result}
@@ -451,6 +536,46 @@ export default function Dashboard() {
               <SecurityBeat securityBeat={securityBeat || null} />
               <VendorsCard vendors={vendors} />
               <RiskCard risks={riskFlags} />
+              {/* P7B — Orchestrator Chat */}
+              <section className="card" id="orchestrator-chat">
+                <div className="card__header">
+                  <h2>Orchestrator Chat</h2>
+                </div>
+                <div style={{ padding: 'var(--space-3)' }}>
+                  <form onSubmit={handleOrchestratorChat}>
+                    <textarea
+                      value={chatInput}
+                      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
+                      placeholder="Ask for suggestions (e.g., 'Make this feel more premium')"
+                      disabled={!result?.event_id}
+                      rows={2}
+                      style={{ width: '100%', marginBottom: 'var(--space-2)' }}
+                    />
+                    <button type="submit" disabled={!result?.event_id || loading} className="btn btn--primary">
+                      Ask Orchestrator
+                    </button>
+                  </form>
+                  {chatReply && (
+                    <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-2)', background: 'var(--surface-tertiary)', borderRadius: 'var(--radius-md)' }}>
+                      <strong>Reply:</strong> {chatReply}
+                    </div>
+                  )}
+                  {orchestratorProposals.length > 0 && (
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Proposals</h3>
+                      {orchestratorProposals.map((p) => (
+                        <div key={p.id} className="card card--inset" style={{ marginBottom: 'var(--space-2)' }}>
+                          <div style={{ fontWeight: 600 }}>{p.title}</div>
+                          <div style={{ fontSize: 'var(--text-sm)' }}>{p.rationale}</div>
+                          <button onClick={() => applyProposal(p)} className="btn btn--sm" style={{ marginTop: 'var(--space-1)' }}>
+                            Apply
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
               <ChatPane messages={chatLog} />
             </div>
           </div>

@@ -8,6 +8,8 @@ and HTTP concerns.
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,7 +19,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from event_producer.main import EventProducerApp
-from event_producer.models.schemas import Approval, RunEventRequest as RunEventSchema
+from event_producer.models.schemas import (
+    Approval,
+    BudgetSummary,
+    Proposal,
+    RunEventRequest as RunEventSchema,
+    ScopeItem,
+    ScopeItemCreate,
+    ScopeItemUpdate,
+)
 from event_producer.security.action_gate import enforce
 
 # ---------------------------------------------------------------------------
@@ -69,10 +79,24 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class OrchestratorChatRequest(BaseModel):
+    """Request body for the orchestrator chat endpoint."""
+
+    message: str
+
+
 class ApprovalAction(BaseModel):
     """Request body for the ``POST /approvals/{approval_id}`` endpoint."""
 
     action: Literal["approve", "reject"]
+
+
+class OrchestratorChatResponse(BaseModel):
+    """Response from the orchestrator chat endpoint."""
+    reply: str
+    proposals: list[dict[str, Any]]
+    model_mode: str
+    fallback_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -273,10 +297,383 @@ def create_app() -> FastAPI:
 
     @app.post("/chat")
     async def chat(req: ChatRequest) -> dict[str, str]:
-        """Chat endpoint (stub — acknowledges the message)."""
+        """Chat endpoint (stub — acknowledges the message).
+
+        P7B Note: This is a legacy stub for backward compatibility.
+        The event-aware orchestrator chat is at POST /event/{event_id}/chat.
+        """
         print(f"[chat] Received message: {req.message}")
         return {
             "reply": f"Received: {req.message}. The orchestrator will process this."
         }
+
+    # ---------------------------------------------------------------------------
+    # P7B — Scope mutation endpoints
+    # ---------------------------------------------------------------------------
+
+    def _recompute_event(event_id: str) -> dict[str, Any]:
+        """Recompute budget and schedule after scope mutation.
+
+        This helper calls the deterministic engines on the current scope items,
+        preserving the budget/schedule invariants. Returns the updated snapshot.
+        """
+        producer: EventProducerApp = app.state.event_producer
+
+        # Fetch current state
+        scope_items = producer.event_store.get_scope(event_id)
+        event_spec = producer.event_store.get_event(event_id)
+        if not event_spec:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        # Recompute budget using existing engine (need budget_cap from stored budget)
+        existing_budget = producer.event_store.get_budget(event_id)
+        budget_cap = (
+            existing_budget.budget_cap if existing_budget
+            else Decimal("20000")  # fallback for demo
+        )
+
+        budget_request = {
+            "scope_items": [s.model_dump() for s in scope_items],
+            "budget_cap": budget_cap,
+            "contingency_pct": Decimal("15"),
+            "reporting_currency": "USD",
+        }
+        budget_raw = producer._budget_reason.run(budget_request)
+        budget_validated = producer._budget_formatter.run(budget_raw)
+        budget_summary = budget_validated["budget_summary"]
+        producer.event_store.save_budget(event_id, BudgetSummary(**budget_summary))
+
+        # Recompute schedule (best effort; may be None)
+        event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
+        start_time = event_date.replace(
+            hour=8, minute=0, second=0, tzinfo=timezone.utc,
+        ) - timedelta(days=30)
+
+        production_request = {
+            "event_spec": event_spec.model_dump(),
+            "scope_items": [s.model_dump() for s in scope_items],
+            "start_time": start_time.isoformat(),
+        }
+        production_raw = producer._production_reason.run(production_request)
+        production_validated = producer._production_formatter.run(production_raw)
+
+        schedule_result = None
+        call_sheet = []
+        if "schedule_result" in production_validated and production_validated["schedule_result"] is not None:
+            schedule_result = production_validated["schedule_result"]
+            if schedule_result is not None:
+                producer.event_store.save_schedule(event_id, schedule_result)
+
+        if "call_sheet" in production_validated:
+            call_sheet = list(production_validated["call_sheet"])
+
+        # Risk flags recompute (optional - for now return empty, can extend later)
+        # For P7B, we skip risk recompute to keep scope focused
+
+        return {
+            "scope_items": [s.model_dump() for s in scope_items],
+            "budget_summary": budget_summary,
+            "schedule_result": schedule_result.model_dump() if schedule_result else None,
+            "call_sheet": [c.model_dump() for c in call_sheet],
+        }
+
+    # P7B scope mutation uses a generic event_id parameter; the store is keyed by event_id.
+    # Using a query parameter for demo purposes (frontend drives event_id from last /run result).
+
+    @app.post("/event/{event_id}/scope-items")
+    async def add_scope_item(event_id: str, req: ScopeItemCreate) -> dict[str, Any]:
+        """Add a new scope item to an event and recompute budget."""
+        producer: EventProducerApp = app.state.event_producer
+
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        # Create ScopeItem from the request
+        new_item = ScopeItem(
+            name=req.name,
+            description=req.description,
+            category=req.category,
+            tier=req.tier,
+            estimated_cost=req.estimated_cost,
+            currency=req.currency,
+            qty=req.qty,
+            selected=req.selected,
+        )
+        scope.append(new_item)
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="add_scope_item",
+            actor="demo-user",
+            details=f"Added scope item '{req.name}' to event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    @app.patch("/event/{event_id}/scope-items/{item_id}")
+    async def update_scope_item(
+        event_id: str, item_id: str, req: ScopeItemUpdate
+    ) -> dict[str, Any]:
+        """Update an existing scope item and recompute budget."""
+        producer: EventProducerApp = app.state.event_producer
+
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        # Find and update the item by index (simplified for MVP)
+        # In a real system, ScopeItem would have its own ID; for now we use index
+        idx = int(item_id) if item_id.isdigit() else -1
+        if idx < 0 or idx >= len(scope):
+            raise HTTPException(status_code=404, detail="Scope item not found")
+
+        item = scope[idx]
+        update_data = req.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(item, field, value)
+
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="update_scope_item",
+            actor="demo-user",
+            details=f"Updated scope item '{item.name}' in event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    @app.delete("/event/{event_id}/scope-items/{item_id}")
+    async def delete_scope_item(event_id: str, item_id: str) -> dict[str, Any]:
+        """Delete a scope item and recompute budget."""
+        producer: EventProducerApp = app.state.event_producer
+
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        idx = int(item_id) if item_id.isdigit() else -1
+        if idx < 0 or idx >= len(scope):
+            raise HTTPException(status_code=404, detail="Scope item not found")
+
+        deleted_name = scope[idx].name
+        scope.pop(idx)
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="delete_scope_item",
+            actor="demo-user",
+            details=f"Deleted scope item '{deleted_name}' from event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    @app.post("/event/{event_id}/scope-items/{item_id}/toggle")
+    async def toggle_scope_item(event_id: str, item_id: str) -> dict[str, Any]:
+        """Toggle the selected flag on a scope item and recompute budget."""
+        producer: EventProducerApp = app.state.event_producer
+
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        idx = int(item_id) if item_id.isdigit() else -1
+        if idx < 0 or idx >= len(scope):
+            raise HTTPException(status_code=404, detail="Scope item not found")
+
+        scope[idx].selected = not scope[idx].selected
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="toggle_scope_item",
+            actor="demo-user",
+            details=f"Toggled scope item '{scope[idx].name}' in event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    @app.post("/event/{event_id}/scope-items/{item_id}/retier")
+    async def retier_scope_item(
+        event_id: str, item_id: str, req: dict
+    ) -> dict[str, Any]:
+        """Change the tier on a scope item and recompute budget."""
+        producer: EventProducerApp = app.state.event_producer
+
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        idx = int(item_id) if item_id.isdigit() else -1
+        if idx < 0 or idx >= len(scope):
+            raise HTTPException(status_code=404, detail="Scope item not found")
+
+        new_tier = req.get("tier", "could")
+        if new_tier not in ("must", "should", "could", "wow"):
+            raise HTTPException(status_code=422, detail="Invalid tier value")
+
+        scope[idx].tier = new_tier
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="retier_scope_item",
+            actor="demo-user",
+            details=f"Retiered scope item '{scope[idx].name}' to '{new_tier}' in event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    # ---------------------------------------------------------------------------
+    # P7B — Orchestrator chat and proposal application
+    # ---------------------------------------------------------------------------
+
+    @app.post("/event/{event_id}/chat")
+    async def orchestrator_chat(
+        event_id: str, req: OrchestratorChatRequest
+    ) -> OrchestratorChatResponse:
+        """Chat with the orchestrator; returns proposed actions, no mutation.
+
+        Proposals are stored server-side; the response includes the stored
+        proposal IDs for apply/dismiss operations.
+        """
+        producer: EventProducerApp = app.state.event_producer
+
+        # Fetch event context for the orchestrator
+        event_spec = producer.event_store.get_event(event_id)
+        scope_items = producer.event_store.get_scope(event_id)
+        budget_summary = producer.event_store.get_budget(event_id)
+
+        if not event_spec:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        # Build context for the orchestrator agent
+        context = {
+            "event_id": event_id,
+            "event_spec": event_spec.model_dump(),
+            "scope_items": [s.model_dump() for s in scope_items],
+            "budget_summary": budget_summary.model_dump() if budget_summary else None,
+        }
+
+        # The orchestrator agent returns proposed actions
+        result = producer._orchestrator.run(req.message, context)
+
+        # Store each proposed action as a Proposal object for apply/dismiss
+        stored_proposals: list[dict[str, Any]] = []
+        for pa in result.proposals:
+            # Convert ProposedAction to Proposal and store
+            prop = Proposal(
+                id=pa.id,
+                event_id=event_id,
+                title=pa.title,
+                rationale=pa.rationale,
+                proposed_actions=[pa],
+                status="pending",
+                created_at=pa.created_at or datetime.now(timezone.utc).isoformat(),
+                model_mode=pa.model_mode,
+                fallback_reason=result.fallback_reason,
+            )
+            producer.event_store.save_proposal(event_id, prop)
+            stored_proposals.append(pa.model_dump())
+
+        return OrchestratorChatResponse(
+            reply=result.reply,
+            proposals=stored_proposals,
+            model_mode=result.model_mode,
+            fallback_reason=result.fallback_reason,
+        )
+
+    @app.post("/event/{event_id}/proposals/{proposal_id}/apply")
+    async def apply_proposal(event_id: str, proposal_id: str) -> dict[str, Any]:
+        """Apply a pending proposal; mutates scope based on proposed actions."""
+        producer: EventProducerApp = app.state.event_producer
+
+        # Validate event exists
+        event_spec = producer.event_store.get_event(event_id)
+        if not event_spec:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        # Find the proposal
+        proposal = producer.event_store.get_proposal(event_id, proposal_id)
+        if not proposal:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if proposal.status != "pending":
+            raise HTTPException(status_code=409, detail="Proposal already applied or dismissed")
+
+        # Check for approval-gated actions in any proposed action
+        for action in proposal.proposed_actions:
+            if action.requires_approval_gate:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Proposal contains approval-gated action; use /approvals instead"
+                )
+
+        # Apply each action to scope
+        scope = producer.event_store.get_scope(event_id)
+        for action in proposal.proposed_actions:
+            if action.type == "add_scope_item":
+                payload = action.payload
+                new_item = ScopeItem(
+                    name=payload.get("name", "Unnamed"),
+                    description=payload.get("description", ""),
+                    category=payload.get("category", "other"),
+                    tier=payload.get("tier", "could"),
+                    estimated_cost=Decimal(str(payload.get("estimated_cost", "0"))),
+                    currency=payload.get("currency", "USD"),
+                    qty=Decimal(str(payload.get("qty", "1"))),
+                    selected=payload.get("selected", True),
+                )
+                scope.append(new_item)
+                producer.audit_log.log(
+                    action="apply_proposal_add",
+                    actor="demo-user",
+                    details=f"Applied proposal action {action.id}: added '{payload.get('name')}'",
+                    event_id=event_id,
+                )
+            elif action.type == "toggle_scope_item":
+                # For now, toggle by index or name; MVP uses name match
+                item_name = action.payload.get("name")
+                for item in scope:
+                    if item.name == item_name:
+                        item.selected = action.payload.get("selected", False)
+                        producer.audit_log.log(
+                            action="apply_proposal_toggle",
+                            actor="demo-user",
+                            details=f"Applied proposal action {action.id}: toggled '{item_name}'",
+                            event_id=event_id,
+                        )
+                        break
+
+        # Save updated scope and mark proposal as applied
+        producer.event_store.save_scope(event_id, scope)
+        proposal.status = "applied"
+        producer.event_store.save_proposal(event_id, proposal)
+
+        return _recompute_event(event_id)
+
+    @app.post("/event/{event_id}/proposals/{proposal_id}/dismiss")
+    async def dismiss_proposal(event_id: str, proposal_id: str) -> dict[str, Any]:
+        """Dismiss a pending proposal without mutation."""
+        producer: EventProducerApp = app.state.event_producer
+
+        event_spec = producer.event_store.get_event(event_id)
+        if not event_spec:
+            raise HTTPException(status_code=404, detail="Event not found")
+
+        proposal = producer.event_store.get_proposal(event_id, proposal_id)
+        if not proposal:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if proposal.status != "pending":
+            raise HTTPException(status_code=409, detail="Proposal already applied or dismissed")
+
+        proposal.status = "dismissed"
+        producer.event_store.save_proposal(event_id, proposal)
+        producer.audit_log.log(
+            action="dismiss_proposal",
+            actor="demo-user",
+            details=f"Dismissed proposal {proposal_id}",
+            event_id=event_id,
+        )
+
+        # Return current state unchanged
+        return {"proposal_id": proposal_id, "status": "dismissed"}
 
     return app

@@ -47,6 +47,7 @@ from event_producer.models.schemas import (
     ChatLogMessage,
     CreativeConceptResult,
     EventSpec,
+    Proposal,
     RiskFlag,
     RunOfShow,
     ScheduleResult,
@@ -84,6 +85,7 @@ class InMemoryEventStore(EventStore):
         self._messages: dict[str, list[VendorMessage]] = {}
         self._run_of_shows: dict[str, RunOfShow] = {}
         self._approvals: dict[str, list[Approval]] = {}
+        self._proposals: dict[str, list[Proposal]] = {}
 
     def save_event(self, event_id: str, event_spec: EventSpec) -> None:
         self._events[event_id] = event_spec
@@ -159,6 +161,30 @@ class InMemoryEventStore(EventStore):
 
     def get_approvals(self, event_id: str) -> list[Approval]:
         return list(self._approvals.get(event_id, []))
+
+    # -----------------------------------------------------------------------
+    # P7B — Proposal storage
+    # -----------------------------------------------------------------------
+
+    def save_proposal(self, event_id: str, proposal: Proposal) -> None:
+        """Persist a proposed action for an event."""
+        proposals = self._proposals.setdefault(event_id, [])
+        for i, p in enumerate(proposals):
+            if p.id == proposal.id:
+                proposals[i] = proposal
+                return
+        proposals.append(proposal)
+
+    def get_proposals(self, event_id: str) -> list[Proposal]:
+        """Retrieve all proposals for an event."""
+        return list(self._proposals.get(event_id, []))
+
+    def get_proposal(self, event_id: str, proposal_id: str) -> Proposal | None:
+        """Retrieve a single proposal by its ID."""
+        for p in self._proposals.get(event_id, []):
+            if p.id == proposal_id:
+                return p
+        return None
 
 
 class InMemoryVendorSourcer(VendorSourcer):

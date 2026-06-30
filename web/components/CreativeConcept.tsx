@@ -35,7 +35,20 @@ function IdeaCard({ idea }: { idea: { title: string; description: string; tier: 
   )
 }
 
-function SugCard({ s }: { s: { title: string; description: string; category: string; action_hint: string; rationale: string } }) {
+interface SugCardProps {
+  s: {
+    title: string
+    description: string
+    category: string
+    action_hint: string
+    rationale: string
+    estimated_cost?: string | null
+    tier?: string
+  }
+  onAddToScope?: (s: { title: string; description: string; category: string; estimated_cost?: string | null; tier?: string }) => void
+}
+
+function SugCard({ s, onAddToScope }: SugCardProps) {
   return (
     <div className="card card--inset sug-card">
       <div className="sug-card__head">
@@ -44,12 +57,28 @@ function SugCard({ s }: { s: { title: string; description: string; category: str
         <span className="chip">{s.category}</span>
       </div>
       <p className="sug-card__desc">{s.description}</p>
+      {s.estimated_cost && (
+        <p className="sug-card__cost">Estimated: ${s.estimated_cost}</p>
+      )}
       <p className="sug-card__why">{s.rationale}</p>
+      {onAddToScope && s.action_hint === 'add' && (
+        <button
+          onClick={() => onAddToScope(s)}
+          className="btn btn--primary btn--sm"
+          style={{ marginTop: 'var(--space-2)' }}
+        >
+          Add to scope
+        </button>
+      )}
     </div>
   )
 }
 
-export default function CreativeConcept({ concept }: Props) {
+interface CreativeConceptProps extends Props {
+  onAddToScope?: (s: { title: string; description: string; category: string; estimated_cost?: string | null; tier?: string }) => void
+}
+
+export default function CreativeConcept({ concept, onAddToScope }: CreativeConceptProps) {
   if (!concept) {
     return (
       <section
@@ -132,7 +161,11 @@ export default function CreativeConcept({ concept }: Props) {
           <h3 className="block__title">Suggested additions</h3>
           <div className="sugs">
             {additions.map((s) => (
-              <SugCard key={`add-${s.title}`} s={s} />
+              <SugCard
+                key={`add-${s.title}`}
+                s={s}
+                onAddToScope={onAddToScope}
+              />
             ))}
           </div>
         </div>
