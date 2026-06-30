@@ -368,3 +368,239 @@ class TestApprovals:
                 or conflict_report.get("cycle")
             )
             assert has_conflicts, "conflict_report must contain at least one conflict"
+
+
+# ---------------------------------------------------------------------------
+# P7A — agentic intake contract tests (no live Gemini; fallback / mocked)
+# ---------------------------------------------------------------------------
+
+
+class TestP7aAgenticIntake:
+    """P7A /run contract additions for the AI co-producer layer.
+
+    Unless explicitly enabled with a key, these run in fallback mode — which
+    is the honest, key-less demo path. The assertions therefore check
+    *telemetry* (mode recorded, security wall intact, determinism preserved)
+    rather than requiring Gemini-flavor output.
+    """
+
+    def _run(self, client: TestClient, body: dict) -> dict:
+        res = client.post("/run", json=body)
+        assert res.status_code == 200
+        return res.json()
+
+    def test_no_key_returns_fallback_mode(self, client: TestClient, monkeypatch) -> None:
+        """No key + ENABLE_LIVE_GEMINI unset -> both agents fall back."""
+        monkeypatch.delenv("ENABLE_LIVE_GEMINI", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        data = self._run(client, {"brief": "50-pax networking night. 20k budget."})
+        summary = data["model_mode_summary"]
+        assert summary["brief_intake"] == "rule_based_fallback"
+        assert summary["creative_concept"] == "rule_based_fallback"
+        assert summary["budget_manager"] == "deterministic_engine"
+        assert summary["production_manager"] == "deterministic_engine"
+        assert summary["vendor_coordinator"] == "human_approval_gate"
+        assert summary["security"] == "scripted_fixture"
+
+    def test_live_without_key_falls_back_with_reason(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """ENABLE_LIVE_GEMINI=true but missing key -> fallback with visible reason."""
+        monkeypatch.setenv("ENABLE_LIVE_GEMINI", "true")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        data = self._run(client, {"brief": "Small corporate dinner next Friday."})
+        assert data["model_mode_summary"]["brief_intake"] == "rule_based_fallback"
+        assert data["brief_intake"]["model_mode"] == "rule_based_fallback"
+        # fallback_reason is recorded (not silently dropped).
+        assert data["brief_intake"].get("fallback_reason") or data["agent_trace"][0].get(
+            "fallback_reason"
+        )
+
+    def test_mock_gemini_brief_intake_parses_into_schema(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """A live-mode provider returning valid JSON parses into BriefIntakeResult and appears in /run."""
+        from event_producer.agents import brief_intake as brief_mod
+        from event_producer.providers.agent_model import AgentModelResult
+
+        fake_parsed = brief_mod.BriefIntakeResult(
+            normalized_brief="mocked brief",
+            event_type="networking",
+            attendees=30,
+            budget_cap="15000",
+            goals=["network"],
+            confidence="medium",
+            model_mode="gemini_live",
+        )
+
+        class _FakeGemini:
+            def generate_structured(self, **_kw):
+                return AgentModelResult(
+                    parsed=fake_parsed,
+                    raw_text=fake_parsed.model_dump_json(),
+                    model_mode="gemini_live",
+                    model_name="gemini-2.5-flash",
+                    fallback_reason=None,
+                    error=None,
+                )
+
+        # Force live env and swap provider at the app object.
+        monkeypatch.setenv("ENABLE_LIVE_GEMINI", "true")
+        monkeypatch.setenv("GEMINI_API_KEY", "mock-key")
+        producer = client.app.state.event_producer  # type: ignore[attr-defined]
+        producer._agent_model = _FakeGemini()
+        producer._brief_intake_reason = brief_mod.BriefIntakeReasonAgent(provider=_FakeGemini())
+
+        data = self._run(client, {"brief": "mocked", "event_type": "networking"})
+        assert data["brief_intake"]["event_type"] == "networking"
+        assert data["brief_intake"]["attendees"] == 30
+
+    def test_mock_gemini_creative_concept_parses(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """A live-mode provider returning creative JSON appears in /run.creative_concept."""
+        from event_producer.agents import creative_concept as creative_mod
+        from event_producer.providers.agent_model import AgentModelResult
+
+        fake_parsed = creative_mod.CreativeConceptResult(
+            event_title_options=["Option A"],
+            concept_summary="A mocked concept",
+            creative_ideas=[
+                creative_mod.CreativeIdea(
+                    title="Idea",
+                    description="desc",
+                    why_it_fits="fits",
+                    estimated_complexity="low",
+                    budget_pressure="low",
+                    tier="should",
+                )
+            ],
+            model_mode="gemini_live",
+        )
+
+        class _FakeGemini:
+            def generate_structured(self, **_kw):
+                return AgentModelResult(
+                    parsed=fake_parsed,
+                    raw_text=fake_parsed.model_dump_json(),
+                    model_mode="gemini_live",
+                    model_name="gemini-2.5-flash",
+                    fallback_reason=None,
+                    error=None,
+                )
+
+        monkeypatch.setenv("ENABLE_LIVE_GEMINI", "true")
+        monkeypatch.setenv("GEMINI_API_KEY", "mock-key")
+        producer = client.app.state.event_producer  # type: ignore[attr-defined]
+        producer._agent_model = _FakeGemini()
+        producer._creative_reason = creative_mod.CreativeConceptReasonAgent(provider=_FakeGemini())
+
+        data = self._run(client, {"brief": "mocked", "event_type": "networking"})
+        assert data["creative_concept"]["concept_summary"] == "A mocked concept"
+        assert data["creative_concept"]["model_mode"] == "gemini_live"
+
+    def test_invalid_provider_output_does_not_crash(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """Live-mode provider returning garbage -> no 500; fallback / structured error path used."""
+        from event_producer.providers.agent_model import AgentModelResult
+
+        class _Broken:
+            def generate_structured(self, **_kw):
+                # Simulates invalid-model-output: no parseable schema, with an error.
+                return AgentModelResult(
+                    parsed=None,
+                    raw_text="<<< totally not json >>>",
+                    model_mode="rule_based_fallback",
+                    model_name="gemini-2.5-flash",
+                    fallback_reason="could not parse JSON from Gemini output",
+                    error="could not parse JSON from Gemini output",
+                )
+
+        monkeypatch.setenv("ENABLE_LIVE_GEMINI", "true")
+        monkeypatch.setenv("GEMINI_API_KEY", "mock-key")
+        producer = client.app.state.event_producer  # type: ignore[attr-defined]
+        producer._agent_model = _Broken()
+        producer._brief_intake_reason._provider = _Broken()
+
+        res = client.post("/run", json={"brief": "networking thing"})
+        assert res.status_code == 200
+        data = res.json()
+        # pipeline still produced budget/schedule results.
+        assert data["budget_summary"] is not None
+        assert data["schedule_result"] is not None
+
+    def test_trace_includes_model_mode_fields(self, client: TestClient, monkeypatch) -> None:
+        """Every trace step exposes model_mode/model_name/prompt_version/fallback_reason."""
+        monkeypatch.delenv("ENABLE_LIVE_GEMINI", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        data = self._run(client, {"brief": "Anything"})
+        trace = data["agent_trace"]
+        assert trace, "expected non-empty agent trace"
+        for step in trace:
+            assert "model_mode" in step
+            assert "model_name" in step
+            assert "prompt_version" in step
+            assert "fallback_reason" in step
+
+    def test_budget_and_schedule_remain_deterministic(
+        self, client: TestClient, monkeypatch
+    ) -> None:
+        """Default /run still reconciles budget to zero and produces a non-empty schedule."""
+        monkeypatch.delenv("ENABLE_LIVE_GEMINI", raising=False)
+        from decimal import Decimal
+
+        data = self._run(
+            client,
+            {
+                "brief": "Networking event",
+                "budget_cap": "50000",
+                "contingency_pct": "15",
+                "attendees": 200,
+                "event_type": "networking",
+                "venue_type": "indoor",
+                "date": "2026-08-15",
+            },
+        )
+        bs = data["budget_summary"]
+        assert Decimal(bs["budget_cap"]) - Decimal(bs["contingency_reserve"]) - Decimal(
+            bs["spendable"]
+        ) == Decimal("0")
+        sr = data["schedule_result"]
+        assert sr is not None
+        assert len(sr["ordered_tasks"]) > 0
+
+    def test_approval_security_wall_preserved(self, client: TestClient, monkeypatch) -> None:
+        """The security beat still reports no external action + no state mutation."""
+        monkeypatch.delenv("ENABLE_LIVE_GEMINI", raising=False)
+        data = self._run(client, {"brief": "Anything"})
+        sb = data["security_beat"]
+        assert sb["external_action_executed"] is False
+        assert sb["state_mutation_executed"] is False
+        assert sb["approval_required"] is True
+        # And approvals keep a pending gate (vendor draft behind human approval).
+        assert any(a["status"] == "pending" for a in data["approvals"])
+
+    def test_legacy_contract_still_supported(self, client: TestClient, monkeypatch) -> None:
+        """The legacy 7-field /run shape keeps working exactly as before."""
+        monkeypatch.delenv("ENABLE_LIVE_GEMINI", raising=False)
+        body = {
+            "brief": "Networking event for industry professionals",
+            "budget_cap": "50000",
+            "contingency_pct": "15",
+            "attendees": 200,
+            "event_type": "networking",
+            "venue_type": "indoor",
+            "date": "2026-08-15",
+        }
+        data = self._run(client, body)
+        for key in (
+            "event_id",
+            "event_spec",
+            "scope_items",
+            "budget_summary",
+            "schedule_result",
+            "risk_flags",
+            "run_of_show",
+        ):
+            assert key in data

@@ -80,6 +80,12 @@ export default function EventCommandHeader({
             <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
               {eventName}
             </h1>
+            <p
+              className="header__sub"
+              style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}
+            >
+              Constraints / manual overrides — optional
+            </p>
             {running && (
               <p className="header__meta" style={{ marginTop: 'var(--space-1)' }}>
                 {eventType} &middot; {eventDate} &middot; {headcount} attendees &middot; {venue}
@@ -93,7 +99,7 @@ export default function EventCommandHeader({
             className={`btn btn--primary ${loading ? 'loading-pulse' : ''}`}
             aria-label={running ? 'Re-run event' : 'Run event'}
           >
-            {loading ? 'Running...' : running ? 'Re-run' : 'Run Event'}
+            {loading ? 'Running...' : running ? 'Re-run' : 'Update constraints'}
           </button>
         </div>
       </div>
@@ -105,9 +111,14 @@ export default function EventCommandHeader({
           style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-4) var(--space-6)' }}
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-3)' }}>
-            {/* Brief */}
+            {/* Brief — mirrors the intake hero above (kept for compact edits) */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Brief</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Brief{' '}
+                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                  (primary input is above)
+                </span>
+              </span>
               <input
                 type="text"
                 value={formData.brief}

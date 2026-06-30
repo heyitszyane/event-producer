@@ -144,15 +144,17 @@ class TestP6dDefaultDemoContract:
         trace = default_run_response.get("agent_trace", [])
         assert len(trace) > 0
 
-    def test_agent_trace_has_5_roles(self, default_run_response: dict) -> None:
-        """agent_trace has exactly 5 role steps."""
+    def test_agent_trace_has_7_roles(self, default_run_response: dict) -> None:
+        """P7A: agent_trace has exactly 7 role steps (added Brief Intake + Creative Concept)."""
         trace = default_run_response.get("agent_trace", [])
-        assert len(trace) == 5
+        assert len(trace) == 7
 
     def test_agent_trace_required_roles(self, default_run_response: dict) -> None:
-        """agent_trace contains all required role names."""
+        """P7A: agent_trace contains all required role names, including the two AI agents."""
         trace = default_run_response.get("agent_trace", [])
         roles = {step["role"] for step in trace}
+        assert "Brief Intake Agent" in roles
+        assert "Creative Concept Agent" in roles
         assert "Brief/Scope Agent" in roles
         assert "Budget Manager" in roles
         assert "Production Manager" in roles
@@ -245,12 +247,33 @@ class TestP6dDefaultDemoContract:
         data = response.json()
         assert len(data["scope_items"]) > 0
 
-    def test_invalid_payload_returns_error(self, client: TestClient) -> None:
-        """Invalid payload returns useful error envelope."""
-        # Missing required fields — FastAPI/Pydantic returns 422
+    def test_brief_only_payload_succeeds(self, client: TestClient) -> None:
+        """P7A: a brief-only payload succeeds (constraint fields are optional, with safe fallback)."""
+        # The constraint fields are now optional — a prompt is the primary product
+        # input. The backend resolves missing fields with safe fallbacks + model
+        # extraction and surfaces the gaps in brief_intake.missing_questions.
         body = {
-            "brief": "Test event",
+            "brief": (
+                "Need a 50-pax AI founder networking night in Singapore in two months. "
+                "Budget around 20k. Premium but not flashy, light F&B, no full conference."
+            ),
         }
         response = client.post("/run", json=body)
-        # Should return 422 for validation error
+        assert response.status_code == 200
+        data = response.json()
+        assert data["brief_intake"]["event_type"] == "networking"
+        # model_mode is recorded (fallback in test env) + security wall preserved
+        assert "creative_concept" in data
+        assert "model_mode_summary" in data
+        assert data["security_beat"]["external_action_executed"] is False
+
+    def test_invalid_payload_returns_error(self, client: TestClient) -> None:
+        """P7A: an empty/missing brief is still rejected with a clear 422.
+
+        ``brief`` remains the one required field; a payload that omits it is a
+        genuine schema violation and is not silently filled.
+        """
+        body: dict = {}
+        response = client.post("/run", json=body)
+        # Empty/missing brief -> FastAPI/Pydantic 422.
         assert response.status_code == 422

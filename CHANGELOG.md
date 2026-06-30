@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7A — Agentic intake + live Gemini provider seam + model-mode telemetry
+
+Moves Event Producer from a form-first deterministic dashboard to a real,
+cloneable AI co-producer surface, while preserving the deterministic core and
+the structural approval-gate.
+
+#### AI intake pipeline (read-only / extractive in front of the engines)
+- `Brief Intake Agent` interprets a messy brief: requirements, assumptions,
+  missing questions, contradictions, market-realism warnings, confidence. Does
+  **not** invent money-critical or schedule-critical values silently.
+- `Creative Concept Agent` proposes an event direction + ideas + suggested
+  additions/cuts as **advisory only** — proposals do not mutate scope/budget/
+  schedule in P7A (P7B applies them).
+- Cooperation model: `user constraint > model extraction > safe fallback`,
+  gaps surfaced in `brief_intake.missing_questions`.
+
+#### Server-side Gemini provider seam
+- New `event_producer/providers/` seam: `model_env`, `agent_model` (protocol),
+  `gemini_model` (lazy, server-side, key-gated), `fallback_model` (honest,
+  never claims to be Gemini), `router`.
+- `google-genai==2.10.0` added, imported lazily, read only server-side.
+- Honest mode reporting: the agent trace per-step `model_mode` / `fallback_reason`
+  + `model_mode_summary`; the UI shows live vs fallback vs deterministic vs
+  approval-gated badges.
+
+#### Frontend reframe
+- Messy-brief `IntakeHero` as the primary surface; structured fields relabeled
+  "Constraints / manual overrides" (optional).
+- New `ExtractedRequirements` + `CreativeConcept` read-only panels; `AgentCrewTrace`
+  now renders model-mode badges. No "Add to scope" control (P7B).
+
+#### Docs
+- Added `.env.example`; updated README with the new live-Gemini setup, deferred
+  list, env table, and expected output (7-step trace + `model_mode_summary`).
+
 ## [0.7.0] - 2026-06-22
 
 ### P6C–P6F Rescue Sequence + P6G Docs/Submission Hardening

@@ -13,6 +13,10 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
+from event_producer.agents.brief_intake import (
+    BriefIntakeFormatterAgent,
+    BriefIntakeReasonAgent,
+)
 from event_producer.agents.brief_scope import (
     BriefScopeFormatterAgent,
     BriefScopeReasonAgent,
@@ -20,6 +24,10 @@ from event_producer.agents.brief_scope import (
 from event_producer.agents.budget_manager import (
     BudgetManagerFormatterAgent,
     BudgetManagerReasonAgent,
+)
+from event_producer.agents.creative_concept import (
+    CreativeConceptFormatterAgent,
+    CreativeConceptReasonAgent,
 )
 from event_producer.agents.orchestrator import OrchestratorAgent
 from event_producer.agents.production_manager import (
@@ -34,8 +42,10 @@ from event_producer.agents.vendor_coordinator import (
 from event_producer.models.schemas import (
     AgentTraceStep,
     Approval,
+    BriefIntakeResult,
     BudgetSummary,
     ChatLogMessage,
+    CreativeConceptResult,
     EventSpec,
     RiskFlag,
     RunOfShow,
@@ -45,6 +55,8 @@ from event_producer.models.schemas import (
     VendorMessage,
 )
 from event_producer.providers.event_store import EventStore
+from event_producer.providers.model_env import ModelEnv
+from event_producer.providers.model_router import build_agent_model
 from event_producer.providers.rate_card import FxRateProvider, StaticFxRateProvider
 from event_producer.providers.vendor_sourcer import VendorSourcer
 from event_producer.security.audit_log import AuditLog
@@ -231,12 +243,23 @@ class EventProducerApp:
     brief to run-of-show.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        env: ModelEnv | None = None,
+    ) -> None:
         # --- Providers ---
         self._event_store = InMemoryEventStore()
         self._vendor_sourcer = InMemoryVendorSourcer()
         self._fx_provider: FxRateProvider = StaticFxRateProvider()
         self._audit_log = AuditLog()
+
+        # --- P7A: provider seam (Gemini live vs deterministic fallback) ---
+        self._model_env: ModelEnv = env if env is not None else ModelEnv.from_env()
+        self._agent_model = build_agent_model(self._model_env)
+        self._brief_intake_reason = BriefIntakeReasonAgent(provider=self._agent_model)
+        self._brief_intake_formatter = BriefIntakeFormatterAgent()
+        self._creative_reason = CreativeConceptReasonAgent(provider=self._agent_model)
+        self._creative_formatter = CreativeConceptFormatterAgent()
 
         # --- Agents: Brief/Scope ---
         self._brief_scope_reason = BriefScopeReasonAgent(event_store=self._event_store)
@@ -286,53 +309,232 @@ class EventProducerApp:
     def run_event(
         self,
         brief: str,
-        budget_cap: str,
-        contingency_pct: str,
-        attendees: int,
-        event_type: str,
-        venue_type: str,
-        date: str,
+        budget_cap: str | None = None,
+        contingency_pct: str | None = None,
+        attendees: int | None = None,
+        event_type: str | None = None,
+        venue_type: str | None = None,
+        date: str | None = None,
     ) -> dict:
         """Run the full event production pipeline.
 
-        Steps:
-            1. Brief/Scope — parse brief, propose scope items
-            2. Budget — reconcile budget to zero
-            3. Production — compute run-of-show schedule
-            4. Vendor — draft a sample vendor RFP + create pending approval
-            5. Risk — flag risks and gaps
-            6. Compose — assemble into a RunOfShow
+        P7A pipeline:
+            0. Brief Intake Agent interprets the messy brief -> ``brief_intake``.
+            1. Resolve the *structured request*: user-provided constraint fields win
+               over model-extracted values; safe server-side fallbacks fill the
+               remaining gaps only where the deterministic engines require them.
+            2. Creative Concept Agent produces advisory proposals
+               (``creative_concept``). Proposals do NOT mutate scope/budget/
+               schedule in P7A — that's P7B.
+            3. Brief/Scope, Budget, Production, Vendor, Risk run as before on the
+               **resolved** structured request, so determinism + the budget/schedule
+               invariants are preserved.
+            4. Compose RunOfShow + model_mode_summary.
 
         Args:
-            brief: Raw event description.
-            budget_cap: Maximum budget as a string (e.g. "50000").
-            contingency_pct: Contingency percentage as a string (e.g. "15").
-            attendees: Expected number of attendees.
-            event_type: One of "networking", "product_launch", "conference",
-                "corporate".
-            venue_type: Venue description (e.g. "indoor", "outdoor").
-            date: Event date in YYYY-MM-DD format.
+            brief: Required primary input — the raw/messy event description.
+            budget_cap: Optional override (e.g. "50000"). Wins over extraction.
+            contingency_pct: Optional override (e.g. "15").
+            attendees: Optional override — expected headcount.
+            event_type: Optional override (networking / product_launch /
+                conference / corporate).
+            venue_type: Optional override (indoor / outdoor / ...).
+            date: Optional override in YYYY-MM-DD.
 
         Returns:
-            A dict with keys: event_id, event_spec, scope_items, budget_summary,
-            schedule_result, conflict_report, call_sheet, risk_flags, vendor_draft,
-            run_of_show, agent_trace, chat_log, approvals, security_beat.
+            A dict with all legacy keys (event_id, event_spec, scope_items,
+            budget_summary, schedule_result, conflict_report, call_sheet,
+            risk_flags, vendor_draft, run_of_show, agent_trace, chat_log,
+            approvals, security_beat) plus the P7A keys: model_mode_summary,
+            brief_intake, creative_concept.
         """
         event_id = str(uuid.uuid4())
         agent_trace: list[AgentTraceStep] = []
         chat_log: list[ChatLogMessage] = []
         approvals: list[Approval] = []
+        model_mode_summary: dict[str, str] = {}
+
+        # ------------------------------------------------------------------
+        # Step 0 (P7A): Brief Intake — interpret the messy brief.
+        # Read-only / extractive. Does NOT touch scope/budget/schedule.
+        # ------------------------------------------------------------------
+        brief_intake_raw = self._brief_intake_reason.run(brief)
+        brief_intake: BriefIntakeResult = self._brief_intake_formatter.run(
+            provider_text=brief_intake_raw["provider_text"],
+            brief=brief,
+            model_mode=brief_intake_raw["model_mode"],
+            fallback_reason=brief_intake_raw.get("fallback_reason"),
+        )
+
+        input_summary = (brief or "").strip().replace("\n", " ")[:200]
+        agent_trace.append(AgentTraceStep(
+            id="trace-brief-intake",
+            role="Brief Intake Agent",
+            label="Interpreted messy brief and extracted requirements",
+            status="warning" if brief_intake.missing_questions else "complete",
+            input_summary=f"Raw brief ({len(brief)} chars): \"{input_summary}\"",
+            output_summary=(
+                f"event_type={brief_intake.event_type or 'unknown'}, "
+                f"attendees={brief_intake.attendees}, "
+                f"budget_cap={brief_intake.budget_cap}, "
+                f"confidence={brief_intake.confidence}, "
+                f"missing={len(brief_intake.missing_questions)}, "
+                f"contradictions={len(brief_intake.contradictions)}"
+            ),
+            artifacts=["brief_intake"],
+            deterministic_core=None,
+            approval_required=False,
+            model_mode=brief_intake_raw["model_mode"],
+            model_name=brief_intake_raw.get("model_name"),
+            prompt_version=brief_intake_raw.get("prompt_version"),
+            fallback_reason=brief_intake_raw.get("fallback_reason"),
+            confidence=brief_intake.confidence,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Brief Intake Agent",
+            content=(
+                f"Interpreted brief. event_type={brief_intake.event_type or 'unknown'}, "
+                f"confidence={brief_intake.confidence}. "
+                f"{len(brief_intake.missing_questions)} open questions, "
+                f"{len(brief_intake.market_realism_warnings)} realism warnings."
+            ),
+        ))
+        # model_mode_summary reflects the *actual* mode of each step. The
+        # deterministic-engine, approval-gated, and scripted-fixture steps are
+        # constant by construction (they never hit the LLM), so they are fixed;
+        # only the two AI-agent modes are dynamic.
+        model_mode_summary["brief_intake"] = brief_intake.model_mode
+        model_mode_summary["creative_concept"] = "rule_based_fallback"  # set below after creative runs
+        model_mode_summary["budget_manager"] = "deterministic_engine"
+        model_mode_summary["production_manager"] = "deterministic_engine"
+        model_mode_summary["vendor_coordinator"] = "human_approval_gate"
+        model_mode_summary["security"] = "scripted_fixture"
+
+        # ------------------------------------------------------------------
+        # Step 0.5 (P7A): resolve structured request.
+        # Explicit user constraint > model extraction > SECURE FALLBACK.
+        # Fallbacks are chosen conservatively and only where the deterministic
+        # engines actually require them; gaps are reported via brief_intake
+        # (missing_questions + assumptions), never silently fabricated.
+        # ------------------------------------------------------------------
+        resolved_attendees = (
+            attendees
+            if attendees is not None
+            else brief_intake.attendees
+            if brief_intake.attendees is not None
+            else 50  # safe fallback for the engines (catalogue scales per-head)
+        )
+        resolved_budget_cap = (
+            budget_cap
+            if budget_cap is not None
+            else brief_intake.budget_cap
+            if brief_intake.budget_cap is not None
+            else "20000"
+        )
+        resolved_contingency_pct = (
+            contingency_pct
+            if contingency_pct is not None
+            else brief_intake.contingency_pct
+            if brief_intake.contingency_pct is not None
+            else "15"
+        )
+        resolved_event_type = (
+            event_type
+            if event_type is not None
+            else brief_intake.event_type
+            if brief_intake.event_type
+            else ""
+        )
+        resolved_venue_type = (
+            venue_type
+            if venue_type is not None
+            else brief_intake.venue_type
+            if brief_intake.venue_type is not None
+            else "indoor"
+        )
+        resolved_date = (
+            date
+            if date is not None
+            else brief_intake.date
+            if brief_intake.date is not None
+            else (datetime.now(timezone.utc) + timedelta(days=45)).strftime("%Y-%m-%d")
+        )
+
+        # If we fell back on a field that wasn't extracted, record it in the
+        # intake assumptions so the UI shows we did NOT fabricate confidently.
+        if (attendees is None and brief_intake.attendees is None
+                and len(brief_intake.assumptions) < 6):
+            brief_intake.assumptions.append(
+                "No attendees specified; using a default of 50 pax for costing."
+            )
+        if (budget_cap is None and brief_intake.budget_cap is None
+                and "Using a default budget of 20000 for costing."
+                not in brief_intake.assumptions):
+            brief_intake.assumptions.append(
+                "No budget cap specified; using a default of 20000 for costing."
+            )
+
+        # ------------------------------------------------------------------
+        # Step 0.6 (P7A): Creative Concept (advisory only).
+        # ------------------------------------------------------------------
+        creative_raw = self._creative_reason.run(brief=brief, intake=brief_intake)
+        creative: CreativeConceptResult = self._creative_formatter.run(
+            provider_text=creative_raw["provider_text"],
+            intake=brief_intake,
+            model_mode=creative_raw["model_mode"],
+            fallback_reason=creative_raw.get("fallback_reason"),
+            event_type=resolved_event_type,
+            goals=brief_intake.goals,
+            attendees=resolved_attendees,
+            budget_cap=resolved_budget_cap,
+        )
+        agent_trace.append(AgentTraceStep(
+            id="trace-creative-concept",
+            role="Creative Concept Agent",
+            label="Proposed creative direction + advisory ideas",
+            status="complete",
+            input_summary=(
+                f"event_type={resolved_event_type or 'unknown'}, "
+                f"attendees={resolved_attendees}, budget_cap={resolved_budget_cap}"
+            ),
+            output_summary=(
+                f"{len(creative.event_title_options)} titles, "
+                f"{len(creative.creative_ideas)} ideas, "
+                f"{len(creative.suggested_additions)} adds, "
+                f"{len(creative.suggested_cuts_or_reductions)} cuts"
+            ),
+            artifacts=["creative_concept"],
+            deterministic_core=None,
+            approval_required=False,
+            model_mode=creative_raw["model_mode"],
+            model_name=creative_raw.get("model_name"),
+            prompt_version=creative_raw.get("prompt_version"),
+            fallback_reason=creative_raw.get("fallback_reason"),
+            confidence=None,
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Creative Concept Agent",
+            content=(
+                f"Proposed direction: {creative.concept_summary}. "
+                f"{len(creative.creative_ideas)} ideas; add {len(creative.suggested_additions)}, "
+                f"cut {len(creative.suggested_cuts_or_reductions)}. Advisory only (P7A)."
+            ),
+        ))
+        model_mode_summary["creative_concept"] = creative.model_mode
+        # (creative_concept key was preview-set above; overwrite with the real mode.)
 
         # ------------------------------------------------------------------
         # Step 1: Brief / Scope
         # ------------------------------------------------------------------
         brief_request = {
             "brief": brief,
-            "budget_cap": budget_cap,
-            "attendees": attendees,
-            "event_type": event_type,
-            "venue_type": venue_type,
-            "date": date,
+            "budget_cap": resolved_budget_cap,
+            "attendees": resolved_attendees,
+            "event_type": resolved_event_type,
+            "venue_type": resolved_venue_type,
+            "date": resolved_date,
         }
         brief_raw = self._brief_scope_reason.run(brief_request)
         brief_validated = self._brief_scope_formatter.run(brief_raw)
@@ -350,11 +552,18 @@ class EventProducerApp:
             role="Brief/Scope Agent",
             label="Parsed event brief and proposed initial scope",
             status="complete",
-            input_summary=f"{brief}, {attendees} attendees, ${budget_cap} cap, {venue_type} {event_type} setting",
+            input_summary=(
+                f"{brief}, {resolved_attendees} attendees, ${resolved_budget_cap} cap, "
+                f"{resolved_venue_type} {resolved_event_type} setting"
+            ),
             output_summary=f"Created event identity and must/should/could scope tiers ({len(scope_items)} items)",
             artifacts=["event_spec", "scope_items"],
             deterministic_core=None,
             approval_required=False,
+            model_mode="rule_based_fallback",
+            model_name="scope-catalogue",
+            prompt_version="scope_v1",
+            fallback_reason=None,
         ))
         chat_log.append(ChatLogMessage(
             role="system",
@@ -372,8 +581,8 @@ class EventProducerApp:
         # ------------------------------------------------------------------
         budget_request = {
             "scope_items": brief_validated["scope_items"],
-            "budget_cap": budget_cap,
-            "contingency_pct": contingency_pct,
+            "budget_cap": resolved_budget_cap,
+            "contingency_pct": resolved_contingency_pct,
             "reporting_currency": "USD",
         }
         budget_raw = self._budget_reason.run(budget_request)
@@ -390,11 +599,15 @@ class EventProducerApp:
             role="Budget Manager",
             label="Costed scope through Budget Engine",
             status="complete",
-            input_summary=f"Scope items and ${budget_cap} budget cap with {contingency_pct}% contingency",
+            input_summary=f"Scope items and ${resolved_budget_cap} budget cap with {resolved_contingency_pct}% contingency",
             output_summary="Reserved contingency, computed spendable budget, rollups, and headroom",
             artifacts=["budget_summary"],
             deterministic_core="Budget Engine",
             approval_required=False,
+            model_mode="deterministic_engine",
+            model_name="budget_engine",
+            prompt_version=None,
+            fallback_reason=None,
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -455,6 +668,10 @@ class EventProducerApp:
             artifacts=["run_of_show"],
             deterministic_core="CPM Scheduler",
             approval_required=False,
+            model_mode="deterministic_engine",
+            model_name="cpm_scheduler",
+            prompt_version=None,
+            fallback_reason=None,
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -506,6 +723,10 @@ class EventProducerApp:
             artifacts=["vendors", "approvals"],
             deterministic_core=None,
             approval_required=True,
+            model_mode="human_approval_gate",
+            model_name=None,
+            prompt_version=None,
+            fallback_reason=None,
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -540,6 +761,10 @@ class EventProducerApp:
             artifacts=["risks", "security_events"],
             deterministic_core="Action Gate",
             approval_required=False,
+            model_mode="scripted_fixture",
+            model_name="security-fixture",
+            prompt_version=None,
+            fallback_reason=None,
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -668,6 +893,10 @@ class EventProducerApp:
             "chat_log": [msg.model_dump() for msg in chat_log],
             "approvals": [a.model_dump() for a in approvals],
             "security_beat": security_beat,
+            # P7A additions --------------------------------------------------
+            "model_mode_summary": model_mode_summary,
+            "brief_intake": brief_intake.model_dump(),
+            "creative_concept": creative.model_dump(),
         }
 
 

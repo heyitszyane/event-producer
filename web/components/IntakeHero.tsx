@@ -1,0 +1,70 @@
+import { type FormEvent } from 'react'
+
+const EXAMPLE_BRIEF = [
+  'Need a 50-pax AI founder networking night in Singapore next Thursday.',
+  'Budget is around 20k. Want premium but not flashy, light F&B,',
+  'maybe a short fireside chat, no full conference setup.',
+  'Need it to feel credible for investors and builders.',
+].join(' ')
+
+interface IntakeHeroProps {
+  brief: string
+  onBriefChange: (v: string) => void
+  onSubmit: (e: FormEvent) => void
+  loading: boolean
+  hasRun: boolean
+}
+
+export default function IntakeHero({
+  brief,
+  onBriefChange,
+  onSubmit,
+  loading,
+  hasRun,
+}: IntakeHeroProps) {
+  return (
+    <section
+      className="card intake-hero"
+      id="intake"
+      aria-labelledby="intake-heading"
+    >
+      <div className="card__header">
+        <h2 id="intake-heading">Co-produce an event from a messy brief</h2>
+        <span className="badge badge--info">AI Production Crew</span>
+      </div>
+
+      <form onSubmit={onSubmit} className="intake-hero__form">
+        <textarea
+          className="input intake-hero__textarea"
+          value={brief}
+          onChange={(e) => onBriefChange(e.target.value)}
+          placeholder="Describe your event — rough is fine. The crew will interpret the ambiguity."
+          rows={5}
+          aria-label="Event brief"
+        />
+        <div className="intake-hero__actions">
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => onBriefChange(EXAMPLE_BRIEF)}
+            disabled={loading}
+            aria-label="Load an example brief"
+          >
+            Try example
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !brief.trim()}
+            className={`btn btn--primary ${loading ? 'loading-pulse' : ''}`}
+          >
+            {loading
+              ? 'Analyzing…'
+              : hasRun
+              ? 'Re-analyze with AI Production Crew'
+              : 'Analyze with AI Production Crew'}
+          </button>
+        </div>
+      </form>
+    </section>
+  )
+}

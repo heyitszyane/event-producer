@@ -23,6 +23,24 @@ ISO_4217_ALLOWLIST: frozenset[str] = frozenset({
 
 _TIER_LITERAL = Literal["must", "should", "could", "wow"]
 
+# P7A — agent / model mode taxonomy used across the crew trace.
+AgentMode = Literal[
+    "gemini_live",
+    "rule_based_fallback",
+    "deterministic_engine",
+    "scripted_fixture",
+    "human_approval_gate",
+    "not_enabled",
+]
+
+_AGENT_STATUS = Literal[
+    "complete",
+    "warning",
+    "blocked",
+    "pending_approval",
+    "error",
+]
+
 
 # ---------------------------------------------------------------------------
 # Validators (reusable helpers)
@@ -627,8 +645,11 @@ class RunOfShow(BaseModel):
 class AgentTraceStep(BaseModel):
     """A single step in the agent crew trace.
 
-    This is a structural trace of actual rule-based role-agent steps.
-    It is NOT a live LLM reasoning transcript.
+    This is a structural trace of actual rule-based role-agent steps, plus
+    (P7A) the surface used by the live/fallback AI intake agents. It is NOT a
+    verbatim LLM reasoning transcript. The P7A fields are optional with safe
+    defaults so older serialized traces and existing call sites behave
+    unchanged.
     """
 
     model_config = ConfigDict(strict=True)
@@ -636,12 +657,24 @@ class AgentTraceStep(BaseModel):
     id: str
     role: str
     label: str
-    status: Literal["complete", "warning", "blocked", "pending_approval"]
+    status: _AGENT_STATUS = "complete"
     input_summary: str
     output_summary: str
     artifacts: list[str] = Field(default_factory=list)
     deterministic_core: str | None = None
     approval_required: bool = False
+
+    # --- P7A: model-mode telemetry (optional, safe defaults) ----------------
+    """Which model surface actually produced this step's output."""
+    model_mode: AgentMode = "rule_based_fallback"
+    """Concrete model id/name reported by the provider, when known."""
+    model_name: str | None = None
+    """Prompt asset version used by the agent (e.g. "brief_intake.v1")."""
+    prompt_version: str | None = None
+    """If the provider did NOT run live Gemini, why."""
+    fallback_reason: str | None = None
+    """Agent-reported confidence in its extraction/signal ("high"/"medium"/"low" or None)."""
+    confidence: str | None = None
 
 
 class ChatLogMessage(BaseModel):
@@ -652,3 +685,129 @@ class ChatLogMessage(BaseModel):
     role: str
     content: str
     agent: str = ""
+
+
+# ---------------------------------------------------------------------------
+# P7A — AI intake + creative concept typed results
+# ---------------------------------------------------------------------------
+
+
+class BriefIntakeResult(BaseModel):
+    """Output of the Brief Intake Agent.
+
+    The agent extracts a structured picture from a messy human brief. It NEVER
+    invents money-critical or schedule-critical values silently; missing or
+    uncertain information is surfaced via ``missing_questions``,
+    ``assumptions``, and ``confidence`` instead. Budget/schedule math is left to
+    the deterministic engines.
+    """
+
+    # tolerate model-supplied extra/verbose keys rather than dropping the whole
+    # parse; the structured fields are what we render.
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    normalized_brief: str
+    event_type: str
+    event_type_raw: str | None = None
+    attendees: int | None = None
+    budget_cap: str | None = None
+    contingency_pct: str | None = None
+    venue_type: str | None = None
+    date: str | None = None
+    location: str | None = None
+    goals: list[str] = Field(default_factory=list)
+    audience_profile: str | None = None
+    tone: str | None = None
+    must_haves: list[str] = Field(default_factory=list)
+    nice_to_haves: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    missing_questions: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
+    market_realism_warnings: list[str] = Field(default_factory=list)
+    confidence: str = "low"
+    model_mode: AgentMode = "rule_based_fallback"
+
+
+class CreativeIdea(BaseModel):
+    """A single creative experience idea for the event."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    title: str
+    description: str
+    tier: _TIER_LITERAL = "could"
+    estimated_complexity: Literal["low", "medium", "high"] = "medium"
+    budget_pressure: Literal["low", "medium", "high"] = "medium"
+    why_it_fits: str
+
+
+class CreativeScopeSuggestion(BaseModel):
+    """A proposal to add / cut / reduce / reconsider a scope element."""
+
+    model_config = ConfigDict(extra="forbid", strict=False)
+
+    title: str
+    description: str
+    category: str
+    tier: _TIER_LITERAL = "could"
+    estimated_cost: str | None = None
+    budget_pressure: Literal["low", "medium", "high"] = "medium"
+    action_hint: Literal["add", "cut", "reduce", "reconsider"] = "add"
+    rationale: str
+
+    @field_validator("category", "title", "description", "rationale")
+    @classmethod
+    def _non_empty(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v
+
+
+class CreativeConceptResult(BaseModel):
+    """Output of the Creative Concept Agent (P7A: advisory only).
+
+    These are PROPOSALS. In P7A they do not mutate scope/budget/schedule.
+    P7B applies them to editable scope through a user-confirmed action.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    event_title_options: list[str] = Field(default_factory=list)
+    concept_summary: str = ""
+    experience_principles: list[str] = Field(default_factory=list)
+    creative_ideas: list[CreativeIdea] = Field(default_factory=list)
+    suggested_additions: list[CreativeScopeSuggestion] = Field(default_factory=list)
+    suggested_cuts_or_reductions: list[CreativeScopeSuggestion] = Field(
+        default_factory=list
+    )
+    budget_sensitive_notes: list[str] = Field(default_factory=list)
+    production_risks: list[str] = Field(default_factory=list)
+    sponsor_or_partner_hooks: list[str] = Field(default_factory=list)
+    model_mode: AgentMode = "rule_based_fallback"
+
+
+# ---------------------------------------------------------------------------
+# P7A — request / response additions
+# ------------------------------------------------------------------------------
+
+
+class RunEventRequest(BaseModel):
+    """P7A extended request body for ``POST /run``.
+
+    Kept intentionally compatible with the existing API contract: all the
+    legacy structured fields keep their meaning but are now optional at the
+    schema layer (with server-side resolution / fallback). ``brief`` becomes the
+    primary input and is the only required field. Explicit user-provided
+    constraint fields win over model extraction; the AI only fills gaps.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    brief: str
+    budget_cap: str | None = None
+    contingency_pct: str | None = None
+    attendees: int | None = None
+    event_type: str | None = None
+    venue_type: str | None = None
+    date: str | None = None

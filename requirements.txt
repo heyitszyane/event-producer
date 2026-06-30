@@ -1,5 +1,8 @@
-# Pinned dependencies as of P5A (2026-06-21).
+# Pinned dependencies as of P7A (2026-06-30).
 # Re-pin before production deploy: pip freeze > requirements.txt
+# P7A: added google-genai for the server-side live-Gemini provider seam.
+# The SDK is imported lazily and only in live mode; fallback/test mode does
+# not require it.
 pydantic==2.13.4
 pydantic-core==2.46.4
 fastapi==0.138.0
@@ -11,3 +14,4 @@ mypy==2.1.0
 mypy-extensions==1.1.0
 ruff==0.15.18
 pytest==9.1.1
+google-genai==2.10.0

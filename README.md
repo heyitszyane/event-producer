@@ -8,18 +8,26 @@
 
 Event Producer is a **capstone prototype** for AI-assisted event production.
 It demonstrates how an event can be taken from a messy brief to a scoped,
-costed, scheduled, and approval-gated run-of-show — without any live LLM
-calls, live vendor messaging, or production persistence.
+costed, scheduled, and approval-gated run-of-show — with an optional live
+Gemini layer and an honest deterministic fallback when Gemini is unavailable.
 
 It was built as a Google x Kaggle 2026 capstone project under **Agents for
 Business**.
 
 ## Current status
 
-**Post-P6F Rescue Hardening** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
+**P7A — Agentic intake + model mode** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
 
-- **177 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **202 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
+- **Messy-brief hero.** The primary product input is a messy event brief; the
+  six structured fields are now optional manual overrides. Constraint wins
+  over model extraction, with safe fallbacks for residual gaps — gaps surface
+  in `brief_intake.missing_questions`, never silently fabricated.
+- **Live Gemini provider seam** (P7A). Optional, server-side, lazy-loaded. The
+  app runs the deterministic fallback by default and records the fallback
+  reason in the agent trace. Mode badges on the trace make the difference
+  visible. See [Gemini setup](#optional-live-gemini).
 - **Security action-gate is structural** — enforced in code (`action_gate.py`),
   not in prompts. No financial or state-changing action executes without a
   human-approved `Approval` object.
@@ -28,9 +36,10 @@ Business**.
   executed.
 - **Mission-control frontend** — Next.js 14 static export on Firebase Hosting,
   FastAPI backend on Cloud Run.
-- **Agent crew** — rule-based role agents (brief/scope, budget manager,
-  production manager, vendor coordinator, risk/gap flagger) with
-  reason->formatter splits. **No live Gemini or ADK runtime.**
+- **Agent crew** — AI Brief Intake + Creative Concept agents in front of the
+  deterministic engines; plus the rule-based role agents (brief/scope, budget
+  manager, production manager, vendor coordinator, risk/gap flagger) with
+  reason->formatter splits.
 - **Honest-claims rule:** all public docs distinguish implemented, scripted
   deterministic demo, structural seam, and deferred work.
 
@@ -109,13 +118,16 @@ Messy event brief
 ## What is deferred / not implemented
 
 - Firestore persistence (in-memory only)
-- Live Gemini / ADK integration (rule-based agents only)
+- Live Gemini is **optional**: the server-side provider seam exists and is
+  wired; the app defaults to an honest deterministic fallback and records the
+  fallback reason. ADK integration remains deferred.
 - Live Telegram relay (scripted fixtures only)
 - Production auth / multi-user (`X-Demo-User` is a demo-time header gate)
 - Receipt OCR (image-channel fixture is seeded text with `ocr_implemented: false`)
 - Live FX feed (static seeded rates only)
 - Calendar write-back
 - Formal ADK Agent Skills packaging (only skill-like role modules)
+- Applying Creative Concept proposals to editable scope/budget (P7B)
 
 ## Architecture
 
@@ -163,11 +175,15 @@ export NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | No (defaults to `http://localhost:3000,http://localhost:8080`) |
+| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | No (defaults to localhost) |
+| `ENABLE_LIVE_GEMINI` | Enables the live Gemini provider seam (exact `true` to enable; any other value or unset -> fallback) | No (default: fallback) |
+| `GEMINI_API_KEY` | Server-side Gemini API key. Only read by the backend; never sent to the browser. See `.env.example`. | Only for live mode |
+| `GOOGLE_API_KEY` | Legacy alias used if `GEMINI_API_KEY` is empty. | Only for live mode |
+| `GEMINI_MODEL` | Model id for the live provider (default `gemini-2.5-flash`). | No |
 | `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL | For frontend build against backend |
 
 > **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON.
-> These are gitignored.
+> These are gitignored. Copy `.env.example` to `.env` to configure live mode.
 
 ## Default demo input
 
@@ -206,11 +222,20 @@ curl -X POST http://localhost:8080/run \
 - **budget_summary**: populated lines, category rollups, tier rollups,
   contingency reserve, spendable, included totals, headroom, zero-sum holds
 - **schedule_result**: 6 ordered tasks with dependencies and critical path
-- **agent_trace**: 5 role-agent steps
+- **brief_intake**: extracted requirements / assumptions / gaps / confidence +
+  `model_mode`
+- **creative_concept**: advisory concepts + ideas + suggested additions/cuts +
+  `model_mode`
+- **agent_trace**: 7 role-agent steps (added **Brief Intake Agent** and
+  **Creative Concept Agent**); each step exposes `model_mode` / `model_name` /
+  `prompt_version` / `fallback_reason`.
 - **approvals**: 1 pending approval (human-required before vendor send)
-- **chat_log**: 6 production messages explaining pipeline steps
+- **chat_log**: production messages explaining pipeline steps
 - **security_beat**: `scripted_demo_ready`, 3 fixtures,
   `external_action_executed: false`, `state_mutation_executed: false`
+- **model_mode_summary**: per-role mapping of `brief_intake`, `creative_concept`,
+  `budget_manager`, `production_manager`, `vendor_coordinator`, `security` to one
+  of `gemini_live | rule_based_fallback | deterministic_engine | scripted_fixture | human_approval_gate`.
 
 ## Security model
 
