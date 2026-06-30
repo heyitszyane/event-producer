@@ -6,11 +6,18 @@ These tests verify that:
 3. Manual override source is tracked correctly
 """
 
-import pytest
-from decimal import Decimal
-
 from event_producer.main import EventProducerApp
 from event_producer.models.schemas import BriefIntakeSourceMap
+
+STRESS_BRIEF = """
+1 night AI industry networking event with $10000 budget.
+Event will be held in an indoor bar or restaurant in Singapore,
+on 10 July 2026 between 6pm to 10pm.
+Open bar with canapes.
+Expected turnout 100 pax.
+Need basic AV system and banners.
+If budget permits, include some free merch such as branded t-shirts, caps and notebooks.
+"""
 
 
 class TestConstraintOverrideSemantics:
@@ -33,6 +40,26 @@ class TestConstraintOverrideSemantics:
         # The source_map should show brief_extracted for attendees
         source_map = BriefIntakeSourceMap(**intake.get("source_map", {}))
         assert source_map.attendees == "brief_extracted"
+        assert result["event_spec"]["attendees"] == 100
+
+    def test_inactive_manual_attendees_does_not_override_brief(self):
+        """A supplied but inactive manual value is treated as placeholder data."""
+        app = EventProducerApp()
+        result = app.run_event(
+            brief=STRESS_BRIEF,
+            attendees=50,
+            manual_constraints={"attendees": False},
+        )
+
+        intake = result.get("brief_intake", {})
+        resolution = result["constraint_resolution"]["attendees"]
+
+        assert intake.get("attendees") == 100
+        assert result["event_spec"]["attendees"] == 100
+        assert resolution["brief_value"] == 100
+        assert resolution["manual_value"] is None
+        assert resolution["resolved_value"] == 100
+        assert resolution["source"] == "brief_extracted"
 
     def test_manual_override_takes_precedence(self):
         """Given a brief says 100 pax but user explicitly overrides to 50,
@@ -49,6 +76,13 @@ class TestConstraintOverrideSemantics:
 
         # Source should be manual_override, not brief_extracted
         assert source_map.attendees == "manual_override"
+        assert result["event_spec"]["attendees"] == 50
+        assert result["constraint_resolution"]["attendees"] == {
+            "brief_value": 100,
+            "manual_value": 50,
+            "resolved_value": 50,
+            "source": "manual_override",
+        }
 
     def test_manual_budget_cap_overrides_brief(self):
         """Given a brief mentions budget but user provides explicit cap,
@@ -82,6 +116,31 @@ class TestConstraintOverrideSemantics:
         # budget_cap should be fallback since brief didn't mention it
         assert source_map.budget_cap == "fallback_default"
 
+    def test_stress_brief_no_default_50_leaks_into_event_summary(self):
+        """The 100-pax stress brief must not fall back to a stale 50-pax basis."""
+        app = EventProducerApp()
+        result = app.run_event(brief=STRESS_BRIEF)
+
+        assert result["brief_intake"]["attendees"] == 100
+        assert result["event_spec"]["attendees"] == 100
+        assert result["constraint_resolution"]["attendees"]["resolved_value"] == 100
+        assert result["constraint_resolution"]["attendees"]["source"] == "brief_extracted"
+        assert "50 attendees" not in str(result["event_spec"])
+
+    def test_budget_basis_uses_extracted_attendees(self):
+        """Per-attendee budget lines expose the 100-pax basis."""
+        app = EventProducerApp()
+        result = app.run_event(brief=STRESS_BRIEF)
+
+        lines = result["budget_summary"]["lines"]
+        variable_lines = [
+            line for line in lines
+            if line["category"] in {"venue", "catering", "av_equipment", "decor"}
+        ]
+        assert variable_lines
+        assert any(str(line["qty"]) == "100" for line in variable_lines)
+        assert any(line["label"] == "Open Bar and Canapes Allowance" for line in lines)
+
 
 class TestBudgetRealismWarnings:
     """P7D tests for budget realism heuristics."""
@@ -92,7 +151,7 @@ class TestBudgetRealismWarnings:
         """
         app = EventProducerApp()
         result = app.run_event(
-            brief="Event in Singapore with 100 pax and open bar, $10000 budget.",
+            brief=STRESS_BRIEF,
         )
 
         intake = result.get("brief_intake", {})
@@ -100,6 +159,8 @@ class TestBudgetRealismWarnings:
 
         # Should have warning about Singapore open bar scenario
         assert any("Singapore" in w and "open bar" in w.lower() for w in warnings)
+        assert result["budget_summary"]["over_budget"] is True
+        assert result["agent_trace"][0]["status"] == "warning"
 
     def test_no_warning_for_realistic_budget(self):
         """Given a lower-risk scenario,

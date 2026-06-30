@@ -48,6 +48,7 @@ from event_producer.models.schemas import (
     ChatLogMessage,
     CreativeConceptResult,
     EventSpec,
+    ManualConstraintFlags,
     Proposal,
     RiskFlag,
     RunOfShow,
@@ -342,6 +343,7 @@ class EventProducerApp:
         event_type: str | None = None,
         venue_type: str | None = None,
         date: str | None = None,
+        manual_constraints: ManualConstraintFlags | dict | None = None,
     ) -> dict:
         """Run the full event production pipeline.
 
@@ -394,11 +396,16 @@ class EventProducerApp:
         )
 
         input_summary = (brief or "").strip().replace("\n", " ")[:200]
+        intake_has_warning = bool(
+            brief_intake.missing_questions
+            or brief_intake.market_realism_warnings
+            or brief_intake.contradictions
+        )
         agent_trace.append(AgentTraceStep(
             id="trace-brief-intake",
             role="Brief Intake Agent",
             label="Interpreted messy brief and extracted requirements",
-            status="warning" if brief_intake.missing_questions else "complete",
+            status="warning" if intake_has_warning else "complete",
             input_summary=f"Raw brief ({len(brief)} chars): \"{input_summary}\"",
             output_summary=(
                 f"event_type={brief_intake.event_type or 'unknown'}, "
@@ -445,6 +452,19 @@ class EventProducerApp:
         # engines actually require them; gaps are reported via brief_intake
         # (missing_questions + assumptions), never silently fabricated.
         # ------------------------------------------------------------------
+        flags = (
+            manual_constraints
+            if isinstance(manual_constraints, ManualConstraintFlags)
+            else ManualConstraintFlags(**manual_constraints)
+            if manual_constraints is not None
+            else None
+        )
+
+        def _manual(field_name: str, value) -> bool:
+            if flags is None:
+                return value is not None
+            return bool(getattr(flags, field_name)) and value is not None
+
         # P7D: Track source for provenance display
         source_map = BriefIntakeSourceMap(
             attendees="brief_extracted" if brief_intake.attendees is not None else "fallback_default",
@@ -456,57 +476,57 @@ class EventProducerApp:
             location="brief_extracted" if brief_intake.location is not None else "missing",
         )
         # Override source_map if user explicitly provided values
-        if attendees is not None:
+        if _manual("attendees", attendees):
             source_map.attendees = "manual_override"
-        if budget_cap is not None:
+        if _manual("budget_cap", budget_cap):
             source_map.budget_cap = "manual_override"
-        if contingency_pct is not None:
+        if _manual("contingency_pct", contingency_pct):
             source_map.contingency_pct = "manual_override"
-        if date is not None:
+        if _manual("date", date):
             source_map.date = "manual_override"
-        if event_type is not None:
+        if _manual("event_type", event_type):
             source_map.event_type = "manual_override"
-        if venue_type is not None:
+        if _manual("venue_type", venue_type):
             source_map.venue_type = "manual_override"
 
         resolved_attendees = (
             attendees
-            if attendees is not None
+            if _manual("attendees", attendees)
             else brief_intake.attendees
             if brief_intake.attendees is not None
             else 50  # safe fallback for the engines (catalogue scales per-head)
         )
         resolved_budget_cap = (
             budget_cap
-            if budget_cap is not None
+            if _manual("budget_cap", budget_cap)
             else brief_intake.budget_cap
             if brief_intake.budget_cap is not None
             else "20000"
         )
         resolved_contingency_pct = (
             contingency_pct
-            if contingency_pct is not None
+            if _manual("contingency_pct", contingency_pct)
             else brief_intake.contingency_pct
             if brief_intake.contingency_pct is not None
             else "15"
         )
         resolved_event_type = (
             event_type
-            if event_type is not None
+            if _manual("event_type", event_type)
             else brief_intake.event_type
             if brief_intake.event_type
             else ""
         )
         resolved_venue_type = (
             venue_type
-            if venue_type is not None
+            if _manual("venue_type", venue_type)
             else brief_intake.venue_type
             if brief_intake.venue_type is not None
             else "indoor"
         )
         resolved_date = (
             date
-            if date is not None
+            if _manual("date", date)
             else brief_intake.date
             if brief_intake.date is not None
             else (datetime.now(timezone.utc) + timedelta(days=45)).strftime("%Y-%m-%d")
@@ -514,12 +534,12 @@ class EventProducerApp:
 
         # If we fell back on a field that wasn't extracted, record it in the
         # intake assumptions so the UI shows we did NOT fabricate confidently.
-        if (attendees is None and brief_intake.attendees is None
+        if (not _manual("attendees", attendees) and brief_intake.attendees is None
                 and len(brief_intake.assumptions) < 6):
             brief_intake.assumptions.append(
                 "No attendees specified; using a default of 50 pax for costing."
             )
-        if (budget_cap is None and brief_intake.budget_cap is None
+        if (not _manual("budget_cap", budget_cap) and brief_intake.budget_cap is None
                 and "Using a default budget of 20000 for costing."
                 not in brief_intake.assumptions):
             brief_intake.assumptions.append(
@@ -528,6 +548,50 @@ class EventProducerApp:
 
         # P7D: Attach source map to brief_intake for provenance display
         brief_intake.source_map = source_map
+        constraint_resolution = {
+            "attendees": {
+                "brief_value": brief_intake.attendees,
+                "manual_value": attendees if _manual("attendees", attendees) else None,
+                "resolved_value": resolved_attendees,
+                "source": source_map.attendees,
+            },
+            "budget_cap": {
+                "brief_value": brief_intake.budget_cap,
+                "manual_value": budget_cap if _manual("budget_cap", budget_cap) else None,
+                "resolved_value": resolved_budget_cap,
+                "source": source_map.budget_cap,
+            },
+            "contingency_pct": {
+                "brief_value": brief_intake.contingency_pct,
+                "manual_value": contingency_pct if _manual("contingency_pct", contingency_pct) else None,
+                "resolved_value": resolved_contingency_pct,
+                "source": source_map.contingency_pct,
+            },
+            "event_type": {
+                "brief_value": brief_intake.event_type,
+                "manual_value": event_type if _manual("event_type", event_type) else None,
+                "resolved_value": resolved_event_type,
+                "source": source_map.event_type,
+            },
+            "venue_type": {
+                "brief_value": brief_intake.venue_type,
+                "manual_value": venue_type if _manual("venue_type", venue_type) else None,
+                "resolved_value": resolved_venue_type,
+                "source": source_map.venue_type,
+            },
+            "date": {
+                "brief_value": brief_intake.date,
+                "manual_value": date if _manual("date", date) else None,
+                "resolved_value": resolved_date,
+                "source": source_map.date,
+            },
+            "location": {
+                "brief_value": brief_intake.location,
+                "manual_value": None,
+                "resolved_value": brief_intake.location,
+                "source": source_map.location,
+            },
+        }
 
         # ------------------------------------------------------------------
         # Step 0.6 (P7A): Creative Concept (advisory only).
@@ -538,7 +602,7 @@ class EventProducerApp:
             intake=brief_intake,
             model_mode=creative_raw["model_mode"],
             fallback_reason=creative_raw.get("fallback_reason"),
-            event_type=resolved_event_type,
+            event_type=str(resolved_event_type or ""),
             goals=brief_intake.goals,
             attendees=resolved_attendees,
             budget_cap=resolved_budget_cap,
@@ -667,8 +731,8 @@ class EventProducerApp:
             role="agent",
             agent="Budget Manager",
             content=(
-                f"Reconciled budget: ${budget_cap} cap, "
-                f"${budget_summary.contingency_reserve} contingency ({contingency_pct}%), "
+                f"Reconciled budget: ${resolved_budget_cap} cap, "
+                f"${budget_summary.contingency_reserve} contingency ({resolved_contingency_pct}%), "
                 f"${budget_summary.spendable} spendable. "
                 f"Included ${budget_summary.included_totals}. "
                 f"Headroom: ${budget_summary.headroom}."
@@ -951,6 +1015,7 @@ class EventProducerApp:
             "model_mode_summary": model_mode_summary,
             "brief_intake": brief_intake.model_dump(),
             "creative_concept": creative.model_dump(),
+            "constraint_resolution": constraint_resolution,
         }
 
 

@@ -1,113 +1,123 @@
-"""P7D tests for manual scope customization.
+"""P7D tests for visible scope customization and recompute feedback."""
 
-These tests verify:
-1. User can add a scope item from the UI
-2. User can edit meaningful budget-driving fields
-3. User can delete/toggle/retier scope items
-4. Budget visibly recomputes after mutation
-5. Schedule recompute or warning is visible
-"""
+from __future__ import annotations
 
-import pytest
 from decimal import Decimal
 
-from event_producer.main import EventProducerApp, InMemoryEventStore
-from event_producer.models.schemas import ScopeItem, BudgetSummary
+import pytest
+from fastapi.testclient import TestClient
+
+from event_producer.api import create_app
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app = create_app()
+    return TestClient(app, headers={"X-Demo-User": "demo"})
+
+
+@pytest.fixture
+def event_snapshot(client: TestClient) -> dict:
+    response = client.post(
+        "/run",
+        json={"brief": "100 pax networking event in Singapore with $20000 budget."},
+    )
+    assert response.status_code == 200
+    return response.json()
 
 
 class TestScopeCustomization:
-    """Test manual scope item CRUD operations."""
+    """Test manual scope item CRUD operations through the API surface."""
 
-    @pytest.fixture
-    def app(self):
-        return EventProducerApp()
+    def test_add_scope_item_recalculates_budget_and_schedule(
+        self, client: TestClient, event_snapshot: dict
+    ) -> None:
+        event_id = event_snapshot["event_id"]
+        previous_headroom = Decimal(event_snapshot["budget_summary"]["headroom"])
 
-    @pytest.fixture
-    def demo_event(self, app):
-        """Run a demo event and return its ID for mutation tests."""
-        result = app.run_event(
-            brief="50-pax networking event in Singapore, $20000 budget.",
+        response = client.post(
+            f"/event/{event_id}/scope-items",
+            json={
+                "name": "Welcome signage",
+                "description": "Branded welcome banners",
+                "category": "decor",
+                "tier": "should",
+                "estimated_cost": "500",
+                "qty": "2",
+                "selected": True,
+            },
         )
-        return result["event_id"]
 
-    def test_add_scope_item_persists(self, app, demo_event):
-        """Given an existing event,
-        When a user adds a selected scope item with qty and unit cost,
-        Then the item is persisted and budget recalculates.
-        """
-        # Add a scope item
-        response = app.event_store.get_scope(demo_event)
-        initial_count = len(response)
+        assert response.status_code == 200
+        data = response.json()
+        assert any(item["name"] == "Welcome signage" for item in data["scope_items"])
+        assert Decimal(data["budget_summary"]["headroom"]) != previous_headroom
+        assert data["recompute_notice"]["message"].startswith("Budget recalculated.")
+        assert data["recompute_notice"]["schedule_status"] in {"recomputed", "warning"}
 
-        # Manually add via the store (simulating API endpoint)
-        new_item = ScopeItem(
-            name="Welcome signage",
-            description="Branded welcome banners",
-            category="decor",
-            tier="should",
-            estimated_cost=Decimal("500"),
-            currency="SGD",
-            qty=Decimal("2"),
-            selected=True,
+    def test_edit_scope_item_quantity_and_cost_recalculates_budget(
+        self, client: TestClient, event_snapshot: dict
+    ) -> None:
+        event_id = event_snapshot["event_id"]
+        initial_headroom = Decimal(event_snapshot["budget_summary"]["headroom"])
+
+        response = client.patch(
+            f"/event/{event_id}/scope-items/0",
+            json={"qty": "100", "estimated_cost": "75"},
         )
-        response.append(new_item)
-        app.event_store.save_scope(demo_event, response)
 
-        # Verify item was saved
-        saved = app.event_store.get_scope(demo_event)
-        assert len(saved) == initial_count + 1
-        assert any(item.name == "Welcome signage" for item in saved)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scope_items"][0]["qty"] == "100"
+        assert data["scope_items"][0]["estimated_cost"] == "75"
+        assert Decimal(data["budget_summary"]["headroom"]) != initial_headroom
+        assert "Headroom changed" in data["recompute_notice"]["message"]
 
-    def test_budget_recalculates_after_mutation(self, app, demo_event):
-        """Given an existing event,
-        When a user updates budget-driving fields,
-        Then budget summary reflects the changes.
-        """
-        # Get initial budget
-        initial_budget = app.event_store.get_budget(demo_event)
-        initial_total = initial_budget.included_totals if initial_budget else Decimal("0")
+    def test_delete_toggle_and_retier_return_recompute_notice(
+        self, client: TestClient, event_snapshot: dict
+    ) -> None:
+        event_id = event_snapshot["event_id"]
 
-        # Add a high-cost item
-        response = app.event_store.get_scope(demo_event)
-        new_item = ScopeItem(
-            name="VIP speaker fee",
-            description="Keynote speaker honorarium",
-            category="talent",
-            tier="wow",
-            estimated_cost=Decimal("3000"),
-            currency="USD",
-            qty=Decimal("1"),
-            selected=True,
+        toggle = client.post(f"/event/{event_id}/scope-items/0/toggle")
+        assert toggle.status_code == 200
+        assert "Budget recalculated." in toggle.json()["recompute_notice"]["message"]
+
+        retier = client.post(
+            f"/event/{event_id}/scope-items/0/retier",
+            json={"tier": "wow"},
         )
-        response.append(new_item)
-        app.event_store.save_scope(demo_event, response)
+        assert retier.status_code == 200
+        assert retier.json()["scope_items"][0]["tier"] == "wow"
+        assert "Budget recalculated." in retier.json()["recompute_notice"]["message"]
 
-        # Verify budget exists for the event
-        budget = app.event_store.get_budget(demo_event)
-        assert budget is not None
+        delete = client.delete(f"/event/{event_id}/scope-items/0")
+        assert delete.status_code == 200
+        assert "Budget recalculated." in delete.json()["recompute_notice"]["message"]
 
-    def test_toggle_scope_item_changes_inclusion(self, app, demo_event):
-        """Given an existing event with scope items,
-        When a user toggles selected off,
-        Then the item's selected status changes.
-        """
-        scope = app.event_store.get_scope(demo_event)
-        if scope:
-            # Toggle the first item
-            scope[0].selected = False
-            app.event_store.save_scope(demo_event, scope)
+    def test_proposal_apply_preserves_event_basis_and_recomputes(
+        self, client: TestClient, event_snapshot: dict
+    ) -> None:
+        event_id = event_snapshot["event_id"]
+        attendee_basis = event_snapshot["event_spec"]["attendees"]
+        budget_cap = Decimal(event_snapshot["budget_summary"]["budget_cap"])
+        contingency_pct = Decimal(event_snapshot["budget_summary"]["contingency_pct"])
 
-            # Verify toggle
-            saved = app.event_store.get_scope(demo_event)
-            if saved:
-                assert saved[0].selected == False
+        chat = client.post(
+            f"/event/{event_id}/chat",
+            json={"message": "Make this feel more premium"},
+        )
+        assert chat.status_code == 200
+        proposals = chat.json()["proposals"]
+        assert proposals
 
-    def test_contingency_preserved_after_mutation(self, app, demo_event):
-        """Contingency percentage is preserved through scope mutations."""
-        # The contingency is set during the original run
-        budget = app.event_store.get_budget(demo_event)
-        original_contingency = budget.contingency_pct if budget else None
+        applied = client.post(f"/event/{event_id}/proposals/{proposals[0]['id']}/apply")
 
-        # Contingency should exist
-        assert original_contingency is not None
-        assert original_contingency == Decimal("15")
+        assert applied.status_code == 200
+        data = applied.json()
+        assert Decimal(data["budget_summary"]["budget_cap"]) == budget_cap
+        assert Decimal(data["budget_summary"]["contingency_pct"]) == contingency_pct
+        assert data["recompute_notice"]["message"].startswith("Budget recalculated.")
+
+        get_event = client.get(f"/event/{event_id}")
+        assert get_event.status_code == 200
+        assert get_event.json()["event_spec"]["attendees"] == attendee_basis

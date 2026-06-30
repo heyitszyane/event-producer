@@ -140,8 +140,10 @@ class OrchestratorAgent:
         proposals: list[ProposedAction] = []
 
         for item in scope_items:
-            cost = Decimal(str(item.get("estimated_cost", 0)))
-            if cost > Decimal("1000"):
+            unit_cost = Decimal(str(item.get("estimated_cost", 0)))
+            qty = Decimal(str(item.get("qty", 1)))
+            cost = unit_cost * qty
+            if cost > Decimal("1000") and item.get("selected", True):
                 proposal_id = f"prop_{uuid.uuid4().hex[:8]}"
                 proposals.append(
                     ProposedAction(

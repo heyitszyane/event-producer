@@ -699,6 +699,23 @@ class ChatLogMessage(BaseModel):
 
 RequirementSource = Literal["brief_extracted", "manual_override", "fallback_default", "missing"]
 
+class ManualConstraintFlags(BaseModel):
+    """Which optional request fields should be treated as user overrides.
+
+    This preserves legacy compatibility while letting the UI send inactive
+    placeholder values without turning them into real constraints.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    budget_cap: bool = False
+    contingency_pct: bool = False
+    attendees: bool = False
+    event_type: bool = False
+    venue_type: bool = False
+    date: bool = False
+
+
 class BriefIntakeSourceMap(BaseModel):
     """P7D: Source tracking for each extracted field.
 
@@ -844,6 +861,7 @@ class RunEventRequest(BaseModel):
     event_type: str | None = None
     venue_type: str | None = None
     date: str | None = None
+    manual_constraints: ManualConstraintFlags | None = None
 
 
 # ---------------------------------------------------------------------------

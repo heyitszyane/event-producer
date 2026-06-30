@@ -129,14 +129,24 @@ export default function AIProductionCrew({
               <p style={{ fontSize: 'var(--text-sm)', margin: '0 0 var(--space-2)', opacity: 0.9 }}>
                 {step.label}
               </p>
-              {step.output_summary && (
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', margin: 0 }}>
-                  {step.output_summary}
+              {step.input_summary && (
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '0 0 var(--space-1)' }}>
+                  <strong>Input:</strong> {step.input_summary}
                 </p>
               )}
+              {step.output_summary && (
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', margin: '0 0 var(--space-1)' }}>
+                  <strong>Output:</strong> {step.output_summary}
+                </p>
+              )}
+              {step.status === 'warning' && briefIntake?.market_realism_warnings?.length ? (
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--status-warn)', margin: 0 }}>
+                  <strong>Warning:</strong> {briefIntake.market_realism_warnings[0]}
+                </p>
+              ) : null}
               {step.approval_required && (
-                <span className="badge badge--warning" style={{ marginTop: 'var(--space-2)' }}>
-                  🔒 Approval Required
+                <span className="badge badge--warn" style={{ marginTop: 'var(--space-2)' }}>
+                  Approval Required
                 </span>
               )}
             </div>

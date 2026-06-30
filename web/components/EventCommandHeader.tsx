@@ -39,8 +39,8 @@ export interface EventCommandHeaderProps {
     attendees: number | ''
     eventType: string
     venueType: string
-    date: string
-  }
+  date: string
+}
   formHandlers: {
     setBrief: (v: string) => void
     setBudgetCap: (v: string) => void
@@ -70,6 +70,18 @@ export default function EventCommandHeader({
   const eventDate = eventSpec?.date || '—'
   const headcount = eventSpec?.attendees ? String(eventSpec.attendees) : '—'
   const venue = eventSpec?.venue_type || '—'
+  const manualActive = {
+    budgetCap: Boolean(formData.budgetCap.trim()),
+    contingencyPct: Boolean(formData.contingencyPct.trim()),
+    attendees: formData.attendees !== '',
+    eventType: Boolean(formData.eventType),
+    venueType: Boolean(formData.venueType),
+    date: Boolean(formData.date),
+  }
+
+  function OverrideBadge({ active }: { active: boolean }) {
+    return active ? <span className="badge badge--warn">manual override</span> : <span className="badge badge--muted">inactive</span>
+  }
 
   return (
     <header className="header">
@@ -84,7 +96,7 @@ export default function EventCommandHeader({
               className="header__sub"
               style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}
             >
-              Constraints / manual overrides — optional
+              Optional manual constraints. Filled/enabled values override AI extraction.
             </p>
             {running && (
               <p className="header__meta" style={{ marginTop: 'var(--space-1)' }}>
@@ -135,7 +147,7 @@ export default function EventCommandHeader({
 
             {/* Budget Cap */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Budget Cap</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Budget Cap <OverrideBadge active={manualActive.budgetCap} /></span>
               <input
                 type="text"
                 value={formData.budgetCap}
@@ -152,7 +164,7 @@ export default function EventCommandHeader({
 
             {/* Contingency % - empty by default, brief extraction primary */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Contingency %</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Contingency % <OverrideBadge active={manualActive.contingencyPct} /></span>
               <input
                 type="number"
                 value={formData.contingencyPct}
@@ -169,7 +181,7 @@ export default function EventCommandHeader({
 
             {/* Attendees - empty by default, brief extraction primary */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Attendees</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Attendees <OverrideBadge active={manualActive.attendees} /></span>
               <input
                 type="number"
                 value={formData.attendees}
@@ -189,7 +201,7 @@ export default function EventCommandHeader({
 
             {/* Event Type */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Event Type</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Event Type <OverrideBadge active={manualActive.eventType} /></span>
               <select
                 value={formData.eventType}
                 onChange={(e) => formHandlers.setEventType(e.target.value)}
@@ -197,6 +209,7 @@ export default function EventCommandHeader({
                 aria-invalid={!!fieldErrors.eventType}
                 aria-describedby={fieldErrors.eventType ? 'error-eventType' : undefined}
               >
+                <option value="">From brief</option>
                 {EVENT_TYPES.map((et) => (
                   <option key={et.value} value={et.value}>{et.label}</option>
                 ))}
@@ -208,7 +221,7 @@ export default function EventCommandHeader({
 
             {/* Venue Type */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Venue Type</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Venue Type <OverrideBadge active={manualActive.venueType} /></span>
               <select
                 value={formData.venueType}
                 onChange={(e) => formHandlers.setVenueType(e.target.value)}
@@ -216,6 +229,7 @@ export default function EventCommandHeader({
                 aria-invalid={!!fieldErrors.venueType}
                 aria-describedby={fieldErrors.venueType ? 'error-venueType' : undefined}
               >
+                <option value="">From brief</option>
                 <option value="indoor">Indoor</option>
                 <option value="outdoor">Outdoor</option>
                 <option value="hybrid">Hybrid</option>
@@ -227,7 +241,7 @@ export default function EventCommandHeader({
 
             {/* Date */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Date</span>
+              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Date <OverrideBadge active={manualActive.date} /></span>
               <input
                 type="date"
                 value={formData.date}

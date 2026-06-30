@@ -16,21 +16,27 @@ Business**.
 
 ## Current status
 
-**P7D — Interactive agentic demo surface** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
+**P7D-FIX / 21B — Constraint provenance + demo-surface acceptance** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
 
-- **222 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **225 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
-  six structured fields are now optional manual overrides. Constraint wins
-  over model extraction, with safe fallbacks for residual gaps — gaps surface
-  in `brief_intake.missing_questions`, never silently fabricated.
+  structured fields are optional manual overrides. Placeholder/default values
+  do not win unless explicitly submitted as manual constraints; the response
+  exposes provenance via `source_map` and `constraint_resolution`.
+- **Stress-brief realism.** The Singapore 100-pax open-bar/canapes scenario
+  resolves to 100 attendees end-to-end, costs per-attendee scope at quantity
+  100, and flags the budget as at risk/over budget instead of showing a clean
+  green plan.
 - **Live Gemini provider seam** (P7A). Optional, server-side, lazy-loaded. The
   app runs the deterministic fallback by default and records the fallback
   reason in the agent trace. Mode badges on the trace make the difference
   visible. See [Gemini setup](#optional-live-gemini).
-- **Editable scope + orchestrator proposals** (P7B). Scope items can be added,
-  updated, deleted, or retiered via API endpoints. The orchestrator chat returns
-  actionable proposals that can be applied or dismissed.
+- **Editable scope + orchestrator proposals** (P7B/P7D-FIX). Scope items can be
+  added, edited, deleted, toggled, and retiered via API endpoints. Recompute
+  responses include before/after headroom and schedule status. The top
+  "Ask the AI Producer" surface returns proposals that can be applied or
+  dismissed.
 - **Security action-gate is structural** — enforced in code (`action_gate.py`),
   not in prompts. No financial or state-changing action executes without a
   human-approved `Approval` object.
@@ -39,10 +45,10 @@ Business**.
   executed.
 - **Mission-control frontend** — Next.js 14 static export on Firebase Hosting,
   FastAPI backend on Cloud Run.
-- **Agent crew** — AI Brief Intake + Creative Concept agents in front of the
-  deterministic engines; plus the rule-based role agents (brief/scope, budget
-  manager, production manager, vendor coordinator, risk/gap flagger) with
-  reason->formatter splits.
+- **AI Production Crew surface** — Brief Intake, Creative Concept, Budget
+  Engine/Manager, Run-of-Show/Production Manager, Approval Wall/Vendor
+  Coordinator, and Risk/Gap Flagger are visible as top-level crew cards with
+  mode badges and summaries.
 - **Honest-claims rule:** all public docs distinguish implemented, scripted
   deterministic demo, structural seam, and deferred work.
 
@@ -71,8 +77,8 @@ Messy event brief
   detection, conflict reporting. 25+ tests.
 - **Agent crew** — 5 role agents + orchestrator with reason->formatter splits.
   Rule-based (not live Gemini). 15+ tests.
-- **Agent trace** — 5 structural role-agent steps recorded during the run
-  (`AgentTraceStep` schema). Rendered in the frontend.
+- **Agent trace** — 7 structural role-agent steps recorded during the run
+  (`AgentTraceStep` schema). Rendered as a secondary technical trace.
 - **Security action-gate** — `enforce()` blocks 8 gated actions
   (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
   `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
@@ -82,10 +88,11 @@ Messy event brief
   `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}`, `/approvals`,
   `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate
   integration. Consistent error envelope. CORS driven by `ALLOWED_ORIGINS`.
-- **Frontend mission-control dashboard** — 11 React components (AgentCrewTrace,
-  ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader,
-  RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard). Two-column
-  responsive grid, design token system, accessibility landmarks. Static export.
+- **Frontend mission-control dashboard** — React components for intake,
+  requirements provenance, AI Production Crew, creative concepts, scope,
+  budget, run-of-show, approvals, security, vendors, risks, and production log.
+  Two-column responsive grid, design token system, accessibility landmarks.
+  Static export.
 - **MCP event-store wrapper** — `McpServer` wraps the `EventStore` ABC. Honest
   CRUD/list/delete via the provider seam. No private introspection.
 - **Deployment lane** — Cloud Run (FastAPI) + Firebase Hosting (static export).
@@ -132,7 +139,7 @@ Messy event brief
 - Live FX feed (static seeded rates only)
 - Calendar write-back
 - Formal ADK Agent Skills packaging (only skill-like role modules)
-- Applying Creative Concept proposals to editable scope/budget (P7B)
+- Live autonomous proposal execution (all proposals still require human Apply)
 
 ## Architecture
 
@@ -200,7 +207,9 @@ export NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 }
 ```
 
-This scenario triggers a budget realism warning in fallback mode.
+This scenario resolves to `100` attendees, parses the date as `2026-07-10`,
+costs attendee-scaled items at quantity `100`, and triggers a prominent budget
+realism warning in fallback mode.
 
 ### P7C Seed brief (calmer premium scenario)
 
@@ -218,7 +227,7 @@ This scenario triggers a budget realism warning in fallback mode.
 
 Click "Try example" in the UI to load this seed brief.
 
-## Default demo input (structured)
+## Default demo input (structured manual overrides)
 
 ```json
 {
@@ -228,7 +237,15 @@ Click "Try example" in the UI to load this seed brief.
   "attendees": 50,
   "event_type": "corporate",
   "venue_type": "indoor",
-  "date": "2026-06-30"
+  "date": "2026-06-30",
+  "manual_constraints": {
+    "budget_cap": true,
+    "contingency_pct": true,
+    "attendees": true,
+    "event_type": true,
+    "venue_type": true,
+    "date": true
+  }
 }
 ```
 
@@ -245,13 +262,22 @@ curl -X POST http://localhost:8080/run \
     "attendees": 50,
     "event_type": "corporate",
     "venue_type": "indoor",
-    "date": "2026-06-30"
+  "date": "2026-06-30",
+  "manual_constraints": {
+    "budget_cap": true,
+    "contingency_pct": true,
+    "attendees": true,
+    "event_type": true,
+    "venue_type": true,
+    "date": true
+  }
   }'
 ```
 
 ### Expected output summary
 
-- **scope_items**: 6 (3 must, 2 should, 1 could)
+- **scope_items**: 6 (3 must, 2 should, 1 could), selected by default for
+  budget basis
 - **budget_summary**: populated lines, category rollups, tier rollups,
   contingency reserve, spendable, included totals, headroom, zero-sum holds
 - **schedule_result**: 6 ordered tasks with dependencies and critical path
@@ -298,16 +324,22 @@ and served by Firebase Hosting. It calls the backend via
 `NEXT_PUBLIC_API_BASE_URL`.
 
 Modules:
-- **EventCommandHeader** — event identity, Run button, collapsible input form
-  with 7 field-level validation rules
-- **AgentCrewTrace** — 5-step timeline of role-agent steps with statuses,
+- **EventCommandHeader** — event identity, Run button, optional manual
+  overrides with inactive/default badges and 7 field-level validation rules
+- **AIProductionCrew** — top-level crew cards with mode badges, inputs,
+  outputs, warnings, and approval-gate summaries
+- **ExtractedRequirements** — resolved requirement basis with from-brief,
+  manual-override, fallback-default, and missing provenance
+- **AgentCrewTrace** — secondary timeline of role-agent steps with statuses,
   deterministic cores, artifacts
-- **BudgetCard** — lines, category rollups, tier pills, headroom, variance
+- **BudgetCard** — budget basis, realism warnings, lines, category rollups,
+  tier pills, headroom, variance
 - **RunOfShowCard** — ordered tasks, critical path, anchor highlighting
 - **ApprovalInbox** — approvals auto-expanded when pending; structural gate
   banner
 - **SecurityBeat** — 3 scripted fixtures, blocked actions, no-execution status
-- **ScopeCard** — tier-grouped scope items
+- **ScopeCard** — add/edit/delete/toggle/retier scope items with recompute
+  feedback
 - **RiskCard** — risk/gap flags
 - **VendorsCard** — vendor cards with lock status
 - **ChatPane** — production log (read-only) from `chat_log`
@@ -325,10 +357,11 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-222 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+225 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
 security demo, P7B scope mutation and orchestrator proposals, P7D constraint
-override semantics and budget realism warnings. 9 Gherkin eval
+override semantics, budget realism warnings, and P7D-FIX recompute/provenance
+regressions. 9 Gherkin eval
 cases under `tests/eval_cases/`.
 
 ## Repository map

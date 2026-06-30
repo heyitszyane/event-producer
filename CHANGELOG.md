@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7D-FIX / 21B — Constraint provenance + demo-surface acceptance
+
+Repairs the P7D acceptance blocker where extracted brief truth could disagree
+with event header/manual defaults.
+
+- Fixed messy-brief/manual-override contradiction: inactive/default manual
+  values no longer override extracted requirements, and `constraint_resolution`
+  exposes brief/manual/resolved provenance.
+- Stress-test brief now resolves to `100` attendees end-to-end, parses
+  `10 July 2026`, and prices attendee-scaled scope at quantity `100`.
+- Added/strengthened the Singapore 100-pax open-bar/canapes budget realism
+  warning; budget UI no longer presents a clean green state for this case.
+- Promoted AI Production Crew cards and moved Ask the AI Producer prompt chips
+  plus proposal Apply/Dismiss into a top post-run surface.
+- Improved scope customization with add/edit/delete/toggle/retier controls and
+  visible recompute notices showing headroom before/after and schedule status.
+- Updated README and repo sitemap to reflect P7D-FIX behavior and 225-test QA
+  count.
+
 ### P7D — Interactive agentic demo surface
 
 Makes Event Producer visibly behave like an interactive AI co-producer, not a static dashboard with AI labels.

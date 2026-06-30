@@ -26,6 +26,15 @@ export interface BriefIntakeSourceMap {
   location?: RequirementSource
 }
 
+export interface ConstraintResolutionField {
+  brief_value?: string | number | null
+  manual_value?: string | number | null
+  resolved_value?: string | number | null
+  source?: RequirementSource
+}
+
+export type ConstraintResolution = Record<string, ConstraintResolutionField>
+
 export interface AgentTraceStep {
   id: string
   role: string
@@ -166,4 +175,11 @@ export interface OrchestratorChatResponse {
   proposals: ProposedAction[]
   model_mode: AgentMode
   fallback_reason?: string | null
+}
+
+export interface RecomputeNotice {
+  previous_headroom?: string
+  current_headroom?: string
+  schedule_status?: 'recomputed' | 'warning' | string
+  message?: string
 }

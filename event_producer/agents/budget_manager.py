@@ -62,8 +62,14 @@ class BudgetManagerReasonAgent:
 
         # Convert scope item dicts to BudgetLine objects
         lines: list[BudgetLine] = []
-        for item in scope_item_dicts:
-            scope_item = ScopeItem(**item) if isinstance(item, dict) else item
+        scope_items = [
+            ScopeItem(**item) if isinstance(item, dict) else item
+            for item in scope_item_dicts
+        ]
+        selected_items = [item for item in scope_items if item.selected]
+        budgeted_items = selected_items if selected_items else scope_items
+
+        for scope_item in budgeted_items:
             lines.append(
                 BudgetLine(
                     label=scope_item.name,
