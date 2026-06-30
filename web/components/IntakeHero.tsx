@@ -2,9 +2,10 @@ import { type FormEvent } from 'react'
 
 const EXAMPLE_BRIEF = [
   'Need a 50-pax AI founder networking night in Singapore next Thursday.',
-  'Budget is around 20k. Want premium but not flashy, light F&B,',
-  'maybe a short fireside chat, no full conference setup.',
-  'Need it to feel credible for investors and builders.',
+  'Budget is around 20k SGD. Want it to feel premium but not flashy,',
+  'light F&B, a short fireside chat, and a few structured networking prompts.',
+  'No full conference setup. Audience is founders, investors, and AI builders.',
+  'Need this to be credible, efficient, and not overproduced.',
 ].join(' ')
 
 interface IntakeHeroProps {

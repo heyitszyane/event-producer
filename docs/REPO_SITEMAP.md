@@ -46,14 +46,14 @@ Package marker. Exports top-level symbols if needed.
 Application entry point. Wires agents, engines, and providers into a runnable app. Contains `InMemoryEventStore` (full CRUD implementation of the `EventStore` ABC) and `EventProducerApp` (composition root).
 
 #### `event_producer/api.py`
-FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Consistent error envelope.
+FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Consistent error envelope.
 
 #### `event_producer/agents/`
 Role-based agents plus reasoner/formatter splits. Each agent file owns a single responsibility:
 
 | File | Agent Role |
 |---|---|
-| `orchestrator.py` | Top-level coordinator; routes work to specialist agents |
+| `orchestrator.py` | Top-level coordinator; returns structured proposals for scope changes (P7B) |
 | `brief_scope.py` | Parses and validates incoming event briefs |
 | `budget_manager.py` | Owns budget allocation decisions (delegates math to Budget Engine) |
 | `production_manager.py` | Manages production timeline and deliverables |
@@ -194,4 +194,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-06-22 (P6G)*
+*Last updated: 2026-06-30 (P7C)*

@@ -16,9 +16,9 @@ Business**.
 
 ## Current status
 
-**P7A — Agentic intake + model mode** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
+**P7B — Editable scope + orchestrator proposals** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
 
-- **202 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **211 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
   six structured fields are now optional manual overrides. Constraint wins
@@ -28,6 +28,9 @@ Business**.
   app runs the deterministic fallback by default and records the fallback
   reason in the agent trace. Mode badges on the trace make the difference
   visible. See [Gemini setup](#optional-live-gemini).
+- **Editable scope + orchestrator proposals** (P7B). Scope items can be added,
+  updated, deleted, or retiered via API endpoints. The orchestrator chat returns
+  actionable proposals that can be applied or dismissed.
 - **Security action-gate is structural** — enforced in code (`action_gate.py`),
   not in prompts. No financial or state-changing action executes without a
   human-approved `Approval` object.
@@ -74,7 +77,9 @@ Messy event brief
   (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
   `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
   without a human-approved `Approval`. Tested end-to-end.
-- **REST API** — FastAPI with `/run`, `/event/{id}`, `/approvals`,
+- **REST API** — FastAPI with `/run`, `/event/{id}`, `/event/{id}/chat`,
+  `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`,
+  `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}`, `/approvals`,
   `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate
   integration. Consistent error envelope. CORS driven by `ALLOWED_ORIGINS`.
 - **Frontend mission-control dashboard** — 11 React components (AgentCrewTrace,
@@ -185,7 +190,19 @@ export NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 > **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON.
 > These are gitignored. Copy `.env.example` to `.env` to configure live mode.
 
-## Default demo input
+## Demo seed brief (P7C)
+
+The recommended demo seed brief:
+
+```json
+{
+  "brief": "Need a 50-pax AI founder networking night in Singapore next Thursday. Budget is around 20k SGD. Want it to feel premium but not flashy, light F&B, a short fireside chat, and a few structured networking prompts. No full conference setup. Audience is founders, investors, and AI builders."
+}
+```
+
+Click "Try example" in the UI to load this seed brief.
+
+## Default demo input (structured)
 
 ```json
 {
@@ -292,9 +309,10 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-177 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+211 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
-security demo. 9 Gherkin eval cases under `tests/eval_cases/`.
+security demo, P7B scope mutation and orchestrator proposals. 9 Gherkin eval
+cases under `tests/eval_cases/`.
 
 ## Repository map
 

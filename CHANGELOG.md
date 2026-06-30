@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7B — Editable scope + orchestrator proposals
+
+Extends P7A with editable scope items and orchestrator chat for AI-driven
+proposals. All proposals require explicit human apply before state mutation.
+
+#### Scope mutation endpoints
+- `POST /event/{id}/scope-items` — add a new scope item
+- `PATCH /event/{id}/scope-items/{idx}` — update an existing scope item
+- `DELETE /event/{id}/scope-items/{idx}` — delete a scope item
+- `POST /event/{id}/scope-items/{idx}/toggle` — toggle selected flag
+- `POST /event/{id}/scope-items/{idx}/retier` — change tier
+
+#### Orchestrator chat
+- `POST /event/{id}/chat` — returns proposed actions without mutating state
+- `POST /event/{id}/proposals/{id}/apply` — applies a pending proposal
+- `POST /event/{id}/proposals/{id}/dismiss` — dismisses without mutation
+
+#### Contingency preservation fix
+- `BudgetSummary` now includes `contingency_pct` to preserve the original
+  percentage across scope mutations. Post-mutation recompute uses the stored
+  percentage instead of a hardcoded fallback.
+
+#### Docs
+- Updated README with P7B features and test count (211 tests).
+
+## [0.7.0] - 2026-06-22
+
 ### P7A — Agentic intake + live Gemini provider seam + model-mode telemetry
 
 Moves Event Producer from a form-first deterministic dashboard to a real,
@@ -19,7 +46,7 @@ the structural approval-gate.
   **not** invent money-critical or schedule-critical values silently.
 - `Creative Concept Agent` proposes an event direction + ideas + suggested
   additions/cuts as **advisory only** — proposals do not mutate scope/budget/
-  schedule in P7A (P7B applies them).
+  schedule in P7A (now P7B applies them).
 - Cooperation model: `user constraint > model extraction > safe fallback`,
   gaps surfaced in `brief_intake.missing_questions`.
 
@@ -36,13 +63,7 @@ the structural approval-gate.
 - Messy-brief `IntakeHero` as the primary surface; structured fields relabeled
   "Constraints / manual overrides" (optional).
 - New `ExtractedRequirements` + `CreativeConcept` read-only panels; `AgentCrewTrace`
-  now renders model-mode badges. No "Add to scope" control (P7B).
-
-#### Docs
-- Added `.env.example`; updated README with the new live-Gemini setup, deferred
-  list, env table, and expected output (7-step trace + `model_mode_summary`).
-
-## [0.7.0] - 2026-06-22
+  now renders model-mode badges. "Add to scope" control wired via P7B endpoints.
 
 ### P6C–P6F Rescue Sequence + P6G Docs/Submission Hardening
 

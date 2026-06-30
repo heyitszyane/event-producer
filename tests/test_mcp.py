@@ -160,6 +160,7 @@ def test_mcp_delete_cleans_all_dicts() -> None:
             category_rollups={"venue": Decimal("10000")},
             tier_rollups={"must": Decimal("10000")},
             budget_cap=Decimal("50000"),
+            contingency_pct=Decimal("15"),
             contingency_reserve=Decimal("7500"),
             spendable=Decimal("42500"),
             included_totals=Decimal("10000"),

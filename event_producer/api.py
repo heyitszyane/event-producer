@@ -325,17 +325,21 @@ def create_app() -> FastAPI:
         if not event_spec:
             raise HTTPException(status_code=404, detail="Event not found")
 
-        # Recompute budget using existing engine (need budget_cap from stored budget)
+        # Recompute budget using existing engine (preserve original contingency_pct)
         existing_budget = producer.event_store.get_budget(event_id)
         budget_cap = (
             existing_budget.budget_cap if existing_budget
             else Decimal("20000")  # fallback for demo
         )
+        contingency_pct = (
+            existing_budget.contingency_pct if existing_budget
+            else Decimal("15")  # safe fallback documented in UI default
+        )
 
         budget_request = {
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_cap": budget_cap,
-            "contingency_pct": Decimal("15"),
+            "contingency_pct": contingency_pct,
             "reporting_currency": "USD",
         }
         budget_raw = producer._budget_reason.run(budget_request)
