@@ -13,6 +13,7 @@ import SecurityBeat from '../components/SecurityBeat'
 import IntakeHero from '../components/IntakeHero'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
+import AIProductionCrew from '../components/AIProductionCrew'
 import type {
   BriefIntake,
   CreativeConcept as CreativeConceptData,
@@ -111,7 +112,7 @@ interface FormData {
   brief: string
   budgetCap: string
   contingencyPct: string
-  attendees: number
+  attendees: number | ''
   eventType: string
   venueType: string
   date: string
@@ -189,11 +190,14 @@ async function parseApiError(res: Response): Promise<string> {
   }
 }
 
+// P7D: attendees and contingency defaults are NOT pre-filled to avoid silently
+// overriding brief extraction. The brief is primary. Constraints only win if user
+// explicitly provides them.
 export default function Dashboard() {
   const [brief, setBrief] = useState('')
   const [budgetCap, setBudgetCap] = useState('')
-  const [contingencyPct, setContingencyPct] = useState('10')
-  const [attendees, setAttendees] = useState(50)
+  const [contingencyPct, setContingencyPct] = useState('') // Empty by default - brief primary
+  const [attendees, setAttendees] = useState<number | ''>('') // Empty by default - brief primary
   const [eventType, setEventType] = useState('corporate')
   const [venueType, setVenueType] = useState('indoor')
   const [date, setDate] = useState('')
@@ -502,6 +506,28 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* P7D: AI Production Crew promoted above fold */}
+        {result && (
+          <AIProductionCrew
+            trace={agentTrace}
+            modelModeSummary={result.model_mode_summary}
+            briefIntake={result.brief_intake ?? null}
+            budgetSummary={result.budget_summary}
+            scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
+            onPromptChipClick={(prompt) => {
+              setChatInput(prompt)
+              // Auto-submit the prompt
+              const el = document.querySelector('[data-chip-prompt]') as HTMLTextAreaElement | null
+              if (el) {
+                setTimeout(() => {
+                  const form = el.closest('form') as HTMLFormElement | null
+                  form?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+                }, 100)
+              }
+            }}
+          />
+        )}
+
         {/* Mission control layout after run */}
         {result && (
           <div className="mc-grid">
@@ -526,9 +552,8 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* RIGHT COLUMN: Trace → Approvals → Security → Vendors → Risks → Chat */}
+            {/* RIGHT COLUMN: Approval → Security → Vendors → Risks → Chat/Trace */}
             <div className="stack">
-              <AgentCrewTrace steps={agentTrace} />
               <ApprovalInbox
                 approvals={approvals}
                 defaultExpanded={pendingApprovalCount > 0}
@@ -536,10 +561,10 @@ export default function Dashboard() {
               <SecurityBeat securityBeat={securityBeat || null} />
               <VendorsCard vendors={vendors} />
               <RiskCard risks={riskFlags} />
-              {/* P7B — Orchestrator Chat */}
-              <section className="card" id="orchestrator-chat">
+              {/* P7B — Orchestrator Chat (main interaction surface) */}
+              <section className="card" id="orchestrator-chat" data-chip-prompt>
                 <div className="card__header">
-                  <h2>Orchestrator Chat</h2>
+                  <h2>Ask the AI Producer</h2>
                 </div>
                 <div style={{ padding: 'var(--space-3)' }}>
                   <form onSubmit={handleOrchestratorChat}>
@@ -576,6 +601,15 @@ export default function Dashboard() {
                   )}
                 </div>
               </section>
+              {/* Technical trace - now secondary, collapsed by default could be added later */}
+              <details className="card" style={{ marginTop: 'var(--space-3)' }}>
+                <summary className="card__header" style={{ cursor: 'pointer', listStyle: 'none' }}>
+                  <h2 style={{ margin: 0 }}>Technical Agent Trace</h2>
+                </summary>
+                <div style={{ padding: 'var(--space-3)' }}>
+                  <AgentCrewTrace steps={agentTrace} />
+                </div>
+              </details>
               <ChatPane messages={chatLog} />
             </div>
           </div>

@@ -9,6 +9,23 @@ export type AgentMode =
   | 'human_approval_gate'
   | 'not_enabled'
 
+// P7D: requirement source tracking for provenance display
+export type RequirementSource =
+  | 'brief_extracted'
+  | 'manual_override'
+  | 'fallback_default'
+  | 'missing'
+
+export interface BriefIntakeSourceMap {
+  attendees?: RequirementSource
+  budget_cap?: RequirementSource
+  contingency_pct?: RequirementSource
+  date?: RequirementSource
+  event_type?: RequirementSource
+  venue_type?: RequirementSource
+  location?: RequirementSource
+}
+
 export interface AgentTraceStep {
   id: string
   role: string
@@ -49,6 +66,8 @@ export interface BriefIntake {
   confidence?: string
   model_mode?: AgentMode
   fallback_reason?: string | null
+  // P7D: source map for provenance display
+  source_map?: BriefIntakeSourceMap
 }
 
 export interface CreativeIdea {

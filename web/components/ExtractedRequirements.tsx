@@ -1,4 +1,4 @@
-import type { BriefIntake } from '../types/agentic'
+import type { BriefIntake, BriefIntakeSourceMap, RequirementSource } from '../types/agentic'
 import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
 
 interface Props {
@@ -22,12 +22,34 @@ function ListOrMissing({ items, empty }: { items?: string[]; empty: string }) {
   )
 }
 
-function field(label: string, value: string | number | null | undefined) {
+function SourceBadge({ source }: { source?: RequirementSource }) {
+  if (!source || source === 'brief_extracted') return null
+  const labels: Record<Exclude<RequirementSource, 'brief_extracted'>, string> = {
+    manual_override: 'Manual override',
+    fallback_default: 'Fallback default',
+    missing: 'Missing',
+  }
+  const classes: Record<Exclude<RequirementSource, 'brief_extracted'>, string> = {
+    manual_override: 'badge--warning',
+    fallback_default: 'badge--info',
+    missing: 'badge--muted',
+  }
+  return (
+    <span className={`badge ${classes[source as Exclude<RequirementSource, 'brief_extracted'>]}`} style={{ marginLeft: 'var(--space-1)', fontSize: 'var(--text-xs)' }}>
+      {labels[source as Exclude<RequirementSource, 'brief_extracted'>]}
+    </span>
+  )
+}
+
+function field(label: string, value: string | number | null | undefined, source?: RequirementSource) {
   if (value === null || value === undefined || value === '') return null
   return (
     <div className="kv">
       <span className="kv__label">{label}</span>
-      <span className="kv__value">{String(value)}</span>
+      <span className="kv__value">
+        {String(value)}
+        <SourceBadge source={source} />
+      </span>
     </div>
   )
 }
@@ -77,13 +99,14 @@ export default function ExtractedRequirements({ intake }: Props) {
         </div>
       </div>
 
+      {/* P7D: field provenance — show where each value came from */}
       <div className="kvs">
-        {field('Event type', intake.event_type)}
-        {field('Attendees', intake.attendees)}
-        {field('Budget cap', intake.budget_cap)}
-        {field('Venue type', intake.venue_type)}
-        {field('Date', intake.date)}
-        {field('Location', intake.location)}
+        {field('Event type', intake.event_type, intake.source_map?.event_type)}
+        {field('Attendees', intake.attendees, intake.source_map?.attendees)}
+        {field('Budget cap', intake.budget_cap, intake.source_map?.budget_cap)}
+        {field('Venue type', intake.venue_type, intake.source_map?.venue_type)}
+        {field('Date', intake.date, intake.source_map?.date)}
+        {field('Location', intake.location, intake.source_map?.location)}
         {field('Tone', intake.tone)}
         {field('Audience', intake.audience_profile)}
       </div>

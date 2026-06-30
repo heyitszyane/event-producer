@@ -693,6 +693,33 @@ class ChatLogMessage(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# P7D — Requirement source tracking for provenance display
+# ---------------------------------------------------------------------------
+
+RequirementSource = Literal["brief_extracted", "manual_override", "fallback_default", "missing"]
+
+class BriefIntakeSourceMap(BaseModel):
+    """P7D: Source tracking for each extracted field.
+
+    This allows the UI to show where each value came from:
+    - brief_extracted: parsed directly from the user's brief text
+    - manual_override: user explicitly provided this value
+    - fallback_default: server-side default used (engine requirement)
+    - missing: no value available, needs follow-up
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    attendees: RequirementSource = "brief_extracted"
+    budget_cap: RequirementSource = "brief_extracted"
+    contingency_pct: RequirementSource = "brief_extracted"
+    date: RequirementSource = "brief_extracted"
+    event_type: RequirementSource = "brief_extracted"
+    venue_type: RequirementSource = "brief_extracted"
+    location: RequirementSource = "brief_extracted"
+
+
 class BriefIntakeResult(BaseModel):
     """Output of the Brief Intake Agent.
 
@@ -701,6 +728,9 @@ class BriefIntakeResult(BaseModel):
     uncertain information is surfaced via ``missing_questions``,
     ``assumptions``, and ``confidence`` instead. Budget/schedule math is left to
     the deterministic engines.
+
+    P7D addition: ``source_map`` tracks where each value originated for honest
+    display of brief extraction vs. manual overrides vs. fallback defaults.
     """
 
     # tolerate model-supplied extra/verbose keys rather than dropping the whole
@@ -728,6 +758,8 @@ class BriefIntakeResult(BaseModel):
     market_realism_warnings: list[str] = Field(default_factory=list)
     confidence: str = "low"
     model_mode: AgentMode = "rule_based_fallback"
+    # P7D: source map for provenance display
+    source_map: BriefIntakeSourceMap | None = None
 
 
 class CreativeIdea(BaseModel):

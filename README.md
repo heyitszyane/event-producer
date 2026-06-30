@@ -16,9 +16,9 @@ Business**.
 
 ## Current status
 
-**P7B — Editable scope + orchestrator proposals** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
+**P7D — Interactive agentic demo surface** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
 
-- **211 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **222 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
   six structured fields are now optional manual overrides. Constraint wins
@@ -190,9 +190,25 @@ export NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 > **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON.
 > These are gitignored. Copy `.env.example` to `.env` to configure live mode.
 
-## Demo seed brief (P7C)
+## Demo seed briefs
 
-The recommended demo seed brief:
+### P7D Stress-test brief (Singapore open-bar scenario)
+
+```json
+{
+  "brief": "1 night AI industry networking event with $10000 budget. Event will be held in an indoor bar or restaurant in Singapore, on 10 July 2026 between 6pm to 10pm. Open bar with canapes. Expected turnout 100 pax. Need basic AV system and banners. If budget permits, include some free merch such as branded t-shirts, caps and notebooks."
+}
+```
+
+This scenario triggers a budget realism warning in fallback mode.
+
+### P7C Seed brief (calmer premium scenario)
+
+```json
+{
+  "brief": "Need a 50-pax AI founder networking night in Singapore next Thursday. Budget is around 20k SGD. Want it to feel premium but not flashy, light F&B, a short fireside chat, and a few structured networking prompts. No full conference setup. Audience is founders, investors, and AI builders."
+}
+```
 
 ```json
 {
@@ -309,9 +325,10 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-211 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+222 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
-security demo, P7B scope mutation and orchestrator proposals. 9 Gherkin eval
+security demo, P7B scope mutation and orchestrator proposals, P7D constraint
+override semantics and budget realism warnings. 9 Gherkin eval
 cases under `tests/eval_cases/`.
 
 ## Repository map

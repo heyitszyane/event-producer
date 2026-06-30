@@ -210,6 +210,27 @@ class BriefIntakeFormatterAgent:
                 f"${budget_cap} / {attendees} attendees."
             )
 
+        # P7D: Singapore open-bar realism warning (common contradiction)
+        # 100 pax with open bar/canapés in Singapore under SGD 10000 is
+        # unlikely to be feasible. This heuristic makes the contradiction visible
+        # to the user without fabricating costs.
+        low_realism = False
+        if location and attendees and budget_cap:
+            location_low = location.lower()
+            if "singapore" in location_low or "sg" in location_low:
+                brief_low = brief.lower()
+                has_open_bar = any(
+                    kw in brief_low for kw in ["open bar", "openbar", "bar", "drinks", "alcohol", "full bar"]
+                )
+                budget_value = int(budget_cap.replace(",", ""))
+                if attendees >= 80 and has_open_bar and budget_value <= 10000:
+                    low_realism = True
+        if low_realism:
+            warnings.append(
+                "Budget realism risk: 100 pax with open bar/canapés in Singapore is likely above this cap. "
+                "Consider reducing bar scope, switching to drink coupons, or increasing budget."
+            )
+
         # Confidence mirrors how much was actually extractable vs assumed.
         filled = sum(x is not None for x in (canonical, budget_cap, attendees, date))
         confidence = "high" if filled >= 3 else "medium" if filled >= 2 else "low"

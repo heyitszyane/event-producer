@@ -36,7 +36,7 @@ export interface EventCommandHeaderProps {
     brief: string
     budgetCap: string
     contingencyPct: string
-    attendees: number
+    attendees: number | ''
     eventType: string
     venueType: string
     date: string
@@ -45,7 +45,7 @@ export interface EventCommandHeaderProps {
     setBrief: (v: string) => void
     setBudgetCap: (v: string) => void
     setContingencyPct: (v: string) => void
-    setAttendees: (v: number) => void
+    setAttendees: (v: number | '') => void
     setEventType: (v: string) => void
     setVenueType: (v: string) => void
     setDate: (v: string) => void
@@ -150,13 +150,14 @@ export default function EventCommandHeader({
               )}
             </label>
 
-            {/* Contingency % */}
+            {/* Contingency % - empty by default, brief extraction primary */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
               <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Contingency %</span>
               <input
                 type="number"
                 value={formData.contingencyPct}
                 onChange={(e) => formHandlers.setContingencyPct(e.target.value)}
+                placeholder="e.g. 10"
                 className={`input ${fieldErrors.contingencyPct ? 'input--error' : ''}`}
                 aria-invalid={!!fieldErrors.contingencyPct}
                 aria-describedby={fieldErrors.contingencyPct ? 'error-contingencyPct' : undefined}
@@ -166,13 +167,17 @@ export default function EventCommandHeader({
               )}
             </label>
 
-            {/* Attendees */}
+            {/* Attendees - empty by default, brief extraction primary */}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
               <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Attendees</span>
               <input
                 type="number"
                 value={formData.attendees}
-                onChange={(e) => formHandlers.setAttendees(Number(e.target.value))}
+                onChange={(e) => {
+                  const v = e.target.value
+                  formHandlers.setAttendees(v ? Number(v) : '')
+                }}
+                placeholder="e.g. 100"
                 className={`input ${fieldErrors.attendees ? 'input--error' : ''}`}
                 aria-invalid={!!fieldErrors.attendees}
                 aria-describedby={fieldErrors.attendees ? 'error-attendees' : undefined}

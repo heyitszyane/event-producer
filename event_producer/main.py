@@ -43,6 +43,7 @@ from event_producer.models.schemas import (
     AgentTraceStep,
     Approval,
     BriefIntakeResult,
+    BriefIntakeSourceMap,
     BudgetSummary,
     ChatLogMessage,
     CreativeConceptResult,
@@ -444,6 +445,30 @@ class EventProducerApp:
         # engines actually require them; gaps are reported via brief_intake
         # (missing_questions + assumptions), never silently fabricated.
         # ------------------------------------------------------------------
+        # P7D: Track source for provenance display
+        source_map = BriefIntakeSourceMap(
+            attendees="brief_extracted" if brief_intake.attendees is not None else "fallback_default",
+            budget_cap="brief_extracted" if brief_intake.budget_cap is not None else "fallback_default",
+            contingency_pct="brief_extracted" if brief_intake.contingency_pct is not None else "fallback_default",
+            date="brief_extracted" if brief_intake.date is not None else "fallback_default",
+            event_type="brief_extracted" if brief_intake.event_type else "fallback_default",
+            venue_type="brief_extracted" if brief_intake.venue_type is not None else "fallback_default",
+            location="brief_extracted" if brief_intake.location is not None else "missing",
+        )
+        # Override source_map if user explicitly provided values
+        if attendees is not None:
+            source_map.attendees = "manual_override"
+        if budget_cap is not None:
+            source_map.budget_cap = "manual_override"
+        if contingency_pct is not None:
+            source_map.contingency_pct = "manual_override"
+        if date is not None:
+            source_map.date = "manual_override"
+        if event_type is not None:
+            source_map.event_type = "manual_override"
+        if venue_type is not None:
+            source_map.venue_type = "manual_override"
+
         resolved_attendees = (
             attendees
             if attendees is not None
@@ -500,6 +525,9 @@ class EventProducerApp:
             brief_intake.assumptions.append(
                 "No budget cap specified; using a default of 20000 for costing."
             )
+
+        # P7D: Attach source map to brief_intake for provenance display
+        brief_intake.source_map = source_map
 
         # ------------------------------------------------------------------
         # Step 0.6 (P7A): Creative Concept (advisory only).
