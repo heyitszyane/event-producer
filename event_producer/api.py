@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from event_producer.main import EventProducerApp
-from event_producer.models.schemas import Approval
+from event_producer.models.schemas import Approval, RunEventRequest as RunEventSchema
 from event_producer.security.action_gate import enforce
 
 # ---------------------------------------------------------------------------
@@ -26,15 +26,41 @@ from event_producer.security.action_gate import enforce
 
 
 class RunEventRequest(BaseModel):
-    """Request body for the ``POST /run`` endpoint."""
+    """Request body for the ``POST /run`` endpoint.
+
+    P7A: the legacy shape (all six constraint fields supplied) is preserved so
+    existing calls/tests/tests keep working. The constraint fields are now
+    **optional**, turning ``brief`` into the primary product input:
+
+    1. ``brief`` is required and is the primary product input.
+    2. Structured fields are optional constraints/manual overrides.
+    3. If provided, a user-provided field wins over model extraction.
+    4. If missing, the Brief Intake Agent may extract it.
+    5. If still missing after extraction, a safe server-side fallback is used
+       only where required by the deterministic pipeline, and the gap is
+       surfaced in ``brief_intake.missing_questions`` +
+       ``creative_concept`` assumptions.
+    """
 
     brief: str
-    budget_cap: str
-    contingency_pct: str
-    attendees: int
-    event_type: str
-    venue_type: str
-    date: str
+    budget_cap: str | None = None
+    contingency_pct: str | None = None
+    attendees: int | None = None
+    event_type: str | None = None
+    venue_type: str | None = None
+    date: str | None = None
+
+    def to_legacy(self) -> RunEventSchema:
+        """Return a schema instance (kept for parity with the typed model)."""
+        return RunEventSchema(
+            brief=self.brief,
+            budget_cap=self.budget_cap,
+            contingency_pct=self.contingency_pct,
+            attendees=self.attendees,
+            event_type=self.event_type,
+            venue_type=self.venue_type,
+            date=self.date,
+        )
 
 
 class ChatRequest(BaseModel):

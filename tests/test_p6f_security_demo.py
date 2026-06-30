@@ -326,9 +326,10 @@ class TestP6dContractStillPasses:
         tasks = sr.get("ordered_tasks", [])
         assert len(tasks) >= 6
 
-    def test_agent_trace_has_5_roles(self, default_run_response: dict) -> None:
+    def test_agent_trace_has_7_roles(self, default_run_response: dict) -> None:
+        """P7A: trace expanded to 7 with Brief Intake + Creative Concept agents."""
         trace = default_run_response.get("agent_trace", [])
-        assert len(trace) == 5
+        assert len(trace) == 7
 
     def test_chat_log_exists(self, default_run_response: dict) -> None:
         chat = default_run_response.get("chat_log", [])

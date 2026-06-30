@@ -1,13 +1,22 @@
+import type { AgentMode } from '../types/agentic'
+import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
+
 export interface AgentTraceStep {
   id: string
   role: string
   label: string
-  status: 'complete' | 'warning' | 'blocked' | 'pending_approval'
+  status: 'complete' | 'warning' | 'blocked' | 'pending_approval' | 'error'
   input_summary: string
   output_summary: string
   artifacts: string[]
   deterministic_core: string | null
   approval_required: boolean
+  // P7A: model-mode telemetry (optional so older payloads still render)
+  model_mode?: AgentMode
+  model_name?: string | null
+  prompt_version?: string | null
+  fallback_reason?: string | null
+  confidence?: string | null
 }
 
 interface AgentCrewTraceProps {
@@ -41,6 +50,12 @@ const STATUS_CONFIG: Record<
     bg: 'var(--status-warn-bg)',
     fg: 'var(--status-warn)',
     border: 'var(--status-warn)',
+  },
+  error: {
+    label: 'Error',
+    bg: 'var(--status-critical-bg)',
+    fg: 'var(--status-critical)',
+    border: 'var(--status-critical)',
   },
 }
 
@@ -109,6 +124,15 @@ export default function AgentCrewTrace({ steps }: AgentCrewTraceProps) {
                   >
                     {statusCfg.label}
                   </span>
+                  {/* P7A: model-mode badge — honest about live vs fallback. */}
+                  {step.model_mode && (
+                    <span
+                      className={`badge agent-step__mode ${MODE_CLASS[step.model_mode] ?? 'badge--muted'}`}
+                      title={step.fallback_reason || MODE_LABEL[step.model_mode]}
+                    >
+                      {MODE_LABEL[step.model_mode]}
+                    </span>
+                  )}
                 </div>
 
                 {/* Label */}

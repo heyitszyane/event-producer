@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import Head from 'next/head'
 import EventCommandHeader from '../components/EventCommandHeader'
-import AgentCrewTrace, { type AgentTraceStep } from '../components/AgentCrewTrace'
+import AgentCrewTrace from '../components/AgentCrewTrace'
 import ApprovalInbox from '../components/ApprovalInbox'
 import ScopeCard, { type ScopeItem } from '../components/ScopeCard'
 import BudgetCard, { type BudgetSummary } from '../components/BudgetCard'
@@ -10,6 +10,15 @@ import VendorsCard, { type Vendor } from '../components/VendorsCard'
 import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
 import SecurityBeat from '../components/SecurityBeat'
+import IntakeHero from '../components/IntakeHero'
+import ExtractedRequirements from '../components/ExtractedRequirements'
+import CreativeConcept from '../components/CreativeConcept'
+import type {
+  BriefIntake,
+  CreativeConcept as CreativeConceptData,
+  ModelModeSummary,
+  AgentTraceStep,
+} from '../types/agentic'
 
 // In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
@@ -25,6 +34,9 @@ const EVENT_TYPES = [
 export interface RunEventResponse {
   event_id?: string
   status?: string
+  model_mode_summary?: ModelModeSummary
+  brief_intake?: BriefIntake | null
+  creative_concept?: CreativeConceptData | null
   event_spec?: {
     name?: string
     description?: string
@@ -113,6 +125,11 @@ interface FieldErrors {
   date?: string
 }
 
+// P7A validation: the brief is the one required field (it's the primary
+// product input). Constraints (budget, pax, type, venue, date, contingency)
+// are optional manual overrides; if provided they must be well-formed, but if
+// left blank the backend's AI intake resolves them (and records any gaps in
+// brief_intake.missing_questions).
 function validateForm(data: FormData): { valid: boolean; errors: FieldErrors } {
   const errors: FieldErrors = {}
 
@@ -120,39 +137,26 @@ function validateForm(data: FormData): { valid: boolean; errors: FieldErrors } {
     errors.brief = 'Brief is required'
   }
 
-  if (!data.budgetCap.trim()) {
-    errors.budgetCap = 'Budget cap is required'
-  } else {
+  if (data.budgetCap.trim()) {
     const bc = parseFloat(data.budgetCap)
     if (isNaN(bc) || bc <= 0) {
       errors.budgetCap = 'Must be a positive number'
     }
   }
 
-  if (!data.contingencyPct.trim()) {
-    errors.contingencyPct = 'Contingency % is required'
-  } else {
+  if (data.contingencyPct.trim()) {
     const cp = parseFloat(data.contingencyPct)
     if (isNaN(cp) || cp < 0 || cp > 50) {
       errors.contingencyPct = 'Must be between 0 and 50'
     }
   }
 
-  if (!data.attendees || data.attendees <= 0) {
+  // attendees defaults to 50 when blank; validate only when non-defaulting.
+  if (data.attendees && data.attendees <= 0) {
     errors.attendees = 'Must be greater than 0'
   }
 
-  if (!data.eventType) {
-    errors.eventType = 'Event type is required'
-  }
-
-  if (!data.venueType) {
-    errors.venueType = 'Venue type is required'
-  }
-
-  if (!data.date) {
-    errors.date = 'Date is required'
-  } else {
+  if (data.date) {
     const parsed = new Date(data.date)
     if (isNaN(parsed.getTime())) {
       errors.date = 'Invalid date format'
@@ -221,21 +225,23 @@ export default function Dashboard() {
     setError(null)
 
     try {
+      // P7A: brief-primary. Constraints are optional manual overrides; when
+      // blank we omit them (null) and let the AI intake resolve them.
+      const body: Record<string, unknown> = { brief }
+      if (budgetCap.trim()) body.budget_cap = budgetCap.trim()
+      if (contingencyPct.trim()) body.contingency_pct = contingencyPct.trim()
+      if (attendees && attendees > 0) body.attendees = attendees
+      if (eventType) body.event_type = eventType
+      if (venueType) body.venue_type = venueType
+      if (date) body.date = date
+
       const res = await fetch(`${API_BASE}/run`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Demo-User': 'demo-user',
         },
-        body: JSON.stringify({
-          brief,
-          budget_cap: budgetCap,
-          contingency_pct: contingencyPct,
-          attendees,
-          event_type: eventType,
-          venue_type: venueType,
-          date,
-        }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const message = await parseApiError(res)
@@ -333,7 +339,18 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Configurable form panel ── */}
+      {/* ── P7A: primary intake (messy brief) ── */}
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-6) var(--space-6) 0' }}>
+        <IntakeHero
+          brief={brief}
+          onBriefChange={setBrief}
+          onSubmit={handleRun}
+          loading={loading}
+          hasRun={hasRun}
+        />
+      </div>
+
+      {/* ── Constraints / manual overrides ── */}
       <EventCommandHeader
         eventSpec={result?.event_spec || null}
         formData={{
@@ -386,10 +403,12 @@ export default function Dashboard() {
           <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-8) var(--space-6)' }}>
             <div className="empty-state" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
               <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)' }}>
-                Configure your event above and click <strong>Run Event</strong> to begin.
+                Describe your event in the brief above and click{' '}
+                <strong>Analyze with AI Production Crew</strong>.
               </p>
               <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
-                The AI production crew will generate scope, budget, run-of-show, vendor coordination, and risk assessments.
+                The AI production crew interprets the brief, proposes a creative
+                direction, and runs deterministic budget + scheduling engines.
               </p>
             </div>
           </div>
@@ -410,9 +429,10 @@ export default function Dashboard() {
         {/* Mission control layout after run */}
         {result && (
           <div className="mc-grid">
-            {/* LEFT COLUMN: Agent Trace → Scope → Budget → RunOfShow */}
+            {/* LEFT COLUMN: Extracted → Creative → Scope → Budget → Schedule */}
             <div className="stack">
-              <AgentCrewTrace steps={agentTrace} />
+              <ExtractedRequirements intake={result.brief_intake ?? null} />
+              <CreativeConcept concept={result.creative_concept ?? null} />
               <ScopeCard items={result.scope_items || []} />
               <BudgetCard budget={result.budget_summary || null} />
               <RunOfShowCard
@@ -421,8 +441,9 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* RIGHT COLUMN: Approvals → Security → Vendors → Risks → Chat */}
+            {/* RIGHT COLUMN: Trace → Approvals → Security → Vendors → Risks → Chat */}
             <div className="stack">
+              <AgentCrewTrace steps={agentTrace} />
               <ApprovalInbox
                 approvals={approvals}
                 defaultExpanded={pendingApprovalCount > 0}
