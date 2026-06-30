@@ -13,13 +13,16 @@ import SecurityBeat from '../components/SecurityBeat'
 import IntakeHero from '../components/IntakeHero'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
+import AIProductionCrew from '../components/AIProductionCrew'
 import type {
   BriefIntake,
+  ConstraintResolution,
   CreativeConcept as CreativeConceptData,
   ModelModeSummary,
   AgentTraceStep,
   ProposedAction,
   OrchestratorChatResponse,
+  RecomputeNotice,
 } from '../types/agentic'
 
 // In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
@@ -89,6 +92,7 @@ export interface RunEventResponse {
     notes?: string[]
     note?: string
   }
+  constraint_resolution?: ConstraintResolution
 }
 
 interface ChatMessage {
@@ -111,11 +115,21 @@ interface FormData {
   brief: string
   budgetCap: string
   contingencyPct: string
-  attendees: number
+  attendees: number | ''
   eventType: string
   venueType: string
   date: string
 }
+
+const PRODUCER_PROMPTS = [
+  'Flag unrealistic assumptions',
+  'Suggest cuts to stay under budget',
+  'Rebalance scope under budget',
+  'Make this feel more premium',
+  'Add low-cost networking mechanics',
+  'Suggest vendor/service additions',
+  'Make this more brand/photo-ready',
+]
 
 interface FieldErrors {
   brief?: string
@@ -189,13 +203,16 @@ async function parseApiError(res: Response): Promise<string> {
   }
 }
 
+// P7D: attendees and contingency defaults are NOT pre-filled to avoid silently
+// overriding brief extraction. The brief is primary. Constraints only win if user
+// explicitly provides them.
 export default function Dashboard() {
   const [brief, setBrief] = useState('')
   const [budgetCap, setBudgetCap] = useState('')
-  const [contingencyPct, setContingencyPct] = useState('10')
-  const [attendees, setAttendees] = useState(50)
-  const [eventType, setEventType] = useState('corporate')
-  const [venueType, setVenueType] = useState('indoor')
+  const [contingencyPct, setContingencyPct] = useState('') // Empty by default - brief primary
+  const [attendees, setAttendees] = useState<number | ''>('') // Empty by default - brief primary
+  const [eventType, setEventType] = useState('')
+  const [venueType, setVenueType] = useState('')
   const [date, setDate] = useState('')
   const [result, setResult] = useState<RunEventResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -206,6 +223,8 @@ export default function Dashboard() {
   const [chatInput, setChatInput] = useState('')
   const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
   const [chatReply, setChatReply] = useState<string | null>(null)
+  const [producerLoading, setProducerLoading] = useState(false)
+  const [recomputeNotice, setRecomputeNotice] = useState<RecomputeNotice | null>(null)
 
   async function handleRun(e: FormEvent) {
     e.preventDefault()
@@ -234,12 +253,37 @@ export default function Dashboard() {
       // P7A: brief-primary. Constraints are optional manual overrides; when
       // blank we omit them (null) and let the AI intake resolve them.
       const body: Record<string, unknown> = { brief }
+      const manualConstraints: Record<string, boolean> = {
+        budget_cap: false,
+        contingency_pct: false,
+        attendees: false,
+        event_type: false,
+        venue_type: false,
+        date: false,
+      }
       if (budgetCap.trim()) body.budget_cap = budgetCap.trim()
-      if (contingencyPct.trim()) body.contingency_pct = contingencyPct.trim()
-      if (attendees && attendees > 0) body.attendees = attendees
-      if (eventType) body.event_type = eventType
-      if (venueType) body.venue_type = venueType
-      if (date) body.date = date
+      if (budgetCap.trim()) manualConstraints.budget_cap = true
+      if (contingencyPct.trim()) {
+        body.contingency_pct = contingencyPct.trim()
+        manualConstraints.contingency_pct = true
+      }
+      if (attendees && attendees > 0) {
+        body.attendees = attendees
+        manualConstraints.attendees = true
+      }
+      if (eventType) {
+        body.event_type = eventType
+        manualConstraints.event_type = true
+      }
+      if (venueType) {
+        body.venue_type = venueType
+        manualConstraints.venue_type = true
+      }
+      if (date) {
+        body.date = date
+        manualConstraints.date = true
+      }
+      body.manual_constraints = manualConstraints
 
       const res = await fetch(`${API_BASE}/run`, {
         method: 'POST',
@@ -256,6 +300,7 @@ export default function Dashboard() {
       const data: RunEventResponse = await res.json()
       setResult(data)
       setHasRun(true)
+      setRecomputeNotice(null)
     } catch (err) {
       if (err instanceof TypeError && err.message === 'Failed to fetch') {
         setError(
@@ -285,21 +330,47 @@ export default function Dashboard() {
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
 
   // P7B — orchestrator chat handler
-  async function handleOrchestratorChat(e: FormEvent) {
-    e.preventDefault()
-    if (!result?.event_id || !chatInput.trim()) return
+  async function sendProducerPrompt(message: string) {
+    if (!result?.event_id || !message.trim()) return
 
+    setProducerLoading(true)
     const res = await fetch(`${API_BASE}/event/${result.event_id}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
-      body: JSON.stringify({ message: chatInput }),
+      body: JSON.stringify({ message }),
     })
-    if (res.ok) {
-      const data: OrchestratorChatResponse = await res.json()
-      setChatReply(data.reply)
-      setOrchestratorProposals(data.proposals)
-      setChatInput('')
+    try {
+      if (res.ok) {
+        const data: OrchestratorChatResponse = await res.json()
+        setChatReply(data.reply)
+        setOrchestratorProposals(data.proposals)
+        setChatInput('')
+      }
+    } finally {
+      setProducerLoading(false)
     }
+  }
+
+  async function handleOrchestratorChat(e: FormEvent) {
+    e.preventDefault()
+    await sendProducerPrompt(chatInput)
+  }
+
+  function applyMutationPayload(data: {
+    scope_items?: ScopeItem[]
+    budget_summary?: BudgetSummary
+    schedule_result?: ScheduleResult | null
+    call_sheet?: CallSheetEntry[]
+    recompute_notice?: RecomputeNotice
+  }) {
+    setResult((prev) => prev ? ({
+      ...prev,
+      scope_items: data.scope_items ?? prev.scope_items,
+      budget_summary: data.budget_summary ?? prev.budget_summary,
+      schedule_result: data.schedule_result ?? prev.schedule_result,
+      call_sheet: data.call_sheet ?? prev.call_sheet,
+    }) : prev)
+    if (data.recompute_notice) setRecomputeNotice(data.recompute_notice)
   }
 
   // P7B — apply a proposal
@@ -311,13 +382,18 @@ export default function Dashboard() {
     })
     if (res.ok) {
       const data = await res.json()
-      // Update scope items and budget from response
-      setResult((prev) => ({
-        ...prev,
-        scope_items: data.scope_items,
-        budget_summary: data.budget_summary,
-        schedule_result: data.schedule_result,
-      }) as RunEventResponse)
+      applyMutationPayload(data)
+      setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+    }
+  }
+
+  async function dismissProposal(proposal: ProposedAction) {
+    if (!result?.event_id) return
+    const res = await fetch(`${API_BASE}/event/${result.event_id}/proposals/${proposal.id}/dismiss`, {
+      method: 'POST',
+      headers: { 'X-Demo-User': 'demo-user' },
+    })
+    if (res.ok) {
       setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
     }
   }
@@ -346,13 +422,13 @@ export default function Dashboard() {
     })
     if (res.ok) {
       const data = await res.json()
-      setResult((prev) => ({
-        ...prev,
-        scope_items: data.scope_items,
-        budget_summary: data.budget_summary,
-      }) as RunEventResponse)
+      applyMutationPayload(data)
     }
   }
+
+  const realismWarnings = result?.brief_intake?.market_realism_warnings ?? []
+  const hasRealismRisk = realismWarnings.length > 0
+  const attendeeSource = result?.constraint_resolution?.attendees?.source
 
   return (
     <>
@@ -388,9 +464,15 @@ export default function Dashboard() {
                 <span className={`hero-metric__value ${
                   budgetSummary?.over_budget
                     ? 'hero-metric__value--critical'
-                    : 'hero-metric__value--ok'
+                    : hasRealismRisk
+                      ? 'hero-metric__value--warn'
+                      : 'hero-metric__value--ok'
                 }`}>
-                  {budgetSummary?.over_budget ? 'OVER BUDGET' : 'ON TRACK'}
+                  {budgetSummary?.over_budget
+                    ? 'OVER BUDGET'
+                    : hasRealismRisk
+                      ? 'AT RISK'
+                      : 'ON TRACK'}
                 </span>
                 <span className="hero-metric__label">Budget</span>
               </div>
@@ -502,12 +584,84 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* P7D: AI Production Crew promoted above fold */}
+        {result && (
+          <AIProductionCrew
+            trace={agentTrace}
+            modelModeSummary={result.model_mode_summary}
+            briefIntake={result.brief_intake ?? null}
+            budgetSummary={result.budget_summary}
+            scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
+          />
+        )}
+
+        {result && (
+          <section className="card producer-console" id="orchestrator-chat" style={{ maxWidth: 1200, margin: 'var(--space-4) auto', padding: 'var(--space-3)' }}>
+            <div className="card__header">
+              <h2>Ask the AI Producer</h2>
+              <span className="badge badge--fallback">event-aware proposals</span>
+            </div>
+            <div className="prompt-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
+              {PRODUCER_PROMPTS.map((prompt) => (
+                <button key={prompt} className="btn btn--ghost btn--sm" type="button" onClick={() => sendProducerPrompt(prompt)} disabled={producerLoading}>
+                  {prompt}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleOrchestratorChat} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'stretch', flexWrap: 'wrap' }}>
+              <textarea
+                value={chatInput}
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
+                placeholder="Ask for cuts, premium swaps, vendor additions, or assumption checks"
+                disabled={!result?.event_id || producerLoading}
+                rows={2}
+                style={{ flex: '1 1 420px' }}
+              />
+              <button type="submit" disabled={!result?.event_id || producerLoading || !chatInput.trim()} className="btn btn--primary">
+                {producerLoading ? 'Thinking...' : 'Ask'}
+              </button>
+            </form>
+            {chatReply && (
+              <div className="block block--info" style={{ marginTop: 'var(--space-3)' }}>
+                <strong>Producer reply:</strong> {chatReply}
+              </div>
+            )}
+            {orchestratorProposals.length > 0 && (
+              <div style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-2)' }}>
+                {orchestratorProposals.map((p) => (
+                  <div key={p.id} className="card card--inset">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                      <strong>{p.title}</strong>
+                      <span className="badge badge--info">{String(p.payload?.tier || p.type)}</span>
+                    </div>
+                    <p style={{ margin: 'var(--space-1) 0', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{p.rationale}</p>
+                    {p.payload?.estimated_cost !== undefined && p.payload?.estimated_cost !== null && (
+                      <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
+                        Budget impact: ${String(p.payload.estimated_cost)}
+                      </p>
+                    )}
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
+                      <button onClick={() => applyProposal(p)} className="btn btn--primary btn--sm" type="button">Apply</button>
+                      <button onClick={() => dismissProposal(p)} className="btn btn--ghost btn--sm" type="button">Dismiss</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {recomputeNotice?.message && (
+              <div className={recomputeNotice.schedule_status === 'warning' ? 'block block--warn' : 'block block--info'} style={{ marginTop: 'var(--space-3)' }}>
+                {recomputeNotice.message}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Mission control layout after run */}
         {result && (
           <div className="mc-grid">
             {/* LEFT COLUMN: Extracted → Creative → Scope → Budget → Schedule */}
             <div className="stack">
-              <ExtractedRequirements intake={result.brief_intake ?? null} />
+              <ExtractedRequirements intake={result.brief_intake ?? null} resolution={result.constraint_resolution} />
               <CreativeConcept
                 concept={result.creative_concept ?? null}
                 onAddToScope={handleAddToScope}
@@ -515,20 +669,26 @@ export default function Dashboard() {
               <ScopeCard
                 items={result.scope_items || []}
                 eventId={result.event_id}
-                onItemsChange={(items) =>
-                  setResult((prev) => ({ ...prev, scope_items: items }) as RunEventResponse)
-                }
+                onMutation={applyMutationPayload}
               />
-              <BudgetCard budget={result.budget_summary || null} />
+              <BudgetCard
+                budget={result.budget_summary || null}
+                warnings={realismWarnings}
+                basis={{
+                  attendees: result.constraint_resolution?.attendees?.resolved_value ?? result.event_spec?.attendees,
+                  location: result.constraint_resolution?.location?.resolved_value ? String(result.constraint_resolution.location.resolved_value) : result.brief_intake?.location ?? null,
+                  contingencyPct: result.constraint_resolution?.contingency_pct?.resolved_value ?? result.budget_summary?.contingency_pct,
+                  source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'mixed',
+                }}
+              />
               <RunOfShowCard
                 schedule={result.schedule_result}
                 callSheet={result.call_sheet || []}
               />
             </div>
 
-            {/* RIGHT COLUMN: Trace → Approvals → Security → Vendors → Risks → Chat */}
+            {/* RIGHT COLUMN: Approval → Security → Vendors → Risks → Chat/Trace */}
             <div className="stack">
-              <AgentCrewTrace steps={agentTrace} />
               <ApprovalInbox
                 approvals={approvals}
                 defaultExpanded={pendingApprovalCount > 0}
@@ -536,46 +696,15 @@ export default function Dashboard() {
               <SecurityBeat securityBeat={securityBeat || null} />
               <VendorsCard vendors={vendors} />
               <RiskCard risks={riskFlags} />
-              {/* P7B — Orchestrator Chat */}
-              <section className="card" id="orchestrator-chat">
-                <div className="card__header">
-                  <h2>Orchestrator Chat</h2>
-                </div>
+              {/* Technical trace - now secondary, collapsed by default could be added later */}
+              <details className="card" style={{ marginTop: 'var(--space-3)' }}>
+                <summary className="card__header" style={{ cursor: 'pointer', listStyle: 'none' }}>
+                  <h2 style={{ margin: 0 }}>Technical Agent Trace</h2>
+                </summary>
                 <div style={{ padding: 'var(--space-3)' }}>
-                  <form onSubmit={handleOrchestratorChat}>
-                    <textarea
-                      value={chatInput}
-                      onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
-                      placeholder="Ask for suggestions (e.g., 'Make this feel more premium')"
-                      disabled={!result?.event_id}
-                      rows={2}
-                      style={{ width: '100%', marginBottom: 'var(--space-2)' }}
-                    />
-                    <button type="submit" disabled={!result?.event_id || loading} className="btn btn--primary">
-                      Ask Orchestrator
-                    </button>
-                  </form>
-                  {chatReply && (
-                    <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-2)', background: 'var(--surface-tertiary)', borderRadius: 'var(--radius-md)' }}>
-                      <strong>Reply:</strong> {chatReply}
-                    </div>
-                  )}
-                  {orchestratorProposals.length > 0 && (
-                    <div style={{ marginTop: 'var(--space-3)' }}>
-                      <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Proposals</h3>
-                      {orchestratorProposals.map((p) => (
-                        <div key={p.id} className="card card--inset" style={{ marginBottom: 'var(--space-2)' }}>
-                          <div style={{ fontWeight: 600 }}>{p.title}</div>
-                          <div style={{ fontSize: 'var(--text-sm)' }}>{p.rationale}</div>
-                          <button onClick={() => applyProposal(p)} className="btn btn--sm" style={{ marginTop: 'var(--space-1)' }}>
-                            Apply
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <AgentCrewTrace steps={agentTrace} />
                 </div>
-              </section>
+              </details>
               <ChatPane messages={chatLog} />
             </div>
           </div>

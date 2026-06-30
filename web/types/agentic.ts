@@ -9,6 +9,32 @@ export type AgentMode =
   | 'human_approval_gate'
   | 'not_enabled'
 
+// P7D: requirement source tracking for provenance display
+export type RequirementSource =
+  | 'brief_extracted'
+  | 'manual_override'
+  | 'fallback_default'
+  | 'missing'
+
+export interface BriefIntakeSourceMap {
+  attendees?: RequirementSource
+  budget_cap?: RequirementSource
+  contingency_pct?: RequirementSource
+  date?: RequirementSource
+  event_type?: RequirementSource
+  venue_type?: RequirementSource
+  location?: RequirementSource
+}
+
+export interface ConstraintResolutionField {
+  brief_value?: string | number | null
+  manual_value?: string | number | null
+  resolved_value?: string | number | null
+  source?: RequirementSource
+}
+
+export type ConstraintResolution = Record<string, ConstraintResolutionField>
+
 export interface AgentTraceStep {
   id: string
   role: string
@@ -49,6 +75,8 @@ export interface BriefIntake {
   confidence?: string
   model_mode?: AgentMode
   fallback_reason?: string | null
+  // P7D: source map for provenance display
+  source_map?: BriefIntakeSourceMap
 }
 
 export interface CreativeIdea {
@@ -147,4 +175,11 @@ export interface OrchestratorChatResponse {
   proposals: ProposedAction[]
   model_mode: AgentMode
   fallback_reason?: string | null
+}
+
+export interface RecomputeNotice {
+  previous_headroom?: string
+  current_headroom?: string
+  schedule_status?: 'recomputed' | 'warning' | string
+  message?: string
 }

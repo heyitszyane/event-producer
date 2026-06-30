@@ -24,6 +24,7 @@ from event_producer.models.schemas import (
     BudgetSummary,
     Proposal,
     RunEventRequest as RunEventSchema,
+    ManualConstraintFlags,
     ScopeItem,
     ScopeItemCreate,
     ScopeItemUpdate,
@@ -59,6 +60,7 @@ class RunEventRequest(BaseModel):
     event_type: str | None = None
     venue_type: str | None = None
     date: str | None = None
+    manual_constraints: ManualConstraintFlags | None = None
 
     def to_legacy(self) -> RunEventSchema:
         """Return a schema instance (kept for parity with the typed model)."""
@@ -70,6 +72,7 @@ class RunEventRequest(BaseModel):
             event_type=self.event_type,
             venue_type=self.venue_type,
             date=self.date,
+            manual_constraints=self.manual_constraints,
         )
 
 
@@ -176,6 +179,7 @@ def create_app() -> FastAPI:
             event_type=req.event_type,
             venue_type=req.venue_type,
             date=req.date,
+            manual_constraints=req.manual_constraints,
         )
         return result
 
@@ -327,6 +331,7 @@ def create_app() -> FastAPI:
 
         # Recompute budget using existing engine (preserve original contingency_pct)
         existing_budget = producer.event_store.get_budget(event_id)
+        previous_headroom = existing_budget.headroom if existing_budget else None
         budget_cap = (
             existing_budget.budget_cap if existing_budget
             else Decimal("20000")  # fallback for demo
@@ -345,7 +350,8 @@ def create_app() -> FastAPI:
         budget_raw = producer._budget_reason.run(budget_request)
         budget_validated = producer._budget_formatter.run(budget_raw)
         budget_summary = budget_validated["budget_summary"]
-        producer.event_store.save_budget(event_id, BudgetSummary(**budget_summary))
+        updated_budget = BudgetSummary(**budget_summary)
+        producer.event_store.save_budget(event_id, updated_budget)
 
         # Recompute schedule (best effort; may be None)
         event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
@@ -374,11 +380,29 @@ def create_app() -> FastAPI:
         # Risk flags recompute (optional - for now return empty, can extend later)
         # For P7B, we skip risk recompute to keep scope focused
 
+        schedule_message = (
+            "Schedule recomputed."
+            if schedule_result
+            else "Schedule warning: new item is not yet scheduled."
+        )
+        previous_headroom_text = str(previous_headroom) if previous_headroom is not None else "unknown"
+        current_headroom_text = str(updated_budget.headroom)
+
         return {
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_summary": budget_summary,
             "schedule_result": schedule_result.model_dump() if schedule_result else None,
             "call_sheet": [c.model_dump() for c in call_sheet],
+            "recompute_notice": {
+                "previous_headroom": previous_headroom_text,
+                "current_headroom": current_headroom_text,
+                "schedule_status": "recomputed" if schedule_result else "warning",
+                "message": (
+                    "Budget recalculated. "
+                    f"Headroom changed from {previous_headroom_text} to {current_headroom_text}. "
+                    f"{schedule_message}"
+                ),
+            },
         }
 
     # P7B scope mutation uses a generic event_id parameter; the store is keyed by event_id.

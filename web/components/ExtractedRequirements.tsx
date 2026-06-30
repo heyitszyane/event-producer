@@ -1,8 +1,9 @@
-import type { BriefIntake } from '../types/agentic'
+import type { BriefIntake, ConstraintResolution, ConstraintResolutionField, RequirementSource } from '../types/agentic'
 import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
 
 interface Props {
   intake: BriefIntake | null
+  resolution?: ConstraintResolution
 }
 
 function Chip({ children }: { children: React.ReactNode }) {
@@ -22,17 +23,62 @@ function ListOrMissing({ items, empty }: { items?: string[]; empty: string }) {
   )
 }
 
-function field(label: string, value: string | number | null | undefined) {
+function SourceBadge({ source }: { source?: RequirementSource }) {
+  if (!source) return null
+  const labels: Record<RequirementSource, string> = {
+    brief_extracted: 'from brief',
+    manual_override: 'Manual override',
+    fallback_default: 'Fallback default',
+    missing: 'Missing / needs follow-up',
+  }
+  const classes: Record<RequirementSource, string> = {
+    brief_extracted: 'badge--ok',
+    manual_override: 'badge--warn',
+    fallback_default: 'badge--info',
+    missing: 'badge--muted',
+  }
+  return (
+    <span className={`badge ${classes[source]}`} style={{ marginLeft: 'var(--space-1)', fontSize: 'var(--text-xs)' }}>
+      {labels[source]}
+    </span>
+  )
+}
+
+function field(label: string, value: string | number | null | undefined, source?: RequirementSource, resolved?: ConstraintResolutionField) {
   if (value === null || value === undefined || value === '') return null
   return (
     <div className="kv">
       <span className="kv__label">{label}</span>
-      <span className="kv__value">{String(value)}</span>
+      <span className="kv__value">
+        {String(value)}
+        <SourceBadge source={source} />
+        {source === 'manual_override' && resolved?.brief_value !== null && resolved?.brief_value !== undefined && (
+          <span className="muted" style={{ display: 'block', marginTop: '2px', fontSize: 'var(--text-xs)' }}>
+            Brief said: {String(resolved.brief_value)}
+          </span>
+        )}
+      </span>
     </div>
   )
 }
 
-export default function ExtractedRequirements({ intake }: Props) {
+function resolvedValue(
+  resolution: ConstraintResolution | undefined,
+  key: string,
+  fallback: string | number | null | undefined,
+) {
+  return resolution?.[key]?.resolved_value ?? fallback
+}
+
+function resolvedSource(
+  resolution: ConstraintResolution | undefined,
+  key: string,
+  fallback?: RequirementSource,
+) {
+  return resolution?.[key]?.source ?? fallback
+}
+
+export default function ExtractedRequirements({ intake, resolution }: Props) {
   if (!intake) {
     return (
       <section
@@ -77,13 +123,15 @@ export default function ExtractedRequirements({ intake }: Props) {
         </div>
       </div>
 
+      {/* P7D: field provenance — show where each value came from */}
       <div className="kvs">
-        {field('Event type', intake.event_type)}
-        {field('Attendees', intake.attendees)}
-        {field('Budget cap', intake.budget_cap)}
-        {field('Venue type', intake.venue_type)}
-        {field('Date', intake.date)}
-        {field('Location', intake.location)}
+        {field('Event type', resolvedValue(resolution, 'event_type', intake.event_type), resolvedSource(resolution, 'event_type', intake.source_map?.event_type), resolution?.event_type)}
+        {field('Attendee basis', resolvedValue(resolution, 'attendees', intake.attendees), resolvedSource(resolution, 'attendees', intake.source_map?.attendees), resolution?.attendees)}
+        {field('Budget cap', resolvedValue(resolution, 'budget_cap', intake.budget_cap), resolvedSource(resolution, 'budget_cap', intake.source_map?.budget_cap), resolution?.budget_cap)}
+        {field('Contingency', resolvedValue(resolution, 'contingency_pct', intake.contingency_pct), resolvedSource(resolution, 'contingency_pct', intake.source_map?.contingency_pct), resolution?.contingency_pct)}
+        {field('Venue type', resolvedValue(resolution, 'venue_type', intake.venue_type), resolvedSource(resolution, 'venue_type', intake.source_map?.venue_type), resolution?.venue_type)}
+        {field('Date', resolvedValue(resolution, 'date', intake.date), resolvedSource(resolution, 'date', intake.source_map?.date), resolution?.date)}
+        {field('Location', resolvedValue(resolution, 'location', intake.location), resolvedSource(resolution, 'location', intake.source_map?.location), resolution?.location)}
         {field('Tone', intake.tone)}
         {field('Audience', intake.audience_profile)}
       </div>

@@ -10,6 +10,7 @@ export interface BudgetSummary {
   category_rollups: Record<string, string>
   tier_rollups: Record<string, string>
   budget_cap: string
+  contingency_pct: string
   contingency_reserve: string
   spendable: string
   included_totals: string
@@ -28,6 +29,13 @@ export interface BudgetSummary {
 
 interface BudgetCardProps {
   budget: BudgetSummary | null
+  basis?: {
+    attendees?: string | number | null
+    location?: string | null
+    contingencyPct?: string | number | null
+    source?: string | null
+  }
+  warnings?: string[]
 }
 
 function formatCurrency(value: string | undefined | null): string {
@@ -61,7 +69,7 @@ const TIER_LABELS: Record<string, string> = {
   wow: 'WOW',
 }
 
-export default function BudgetCard({ budget }: BudgetCardProps) {
+export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardProps) {
   if (!budget) {
     return (
       <section className="card" id="budget" aria-labelledby="budget-heading">
@@ -77,9 +85,12 @@ export default function BudgetCard({ budget }: BudgetCardProps) {
 
   const headroomNum = parseFloat(budget.headroom || '0')
   const headroomColor = headroomNum < 0 ? 'var(--status-critical)' : 'var(--status-ok)'
+  const hasRealismRisk = warnings.length > 0
 
   const statusBadge = budget.over_budget
     ? { label: 'OVER BUDGET', variant: 'badge--critical' as const, bg: 'var(--status-critical-bg)' as const, fg: 'var(--status-critical)' as const }
+    : hasRealismRisk
+      ? { label: 'AT RISK — full brief likely exceeds cap', variant: 'badge--warn' as const, bg: 'var(--status-warn-bg)' as const, fg: 'var(--status-warn)' as const }
     : budget.under_budget
       ? { label: 'ON TRACK', variant: 'badge--ok' as const, bg: 'var(--status-ok-bg)' as const, fg: 'var(--status-ok)' as const }
       : { label: 'ON TARGET', variant: 'badge--info' as const, bg: 'var(--status-info-bg)' as const, fg: 'var(--status-info)' as const }
@@ -95,6 +106,23 @@ export default function BudgetCard({ budget }: BudgetCardProps) {
 
       {/* Three metric blocks */}
       <div className="card__body">
+        {basis && (
+          <div className="block block--info" style={{ marginBottom: 'var(--space-3)' }}>
+            <strong>Budget basis:</strong>{' '}
+            {basis.attendees ?? 'unknown'} attendees · {basis.location || 'location unknown'} ·{' '}
+            {basis.contingencyPct ?? 'default'}% contingency · source: {basis.source || 'mixed'}
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <div className="block block--warn" style={{ marginBottom: 'var(--space-3)' }}>
+            <h3 className="block__title">Budget realism risk</h3>
+            <ul className="bullets">
+              {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
           <div className="metric">
             <span className="metric__value" aria-label={`Budget cap: ${formatCurrency(budget.budget_cap)}`}>

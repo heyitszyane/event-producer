@@ -189,6 +189,11 @@ a:hover {
   /* Intentionally minimal — children provide structure */
 }
 
+#ai-crew {
+  max-width: 1200px;
+  margin: var(--space-4) auto;
+}
+
 /* Metric */
 .metric {
   display: flex;
@@ -345,6 +350,25 @@ a:hover {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.select--compact {
+  padding: 4px 6px;
+  font-size: var(--text-sm);
+}
+
+.field-compact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.field-compact--checkbox {
+  flex-direction: row;
+  align-items: center;
+  padding-top: 22px;
 }
 
 .textarea {

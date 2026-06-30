@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from event_producer.models.schemas import AgentMode, BriefIntakeResult
@@ -54,6 +55,12 @@ _BUDGET_RE = re.compile(
     r"(\d[\d,]*\.?\d*)\s*(k|m|million|thousand)?"
 )
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+_NATURAL_DATE_RE = re.compile(
+    r"\b(\d{1,2})\s+"
+    r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+(\d{4})\b",
+    re.I,
+)
 _TOMORROW_RE = re.compile(r"\b(tomorrow)\b", re.I)
 
 
@@ -103,7 +110,15 @@ def _extract_budget_cap(text: str) -> tuple[str | None, str | None]:
 
 def _extract_date(text: str) -> str | None:
     m = _DATE_RE.search(text)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    natural = _NATURAL_DATE_RE.search(text)
+    if not natural:
+        return None
+    try:
+        return datetime.strptime(natural.group(0), "%d %B %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 def _extract_location(text: str) -> str | None:
@@ -208,6 +223,27 @@ class BriefIntakeFormatterAgent:
             warnings.append(
                 f"Per-head budget looks tight given "
                 f"${budget_cap} / {attendees} attendees."
+            )
+
+        # P7D: Singapore open-bar realism warning (common contradiction)
+        # 100 pax with open bar/canapés in Singapore under SGD 10000 is
+        # unlikely to be feasible. This heuristic makes the contradiction visible
+        # to the user without fabricating costs.
+        low_realism = False
+        if location and attendees and budget_cap:
+            location_low = location.lower()
+            if "singapore" in location_low or "sg" in location_low:
+                brief_low = brief.lower()
+                has_open_bar = any(
+                    kw in brief_low for kw in ["open bar", "openbar", "bar", "drinks", "alcohol", "full bar"]
+                )
+                budget_value = int(budget_cap.replace(",", ""))
+                if attendees >= 80 and has_open_bar and budget_value <= 10000:
+                    low_realism = True
+        if low_realism:
+            warnings.append(
+                "Budget realism risk: 100 pax with open bar/canapés in Singapore is likely above this cap. "
+                "Consider reducing bar scope, switching to drink coupons, or increasing budget."
             )
 
         # Confidence mirrors how much was actually extractable vs assumed.

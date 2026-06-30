@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7D-FIX / 21B — Constraint provenance + demo-surface acceptance
+
+Repairs the P7D acceptance blocker where extracted brief truth could disagree
+with event header/manual defaults.
+
+- Fixed messy-brief/manual-override contradiction: inactive/default manual
+  values no longer override extracted requirements, and `constraint_resolution`
+  exposes brief/manual/resolved provenance.
+- Stress-test brief now resolves to `100` attendees end-to-end, parses
+  `10 July 2026`, and prices attendee-scaled scope at quantity `100`.
+- Added/strengthened the Singapore 100-pax open-bar/canapes budget realism
+  warning; budget UI no longer presents a clean green state for this case.
+- Promoted AI Production Crew cards and moved Ask the AI Producer prompt chips
+  plus proposal Apply/Dismiss into a top post-run surface.
+- Improved scope customization with add/edit/delete/toggle/retier controls and
+  visible recompute notices showing headroom before/after and schedule status.
+- Updated README and repo sitemap to reflect P7D-FIX behavior and 225-test QA
+  count.
+
+### P7D — Interactive agentic demo surface
+
+Makes Event Producer visibly behave like an interactive AI co-producer, not a static dashboard with AI labels.
+
+#### Constraint override semantics fix
+- `attendees` and `contingencyPct` fields are now blank by default (not pre-filled)
+- Brief extraction is primary; manual constraints require explicit user input
+- Source map tracks where each value came from for honest display
+
+#### Requirement provenance display
+- Added `BriefIntakeSourceMap` schema with `RequirementSource` enum
+- Fields show "Manual override" or "Fallback default" badges when applicable
+- `ExtractedRequirements.tsx` displays source badges on field values
+
+#### AI Production Crew above the fold
+- Created `AIProductionCrew.tsx` component with visible agent cards
+- Shows mode badges: Gemini live, rule-based fallback, deterministic engine, approval-gated, scripted fixture
+- Prompt chips added for quick orchestrator interaction
+
+#### Orchestrator prompt chips
+- Added quick-action chips: "Make this feel more premium", "Suggest cuts to stay under budget", etc.
+- Chips route through `/event/{id}/chat` endpoint
+- Proposals render with Apply/Dismiss controls
+
+#### Manual scope customization
+- Added "+ Add" button to `ScopeCard.tsx`
+- Inline form allows name, category, cost, tier entry
+- Budget recalculates after mutation
+
+#### Budget realism warnings (fallback)
+- Added heuristic for Singapore open-bar contradiction warning
+- Triggers when: Singapore location + 80+ attendees + open bar + budget <= 10000 SGD
+- Warning suggests drink coupons or increased budget
+
+#### Visual hierarchy rebalancing
+- AI Production Crew promoted to above-the-fold primary view
+- Agent trace moved to collapsed `<details>` panel
+- Orchestrator chat renamed to "Ask the AI Producer"
+
 ### P7B — Editable scope + orchestrator proposals
 
 Extends P7A with editable scope items and orchestrator chat for AI-driven

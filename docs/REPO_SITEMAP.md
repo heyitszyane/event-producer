@@ -1,6 +1,7 @@
 # REPO_SITEMAP.md -- Event Producer Folder Map
 
-> This file describes the **current** repository layout as of P6G (post-rescue, docs hardened).
+> This file describes the **current** repository layout as of P7D-FIX / 21B
+> (constraint provenance and demo-surface acceptance).
 
 ---
 
@@ -46,21 +47,25 @@ Package marker. Exports top-level symbols if needed.
 Application entry point. Wires agents, engines, and providers into a runnable app. Contains `InMemoryEventStore` (full CRUD implementation of the `EventStore` ABC) and `EventProducerApp` (composition root).
 
 #### `event_producer/api.py`
-FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Consistent error envelope.
+FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/event/{id}/scope-items/{idx}/toggle`, `/event/{id}/scope-items/{idx}/retier`, `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Scope/proposal mutation responses include recompute notices with before/after headroom and schedule status.
 
 #### `event_producer/agents/`
 Role-based agents plus reasoner/formatter splits. Each agent file owns a single responsibility:
 
 | File | Agent Role |
 |---|---|
-| `orchestrator.py` | Top-level coordinator; returns structured proposals for scope changes (P7B) |
-| `brief_scope.py` | Parses and validates incoming event briefs |
+| `orchestrator.py` | Top-level coordinator; returns structured proposals for scope changes (P7B/P7D-FIX) |
+| `brief_intake.py` | Extracts requirements from messy briefs, including date/location/headcount and market-realism warnings |
+| `creative_concept.py` | Produces advisory creative ideas and add/cut suggestions through live/fallback model seam |
+| `brief_scope.py` | Parses and validates event specs and attendee-scaled scope items |
 | `budget_manager.py` | Owns budget allocation decisions (delegates math to Budget Engine) |
 | `production_manager.py` | Manages production timeline and deliverables |
 | `vendor_coordinator.py` | Handles vendor selection and communication |
 | `risk_flagger.py` | Identifies and surfaces risks across all domains |
 
-All agents are rule-based (deterministic). Live Gemini integration is deferred.
+Most role agents are rule-based (deterministic). Brief Intake and Creative
+Concept can use the optional server-side Gemini provider seam when explicitly
+enabled; otherwise they run honest fallback mode.
 
 #### `event_producer/engines/`
 Deterministic, pure-Python cores with no external dependencies. These are the "math" layer -- fully testable in isolation.
@@ -71,7 +76,7 @@ Deterministic, pure-Python cores with no external dependencies. These are the "m
 | `scheduler.py` | Run-of-show CPM scheduler; produces time-coded production schedules. Dependency resolution, lead-time validation, anchor constraints, cycle detection, conflict reporting. |
 
 #### `event_producer/models/`
-Pydantic schemas shared across the codebase. Single file `schemas.py`. All monetary fields use `Decimal` (strict mode rejects float). Mutable defaults use `Field(default_factory=...)`.
+Pydantic schemas shared across the codebase. Single file `schemas.py`. All monetary fields use `Decimal` (strict mode rejects float). Mutable defaults use `Field(default_factory=...)`. P7D-FIX adds `ManualConstraintFlags`, `BriefIntakeSourceMap`, and `RequirementSource` so API clients can distinguish brief extraction, manual overrides, fallback defaults, and missing values.
 
 #### `event_producer/security/`
 Action-gate enforcement, prompt-injection flagging, and audit logging. These modules form the trust boundary for all agent actions.
@@ -111,7 +116,8 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/pages/` | Next.js page components (file-system routing) |
 | `web/pages/index.tsx` | Main dashboard page |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard) |
+| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard) |
+| `web/types/agentic.ts` | Shared frontend types for model modes, provenance, proposals, and recompute notices |
 | `web/styles/globals.css` | Design token system + component classes (single source of truth for styling) |
 | `web/public/` | Static assets |
 | `web/out/` | Static export output (gitignored) |
@@ -133,7 +139,18 @@ All test code lives here.
 | `test_fx_rates.py` | FX rate provider tests |
 | `test_p6d_default_demo_contract.py` | Default demo contract tests (non-empty scope, budget, schedule, agent trace, approval, chat log) |
 | `test_p6f_security_demo.py` | Scripted security beat tests (3 fixtures, no-execution guarantee, approval transitions) |
+| `test_p7b_scope_mutation.py` | P7B scope mutation/proposal source-of-truth tests |
+| `test_p7d_constraint_overrides.py` | P7D-FIX constraint provenance, inactive override, 100-pax stress, and budget realism tests |
+| `test_p7d_scope_customization.py` | P7D-FIX scope CRUD, proposal apply, and recompute-notice tests |
 | `eval_cases/` | Red-team eval set written in Gherkin (`*.feature` files) |
+
+---
+
+### `project_documents/result-artifacts/p7d-fix/` *(GITIGNORED)*
+
+Internal fix-pass evidence required by the 21B handover brief. Contains task
+artifacts, saved planner/generator/evaluator subagent outputs, screenshot
+evidence or screenshot blocker, and final verdict.
 
 ---
 
@@ -194,4 +211,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-06-30 (P7C)*
+*Last updated: 2026-07-01 (P7D-FIX / 21B)*

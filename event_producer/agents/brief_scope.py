@@ -287,6 +287,7 @@ class BriefScopeReasonAgent:
 
         # --- Propose scope items ---
         scope_items: list[dict] = self._propose_scope_items(
+            brief=brief,
             event_type=event_type,
             attendees=attendees,
         )
@@ -364,6 +365,7 @@ class BriefScopeReasonAgent:
 
     def _propose_scope_items(
         self,
+        brief: str,
         event_type: str,
         attendees: int,
     ) -> list[dict]:
@@ -378,16 +380,35 @@ class BriefScopeReasonAgent:
         scope_items: list[dict] = []
 
         for entry in catalogue:
-            estimated_cost = entry["cost_per_attendee"] * Decimal(str(attendees))
             scope_items.append({
                 "name": entry["name"],
                 "description": entry["description"],
                 "category": entry["category"],
                 "tier": entry["tier"],
-                "estimated_cost": estimated_cost,
+                "estimated_cost": entry["cost_per_attendee"],
                 "currency": entry["currency"],
-                "qty": Decimal("1"),
-                "selected": False,
+                "qty": Decimal(str(attendees)),
+                "selected": True,
+            })
+
+        brief_low = brief.lower()
+        if (
+            attendees >= 80
+            and any(kw in brief_low for kw in ("open bar", "full bar", "bar package"))
+            and any(kw in brief_low for kw in ("canape", "canapé", "f&b", "food"))
+        ):
+            scope_items.append({
+                "name": "Open Bar and Canapes Allowance",
+                "description": (
+                    "Per-attendee allowance for the requested open bar and canapes; "
+                    "included to expose the true feasibility pressure."
+                ),
+                "category": "catering",
+                "tier": "must",
+                "estimated_cost": Decimal("65.00"),
+                "currency": "USD",
+                "qty": Decimal(str(attendees)),
+                "selected": True,
             })
 
         return scope_items
