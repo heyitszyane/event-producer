@@ -190,6 +190,7 @@ def compute_budget(
         category_rollups=category_rollups,
         tier_rollups=tier_rollups,
         budget_cap=budget_cap,
+        contingency_pct=contingency_pct,
         contingency_reserve=contingency_reserve,
         spendable=spendable,
         included_totals=included_totals,

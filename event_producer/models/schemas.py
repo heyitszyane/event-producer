@@ -161,6 +161,7 @@ class BudgetSummary(BaseModel):
     category_rollups: dict[str, Decimal]
     tier_rollups: dict[str, Decimal]
     budget_cap: Decimal
+    contingency_pct: Decimal
     contingency_reserve: Decimal
     spendable: Decimal
     included_totals: Decimal
@@ -171,7 +172,7 @@ class BudgetSummary(BaseModel):
     variance: BudgetVariance
 
     @field_validator(
-        "budget_cap", "contingency_reserve", "spendable",
+        "budget_cap", "contingency_pct", "contingency_reserve", "spendable",
         "included_totals", "headroom",
     )
     @classmethod
