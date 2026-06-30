@@ -18,8 +18,9 @@
 ## Public Verification
 
 - Baseline public `origin/main`: `e914760b444fc5448c80b685ba4c438315248038`, confirmed stale at P7C.
-- Merge/push could not be completed in this session because environment approval requests for escalated operations began failing with a usage-limit rejection.
+- Local no-ff merge to `main` completed at merge commit `699801c`.
+- Public push verification was pending at artifact refresh time.
 
 ## Status
 
-Local docs are current. Public `main` is not updated from this session.
+Local docs are current. Local `main` contains P7D and P7D-FIX. Public `main` still requires push verification after this artifact refresh.

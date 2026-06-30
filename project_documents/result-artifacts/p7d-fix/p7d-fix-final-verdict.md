@@ -7,9 +7,9 @@ partial
 ## Branch / Commits
 
 - implementation branch: `fix/p7d-constraint-provenance-and-demo-surface`
-- implementation commit: not created; `.git` write/escalation became blocked by environment usage-limit rejection
-- merge commit, if merged: not merged
-- origin/main commit after push: not pushed; baseline public `origin/main` was `e914760b444fc5448c80b685ba4c438315248038`
+- implementation commit: `e0d26d3`
+- merge commit, if merged: `699801c`
+- origin/main commit after push: pending at artifact refresh time; baseline public `origin/main` was `e914760b444fc5448c80b685ba4c438315248038`
 
 ## What Was Fixed
 
@@ -74,14 +74,14 @@ project_documents/result-artifacts/p7d-fix/screenshots/MANUAL_SCREENSHOT_REQUIRE
 - README current locally? yes
 - CHANGELOG current locally? yes
 - REPO_SITEMAP current locally? yes
-- Public `main` current? no; merge/push blocked in this session
+- Public `main` current? pending push at artifact refresh time
 
 ## P8 Recommendation
 
-not greenlit for P8 until screenshots are captured and reviewed, lint setup is completed, and the fix branch is committed/merged/pushed to public `main`
+not greenlit for P8 until screenshots are captured and reviewed, lint setup is completed, and public `main` push is verified
 
 ## Remaining Risks
 
 - Browser screenshots were not captured, so visual acceptance is not proven.
 - `pnpm -C web run lint` remains non-interactive-blocked until ESLint dependencies/config are added.
-- Git commit/merge/push still needs to be completed when `.git` write and network approvals are available.
+- Public push verification still needs to be completed after this artifact refresh.
