@@ -1,6 +1,6 @@
 # === Secrets — never commit ===
-.env
 .env*
+!.env.example
 *.key
 *service-account*.json
 *service-account*.json
