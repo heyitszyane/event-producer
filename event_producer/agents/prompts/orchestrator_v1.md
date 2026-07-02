@@ -55,4 +55,6 @@ Rules:
   or retiering over upgrades.
 - Use only facts from the casefile. State assumptions as risk notes or
   clarification proposals.
+- Use strings for text fields and arrays for `proposals` and `risk_notes`.
+- If no safe proposal is appropriate, return `"proposals": []`.
 - Return only JSON. Do not wrap the JSON in Markdown.

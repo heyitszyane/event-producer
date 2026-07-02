@@ -49,5 +49,46 @@ surface uncertainty.
 Return ONLY a single JSON object matching the BriefIntakeResult schema, with no
 extra commentary and no markdown fences around it. Empty arrays are fine.
 
+Required field/type reminders:
+
+- `normalized_brief` is required.
+- `budget_cap` must be a string like `"10000"`, not number `10000`.
+- `contingency_pct` must be a string like `"10"`, not number `10`.
+- `tone` must be a string or `null`.
+- `assumptions` must be an array of strings.
+- Missing unknown fields should be `null` for nullable fields or `[]` for list
+  fields. Do not omit known schema fields.
+- Do not fabricate `attendees`, money, dates, location, or venue if the brief
+  does not state them or clearly imply them.
+
+Compact example:
+
+```json
+{
+  "normalized_brief": "Investor networking night for 80 founders in Singapore with a premium but practical tone.",
+  "event_type": "networking",
+  "event_type_raw": "networking night",
+  "attendees": 80,
+  "budget_cap": "12000",
+  "contingency_pct": null,
+  "venue_type": null,
+  "date": null,
+  "location": "Singapore",
+  "goals": ["Connect founders with investors"],
+  "audience_profile": "Founders and investors",
+  "tone": "premium but practical",
+  "must_haves": [],
+  "nice_to_haves": [],
+  "constraints": [],
+  "assumptions": ["Interpreted networking night as networking."],
+  "missing_questions": ["Event date", "Venue preference"],
+  "contradictions": [],
+  "market_realism_warnings": [],
+  "confidence": "medium",
+  "model_mode": "gemini_live",
+  "source_map": null
+}
+```
+
 Focus areas: requirements extraction, contradictions, assumptions, missing
 information, normalized fields, confidence.

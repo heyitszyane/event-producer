@@ -189,7 +189,7 @@ class ScopeStrategyReasonAgent:
             schema=ScopeStrategyResult,
         )
         return {
-            "provider_text": res.raw_text or (json.dumps(res.parsed.model_dump()) if res.parsed else None),
+            "provider_text": (json.dumps(res.parsed.model_dump()) if res.parsed else res.raw_text),
             "model_mode": res.model_mode,
             "model_name": res.model_name,
             "prompt_version": self._prompt_version,

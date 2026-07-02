@@ -36,6 +36,9 @@ class LiveModelProviderError(RuntimeError):
         http_status: int | None = None,
         response_shape_keys: list[str] | None = None,
         fallback_reason: str | None = None,
+        response_format_mode: str | None = None,
+        repaired_schema: bool = False,
+        repaired_fields: list[str] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -47,6 +50,9 @@ class LiveModelProviderError(RuntimeError):
         self.http_status = http_status
         self.response_shape_keys = response_shape_keys or []
         self.fallback_reason = fallback_reason
+        self.response_format_mode = response_format_mode
+        self.repaired_schema = repaired_schema
+        self.repaired_fields = repaired_fields or []
 
 
 class AgentModelResult(BaseModel):
@@ -74,6 +80,9 @@ class AgentModelResult(BaseModel):
     http_status: int | None = None
     response_shape_keys: list[str] = []
     response_preview: str | None = None
+    response_format_mode: str | None = None
+    repaired_schema: bool = False
+    repaired_fields: list[str] = []
 
     def diagnostic_dump(self) -> dict[str, Any]:
         """Return non-secret provider diagnostics suitable for API responses."""
@@ -87,6 +96,9 @@ class AgentModelResult(BaseModel):
             "latency_ms": self.latency_ms,
             "http_status": self.http_status,
             "response_shape_keys": self.response_shape_keys,
+            "response_format_mode": self.response_format_mode,
+            "repaired_schema": self.repaired_schema,
+            "repaired_fields": self.repaired_fields,
             "fallback_reason": self.fallback_reason,
             "error": self.error,
             "response_preview": self.response_preview or self.raw_text,

@@ -1,7 +1,8 @@
 # REPO_SITEMAP.md -- Event Producer Folder Map
 
-> This file describes the **current** repository layout as of P7H.4
-> (live-agentic showcase upgrade on top of P7F/P7E/P7D-FIX behavior).
+> This file describes the **current** repository layout as of P7H.5
+> (structured-output hardening for the live-agentic showcase on top of
+> P7F/P7E/P7D-FIX behavior).
 
 ---
 
@@ -75,7 +76,10 @@ Most role agents are rule-based (deterministic). Brief Intake, Creative
 Concept, Scope Strategy, Vendor Draft, and Orchestrator can use the optional
 server-side model provider seam when explicitly enabled; otherwise they run
 honest fallback mode. Gemini is the default live provider; OpenRouter and
-local/OpenAI-compatible endpoints are also supported.
+local/OpenAI-compatible endpoints are also supported. Live providers expose
+non-secret structured-output diagnostics (`response_format_mode`,
+`repaired_schema`, and `repaired_fields`) so schema drift can be debugged
+without logging secrets or full prompts.
 
 #### `event_producer/engines/`
 Deterministic, pure-Python cores with no external dependencies. These are the "math" layer -- fully testable in isolation.
@@ -107,9 +111,10 @@ Abstract interfaces that define the **seam** between the agent layer and externa
 | `model_env.py` | Server-side model provider/env resolution |
 | `model_router.py` | Chooses fallback, Gemini, or OpenAI-compatible provider |
 | `diagnostics.py` | Non-secret provider diagnostic helpers for latency, previews, and sanitized validation errors |
+| `schema_repair.py` | Conservative provider-side structured-output repair before Pydantic validation |
 | `../config/model_settings.py` | Local-dev provider settings reader/writer for gitignored `.env` |
-| `gemini_model.py` | Lazy live Gemini provider |
-| `openai_compatible_model.py` | Lazy live OpenAI-compatible provider for OpenRouter/local endpoints |
+| `gemini_model.py` | Lazy live Gemini provider; uses response schemas when SDK support is available |
+| `openai_compatible_model.py` | Lazy live OpenAI-compatible provider for OpenRouter/local endpoints; tries JSON Schema response format before JSON object fallback where supported |
 | `fallback_model.py` | Honest deterministic fallback provider |
 | `rate_card.py` | Vendor rate lookup and caching (FX rates) |
 | `vendor_sourcer.py` | Vendor discovery and qualification |
@@ -155,6 +160,7 @@ All test code lives here.
 | `test_agents.py` | Agent tests (brief/scope, budget manager, production manager, vendor coordinator, risk flagger) |
 | `test_api.py` | REST API tests (run, event state, approvals, HITL flow, error shapes) |
 | `test_provider_diagnostics.py` | Provider runtime diagnostics, strict-live failure envelope, and degraded live-provider fallback tests |
+| `test_structured_output_hardening.py` | P7H.5 JSON Schema response-format, safe repair, Gemini config, and strict-live invalid-output tests |
 | `test_security.py` | Action-gate, injection flag, and audit log tests |
 | `test_mcp.py` | MCP server tests (CRUD, list, delete via provider seam) |
 | `test_fx_rates.py` | FX rate provider tests |
@@ -235,4 +241,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-07-03 (P7H.4 live-agentic showcase UI/docs pass)*
+*Last updated: 2026-07-03 (P7H.5 structured-output hardening pass)*

@@ -145,6 +145,9 @@ class RuntimeModelTestResponse(BaseModel):
     http_status: int | None = None
     response_shape_keys: list[str] = []
     response_preview: str | None = None
+    response_format_mode: str | None = None
+    repaired_schema: bool = False
+    repaired_fields: list[str] = []
     error: str | None = None
     fallback_reason: str | None = None
     agent_name: str | None = None
@@ -260,6 +263,9 @@ def create_app() -> FastAPI:
                         "provider": exc.provider,
                         "model_name": exc.model_name,
                         "agent_name": exc.agent_name,
+                        "response_format_mode": exc.response_format_mode,
+                        "repaired_schema": exc.repaired_schema,
+                        "repaired_fields": exc.repaired_fields,
                     }
                 },
             )
@@ -354,6 +360,9 @@ def create_app() -> FastAPI:
                 ok=False,
                 http_status=exc.http_status,
                 response_shape_keys=exc.response_shape_keys,
+                response_format_mode=exc.response_format_mode,
+                repaired_schema=exc.repaired_schema,
+                repaired_fields=exc.repaired_fields,
                 error=exc.message,
                 fallback_reason=exc.fallback_reason or "provider_test_failed",
                 agent_name=exc.agent_name,
@@ -370,6 +379,9 @@ def create_app() -> FastAPI:
             http_status=result.http_status,
             response_shape_keys=result.response_shape_keys,
             response_preview=result.response_preview or result.raw_text,
+            response_format_mode=result.response_format_mode,
+            repaired_schema=result.repaired_schema,
+            repaired_fields=result.repaired_fields,
             error=result.error,
             fallback_reason=result.fallback_reason,
             agent_name=result.agent_name,
@@ -867,6 +879,9 @@ def create_app() -> FastAPI:
                         "provider": exc.provider,
                         "model_name": exc.model_name,
                         "agent_name": exc.agent_name,
+                        "response_format_mode": exc.response_format_mode,
+                        "repaired_schema": exc.repaired_schema,
+                        "repaired_fields": exc.repaired_fields,
                     }
                 },
             )

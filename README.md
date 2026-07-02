@@ -17,9 +17,9 @@ Business**.
 
 ## Current status
 
-**P7H — Live-agentic showcase upgrade** · Branch: `feat/p7h4-ui-docs-live-agentic-polish` · [CHANGELOG](CHANGELOG.md)
+**P7H — Live-agentic showcase upgrade** · Branch: `codex/p7h5-structured-output-hardening` · [CHANGELOG](CHANGELOG.md)
 
-- **262 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **268 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
   structured fields are optional manual overrides. Placeholder/default values
@@ -33,7 +33,16 @@ Business**.
   selectable through Settings or `.env`. Gemini, OpenRouter, hosted
   OpenAI-compatible endpoints, LM Studio, Ollama, and local OpenAI-compatible
   servers are supported. Provider diagnostics expose non-secret status and a
-  one-click provider test from the UI.
+  one-click provider test from the UI. OpenRouter/OpenAI-compatible calls use
+  JSON Schema response format where supported and retry JSON object mode if the
+  provider rejects that parameter; Gemini uses response schemas when the
+  installed SDK supports them.
+- **Structured-output hardening** (P7H.5). Live provider JSON is repaired only
+  for safe deterministic shape issues before Pydantic validation: missing brief
+  text can be filled from the original brief, numeric-as-string fields can be
+  stringified, missing optional lists become `[]`, and object values inside
+  string lists become compact strings. The repair layer does not invent
+  attendees, money, dates, vendors, or executable state-changing actions.
 - **Editable scope + orchestrator proposals** (P7B/P7D-FIX). Scope items can be
   added, edited, deleted, toggled, and retiered via API endpoints. Recompute
   responses include before/after headroom, schedule status, and a notice when
@@ -81,7 +90,7 @@ Messy event brief
 | Mode | What happens | Intended use |
 |---|---|---|
 | Live provider | AI agents call the selected provider; Budget Engine, CPM Scheduler, and Approval Wall remain deterministic/source-of-truth controls. | Primary capstone demo |
-| Strict live failure | The API returns a clear provider/model/agent error instead of silently falling back. Settings -> Test provider shows non-secret diagnostics. | Debugging and reviewer honesty |
+| Strict live failure | The API returns a clear provider/model/agent error instead of silently falling back. Settings -> Test provider shows non-secret diagnostics, response format mode, and safe-repair fields. | Debugging and reviewer honesty |
 | Fallback | Live-capable agents use deterministic degraded behavior and record fallback reasons in the UI. | Resilience/no-key clone path |
 
 ## What is implemented
@@ -97,7 +106,9 @@ Messy event brief
   Brief Intake, Creative Concept, Scope Strategy, Vendor Draft, and the
   Orchestrator surface call the configured provider in live mode and degrade
   with explicit fallback reasons when live mode is unavailable or non-strict
-  provider calls fail.
+  provider calls fail. Live providers request schema-shaped JSON where the
+  upstream supports it, and a conservative provider-side repair layer handles
+  recoverable type/shape drift before validation.
 - **Agent trace** — 8 structural role-agent steps recorded during the run
   (`AgentTraceStep` schema). Rendered as a secondary technical trace.
 - **Security action-gate** — `enforce()` blocks 8 gated actions
@@ -237,8 +248,9 @@ To confirm which model provider the backend loaded at startup, call
 `GET /runtime/model` with the demo header, or use **10 Settings** in the UI.
 To run a tiny provider smoke test, call `POST /runtime/model/test` or click
 **Test provider**. Both responses are non-secret: provider, mode, model name,
-base URL/status, whether a key was loaded, sanitized errors, and fallback reason
-only. Local settings writes are accepted only from local dev hosts.
+base URL/status, whether a key was loaded, response format mode, safe repair
+fields, sanitized errors, and fallback reason only. Local settings writes are
+accepted only from local dev hosts.
 
 ### Environment Variables
 

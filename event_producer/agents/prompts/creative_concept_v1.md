@@ -49,5 +49,42 @@ without explicit human confirmation.
 Return ONLY a single JSON object matching the CreativeConceptResult schema, with
 no extra commentary and no markdown fences around it.
 
+Compact example:
+
+```json
+{
+  "event_title_options": ["Founders Exchange", "Investor Signal Night"],
+  "concept_summary": "A focused networking event built around useful founder-investor conversations.",
+  "experience_principles": ["Keep production focused on conversation", "Use one memorable host moment"],
+  "creative_ideas": [
+    {
+      "title": "Curated Networking Circles",
+      "description": "Guided small-group rotations so attendees meet relevant peers.",
+      "tier": "should",
+      "estimated_complexity": "medium",
+      "budget_pressure": "low",
+      "why_it_fits": "The brief prioritizes investor and founder connection."
+    }
+  ],
+  "suggested_additions": [
+    {
+      "title": "Welcome Drink Moment",
+      "description": "A bounded hospitality touchpoint at arrival.",
+      "category": "catering",
+      "tier": "should",
+      "estimated_cost": null,
+      "budget_pressure": "medium",
+      "action_hint": "add",
+      "rationale": "Improves arrival quality without becoming the whole event."
+    }
+  ],
+  "suggested_cuts_or_reductions": [],
+  "budget_sensitive_notes": [],
+  "production_risks": ["Confirm venue load-in and event date before committing vendors."],
+  "sponsor_or_partner_hooks": ["A partner can underwrite the welcome moment."],
+  "model_mode": "gemini_live"
+}
+```
+
 Focus areas: concept direction, add-ons, cuts, guest experience, budget-sensitive
 ideas, operational risks.

@@ -26,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 from event_producer.providers.agent_model import AgentModelResult, LiveModelProviderError
 from event_producer.providers.diagnostics import latency_ms, preview, pydantic_error_summary
 from event_producer.providers.model_env import ModelEnv
+from event_producer.providers.schema_repair import repair_schema_output
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -88,10 +89,11 @@ class GeminiModel:
             )
 
         try:
+            config, response_format_mode = self._build_config(system_prompt, schema)
             response = client.models.generate_content(
                 model=self._env.model_name,
                 contents=user_prompt,
-                config=self._build_config(system_prompt),
+                config=config,
             )
             raw_text = (response.text or "").strip()
         except Exception as exc:
@@ -100,6 +102,7 @@ class GeminiModel:
                 agent_name=agent_name,
                 prompt_version=prompt_version,
                 started=started,
+                response_format_mode="json_object",
             )
 
         if not raw_text:
@@ -121,10 +124,18 @@ class GeminiModel:
                 raw_text=raw_text,
                 response_preview=preview(raw_text),
                 live_mode=True,
+                response_format_mode=response_format_mode,
             )
 
+        repair = repair_schema_output(
+            schema=schema,
+            agent_name=agent_name,
+            original_user_prompt=user_prompt,
+            decoded_json=data,
+        )
+
         try:
-            parsed = schema(**data)
+            parsed = schema(**repair.data)
         except (ValidationError, TypeError, ValueError) as exc:
             return self._failure(
                 f"Gemini output did not match schema: {pydantic_error_summary(exc)}",
@@ -132,9 +143,12 @@ class GeminiModel:
                 prompt_version=prompt_version,
                 started=started,
                 raw_text=raw_text,
-                response_shape_keys=sorted(str(k) for k in data.keys())[:20],
+                response_shape_keys=sorted(str(k) for k in repair.data.keys())[:20],
                 response_preview=preview(raw_text),
                 live_mode=True,
+                response_format_mode=response_format_mode,
+                repaired_schema=repair.repaired_schema,
+                repaired_fields=repair.repaired_fields,
             )
 
         return AgentModelResult(
@@ -151,8 +165,11 @@ class GeminiModel:
             ok=True,
             latency_ms=latency_ms(started),
             http_status=None,
-            response_shape_keys=sorted(str(k) for k in data.keys())[:20],
+            response_shape_keys=sorted(str(k) for k in repair.data.keys())[:20],
             response_preview=preview(raw_text),
+            response_format_mode=response_format_mode,
+            repaired_schema=repair.repaired_schema,
+            repaired_fields=repair.repaired_fields,
         )
 
     # -- internals ----------------------------------------------------------
@@ -165,17 +182,39 @@ class GeminiModel:
             self._client = genai.Client(api_key=self._env.require_key())
         return self._client
 
-    def _build_config(self, system_prompt: str):
+    def _build_config(
+        self,
+        system_prompt: str,
+        schema: type[BaseModel] | None = None,
+    ):
         # Imported lazily alongside the client to avoid a hard import at
         # module load. ``google-genai`` exposes generation config helpers.
         try:
             from google.genai import types
 
-            return types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                temperature=0,
-                max_output_tokens=self._env.max_output_tokens,
+            if schema is not None:
+                for response_schema in (schema, schema.model_json_schema()):
+                    try:
+                        return (
+                            types.GenerateContentConfig(
+                                system_instruction=system_prompt,
+                                response_mime_type="application/json",
+                                temperature=0,
+                                max_output_tokens=self._env.max_output_tokens,
+                                response_schema=response_schema,
+                            ),
+                            "json_schema",
+                        )
+                    except TypeError:
+                        continue
+            return (
+                types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    temperature=0,
+                    max_output_tokens=self._env.max_output_tokens,
+                ),
+                "json_object",
             )
         except Exception:
             # Older SDK shape — fall back to a plain dict the client tolerates.
@@ -183,7 +222,7 @@ class GeminiModel:
                 "system_instruction": system_prompt,
                 "temperature": 0,
                 "max_output_tokens": self._env.max_output_tokens,
-            }
+            }, "json_object"
 
     def _failure(
         self,
@@ -195,6 +234,9 @@ class GeminiModel:
         raw_text: str | None = None,
         response_shape_keys: list[str] | None = None,
         response_preview: str | None = None,
+        response_format_mode: str | None = None,
+        repaired_schema: bool = False,
+        repaired_fields: list[str] | None = None,
         live_mode: bool = False,
     ) -> AgentModelResult:
         duration_ms = latency_ms(started)
@@ -208,6 +250,9 @@ class GeminiModel:
                 prompt_version=prompt_version,
                 response_shape_keys=response_shape_keys,
                 fallback_reason="provider_call_failed",
+                response_format_mode=response_format_mode,
+                repaired_schema=repaired_schema,
+                repaired_fields=repaired_fields,
             )
         return AgentModelResult(
             parsed=None,
@@ -224,4 +269,7 @@ class GeminiModel:
             latency_ms=duration_ms,
             response_shape_keys=response_shape_keys or [],
             response_preview=response_preview or preview(raw_text),
+            response_format_mode=response_format_mode,
+            repaired_schema=repaired_schema,
+            repaired_fields=repaired_fields or [],
         )

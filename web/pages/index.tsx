@@ -1063,6 +1063,8 @@ export default function Dashboard() {
                       <tr><th>Provider</th><td>{humanizeValue(providerTestResult.provider)}</td></tr>
                       <tr><th>Model</th><td>{providerTestResult.model_name || '-'}</td></tr>
                       <tr><th>Effective mode</th><td>{humanizeValue(providerTestResult.effective_mode)}</td></tr>
+                      <tr><th>Response format</th><td>{humanizeValue(providerTestResult.response_format_mode || '-')}</td></tr>
+                      <tr><th>Schema repair</th><td>{providerTestResult.repaired_schema ? `Applied: ${(providerTestResult.repaired_fields || []).join(', ') || 'field shape'}` : 'Not applied'}</td></tr>
                       <tr><th>Latency</th><td>{providerTestResult.latency_ms !== null && providerTestResult.latency_ms !== undefined ? `${providerTestResult.latency_ms} ms` : '-'}</td></tr>
                       <tr><th>HTTP</th><td>{providerTestResult.http_status || '-'}</td></tr>
                       <tr><th>Key loaded</th><td>{providerTestResult.has_api_key ? 'Yes' : 'No'}</td></tr>

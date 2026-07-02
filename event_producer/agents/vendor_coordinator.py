@@ -136,7 +136,7 @@ class VendorCoordinatorReasonAgent:
                 schema=VendorDraftResult,
             )
             draft_result = VendorDraftFormatterAgent().run(
-                provider_text=res.raw_text or (res.parsed.model_dump_json() if res.parsed else None),
+                provider_text=(res.parsed.model_dump_json() if res.parsed else res.raw_text),
                 request=context,
                 model_mode=cast(AgentMode, res.model_mode),
                 fallback_reason=res.fallback_reason,

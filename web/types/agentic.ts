@@ -168,6 +168,9 @@ export interface RuntimeModelTestResult {
   http_status?: number | null
   response_shape_keys?: string[]
   response_preview?: string | null
+  response_format_mode?: string | null
+  repaired_schema?: boolean
+  repaired_fields?: string[]
   error?: string | null
   fallback_reason?: string | null
   agent_name?: string | null

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from urllib import request
 from urllib.error import HTTPError, URLError
@@ -22,6 +23,7 @@ from event_producer.providers.agent_model import AgentModelResult, LiveModelProv
 from event_producer.providers.diagnostics import latency_ms, preview, pydantic_error_summary
 from event_producer.providers.gemini_model import _extract_json_object
 from event_producer.providers.model_env import ModelEnv
+from event_producer.providers.schema_repair import repair_schema_output
 
 _LOG = logging.getLogger(__name__)
 
@@ -50,17 +52,22 @@ class OpenAICompatibleModel:
                 started=started,
             )
 
-        payload = {
+        base_payload = {
             "model": self._env.model_name,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {"type": "json_object"},
             "temperature": 0,
             "stream": False,
             "max_tokens": self._env.max_output_tokens,
         }
+        attempts = self._payload_attempts(
+            base_payload,
+            schema=schema,
+            agent_name=agent_name,
+            prompt_version=prompt_version,
+        )
         headers = {
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/heyitszyane/event-producer",
@@ -68,43 +75,67 @@ class OpenAICompatibleModel:
         }
         if self._env.api_key:
             headers["Authorization"] = f"Bearer {self._env.api_key}"
-        req = request.Request(
-            self._env.api_base_url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
 
         http_status: int | None = None
         response_shape_keys: list[str] = []
-        try:
-            with request.urlopen(req, timeout=self._env.request_timeout_seconds) as resp:
-                http_status = getattr(resp, "status", None) or resp.getcode()
-                raw_body = resp.read().decode("utf-8")
-        except HTTPError as exc:
-            http_status = exc.code
-            body = _safe_decode(exc.read())
-            detail = preview(body) or str(exc)
-            return self._failure(
-                f"{self._provider_title()} call failed: HTTP {exc.code}: {detail}",
-                agent_name=agent_name,
-                prompt_version=prompt_version,
-                started=started,
-                http_status=http_status,
-                raw_text=body,
-                response_preview=detail,
+        raw_body = ""
+        response_format_mode = "json_object"
+        for index, (response_format_mode, payload) in enumerate(attempts):
+            req = request.Request(
+                self._env.api_base_url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST",
             )
-        except (URLError, TimeoutError, OSError) as exc:
-            reason = (
-                f"{self._provider_title()} call failed: "
-                f"{exc.__class__.__name__}: {preview(str(exc))}"
-            )
-            return self._failure(
-                reason,
-                agent_name=agent_name,
-                prompt_version=prompt_version,
-                started=started,
-            )
+            try:
+                with request.urlopen(req, timeout=self._env.request_timeout_seconds) as resp:
+                    http_status = getattr(resp, "status", None) or resp.getcode()
+                    raw_body = resp.read().decode("utf-8")
+                break
+            except HTTPError as exc:
+                http_status = exc.code
+                body = _safe_decode(exc.read())
+                detail = preview(body) or str(exc)
+                can_retry = (
+                    index == 0
+                    and response_format_mode == "json_schema"
+                    and len(attempts) > 1
+                    and _is_json_schema_rejection(exc.code, body)
+                )
+                if can_retry:
+                    _LOG.info(
+                        "model_call retrying_json_object provider=%s model=%s agent=%s "
+                        "prompt_version=%s http_status=%s reason=%s",
+                        self._env.provider,
+                        self._env.model_name,
+                        agent_name,
+                        prompt_version,
+                        exc.code,
+                        detail,
+                    )
+                    continue
+                return self._failure(
+                    f"{self._provider_title()} call failed: HTTP {exc.code}: {detail}",
+                    agent_name=agent_name,
+                    prompt_version=prompt_version,
+                    started=started,
+                    http_status=http_status,
+                    raw_text=body,
+                    response_preview=detail,
+                    response_format_mode=response_format_mode,
+                )
+            except (URLError, TimeoutError, OSError) as exc:
+                reason = (
+                    f"{self._provider_title()} call failed: "
+                    f"{exc.__class__.__name__}: {preview(str(exc))}"
+                )
+                return self._failure(
+                    reason,
+                    agent_name=agent_name,
+                    prompt_version=prompt_version,
+                    started=started,
+                    response_format_mode=response_format_mode,
+                )
 
         try:
             data = json.loads(raw_body)
@@ -122,6 +153,7 @@ class OpenAICompatibleModel:
                 raw_text=raw_body,
                 response_shape_keys=response_shape_keys,
                 response_preview=preview(raw_body),
+                response_format_mode=response_format_mode,
             )
 
         self._log_call(
@@ -145,12 +177,19 @@ class OpenAICompatibleModel:
                 response_shape_keys=response_shape_keys,
                 response_preview=preview(raw_text),
                 live_mode=True,
+                response_format_mode=response_format_mode,
             )
 
-        parsed_shape_keys = sorted(str(k) for k in json_obj.keys())[:20]
+        repair = repair_schema_output(
+            schema=schema,
+            agent_name=agent_name,
+            original_user_prompt=user_prompt,
+            decoded_json=json_obj,
+        )
+        parsed_shape_keys = sorted(str(k) for k in repair.data.keys())[:20]
 
         try:
-            parsed = schema(**json_obj)
+            parsed = schema(**repair.data)
         except (ValidationError, TypeError, ValueError) as exc:
             return self._failure(
                 f"{self._provider_title()} output did not match schema: "
@@ -163,6 +202,9 @@ class OpenAICompatibleModel:
                 response_shape_keys=parsed_shape_keys,
                 response_preview=preview(raw_text),
                 live_mode=True,
+                response_format_mode=response_format_mode,
+                repaired_schema=repair.repaired_schema,
+                repaired_fields=repair.repaired_fields,
             )
 
         return AgentModelResult(
@@ -181,7 +223,38 @@ class OpenAICompatibleModel:
             http_status=http_status,
             response_shape_keys=parsed_shape_keys,
             response_preview=preview(raw_text),
+            response_format_mode=response_format_mode,
+            repaired_schema=repair.repaired_schema,
+            repaired_fields=repair.repaired_fields,
         )
+
+    def _payload_attempts(
+        self,
+        base_payload: dict,
+        *,
+        schema: type[BaseModel],
+        agent_name: str,
+        prompt_version: str,
+    ) -> list[tuple[str, dict]]:
+        if self._env.provider in {"openrouter", "openai_compatible"}:
+            schema_payload = dict(base_payload)
+            schema_payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": safe_schema_name(agent_name, prompt_version),
+                    "strict": True,
+                    "schema": schema.model_json_schema(),
+                },
+            }
+            if self._env.provider == "openrouter":
+                schema_payload["provider"] = {"require_parameters": True}
+            object_payload = dict(base_payload)
+            object_payload["response_format"] = {"type": "json_object"}
+            return [("json_schema", schema_payload), ("json_object", object_payload)]
+
+        payload = dict(base_payload)
+        payload["response_format"] = {"type": "json_object"}
+        return [("json_object", payload)]
 
     def _failure(
         self,
@@ -195,6 +268,9 @@ class OpenAICompatibleModel:
         http_status: int | None = None,
         response_shape_keys: list[str] | None = None,
         response_preview: str | None = None,
+        response_format_mode: str | None = None,
+        repaired_schema: bool = False,
+        repaired_fields: list[str] | None = None,
     ) -> AgentModelResult:
         duration_ms = latency_ms(started)
         self._log_call(
@@ -216,6 +292,9 @@ class OpenAICompatibleModel:
                 http_status=http_status,
                 response_shape_keys=response_shape_keys,
                 fallback_reason="provider_call_failed",
+                response_format_mode=response_format_mode,
+                repaired_schema=repaired_schema,
+                repaired_fields=repaired_fields,
             )
         return AgentModelResult(
             parsed=None,
@@ -233,6 +312,9 @@ class OpenAICompatibleModel:
             http_status=http_status,
             response_shape_keys=response_shape_keys or [],
             response_preview=response_preview or preview(raw_text),
+            response_format_mode=response_format_mode,
+            repaired_schema=repaired_schema,
+            repaired_fields=repaired_fields or [],
         )
 
     def _provider_title(self) -> str:
@@ -269,3 +351,26 @@ class OpenAICompatibleModel:
 
 def _safe_decode(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
+
+
+def safe_schema_name(agent_name: str, prompt_version: str) -> str:
+    raw = f"{agent_name}_{prompt_version}".strip("_")
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", raw)[:64].strip("_")
+    return safe or "event_producer_schema"
+
+
+def _is_json_schema_rejection(http_status: int, body: str) -> bool:
+    if http_status not in {400, 422}:
+        return False
+    low = body.lower()
+    return any(
+        needle in low
+        for needle in (
+            "json_schema",
+            "response_format",
+            "require_parameters",
+            "unsupported parameter",
+            "unsupported_param",
+            "invalid parameter",
+        )
+    )

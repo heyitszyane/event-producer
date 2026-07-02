@@ -14,6 +14,7 @@ Rules:
 - Return JSON only.
 
 Return this JSON shape:
+```json
 {
   "subject": "short email subject",
   "body": "professional draft body",
@@ -23,3 +24,8 @@ Return this JSON shape:
   "risk_notes": ["risk or safety note"],
   "model_mode": "gemini_live"
 }
+```
+
+Use strings for subject/body/summaries and arrays of strings for response
+fields and risk notes. Do not include bank details, payment links, or claims
+that the draft has already been sent.

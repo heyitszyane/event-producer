@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7H.5 — Structured-output hardening for live agentic demo
+
+- Added JSON Schema response format for OpenRouter/OpenAI-compatible live
+  calls, with a one-time JSON object retry when the provider rejects schema
+  response-format parameters.
+- Added Gemini `response_schema` support when the installed `google-genai` SDK
+  accepts it, while preserving fallback behavior for older/test installs.
+- Added provider-side safe schema repair before Pydantic validation for
+  recoverable live-output shape drift, including missing brief text, numeric
+  string fields, missing optional lists, and object values in string lists.
+- Added non-secret diagnostics for `response_format_mode`, `repaired_schema`,
+  and `repaired_fields` on runtime provider tests and strict-live errors.
+- Added compact schema examples to live prompts so ordinary OpenRouter/Gemini
+  responses are less likely to drift away from the typed contracts.
+- Added tests for OpenRouter schema-first payloads, JSON object retry,
+  Brief Intake repair, strict-live invalid-output failure, and Gemini
+  response-schema fallback behavior.
+
 ### P7H.4 — UI runtime visibility and docs honesty
 
 - Added a Settings **Test provider** control that calls

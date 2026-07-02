@@ -15,6 +15,7 @@ Rules:
 - Return JSON only.
 
 Return this JSON shape:
+```json
 {
   "strategy_summary": "short plain-English strategy",
   "must_have_logic": ["why these items must stay"],
@@ -34,3 +35,7 @@ Return this JSON shape:
   "questions_for_user": ["question"],
   "model_mode": "gemini_live"
 }
+```
+
+Use strings for all text fields, arrays for list fields, and `null` for an
+unknown `proposed_scope_item`. Do not omit known schema fields.
