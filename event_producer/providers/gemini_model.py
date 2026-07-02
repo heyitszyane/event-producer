@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from pydantic import BaseModel, ValidationError
 
-from event_producer.providers.agent_model import AgentModelResult
+from event_producer.providers.agent_model import AgentModelResult, LiveModelProviderError
+from event_producer.providers.diagnostics import latency_ms, preview, pydantic_error_summary
 from event_producer.providers.model_env import ModelEnv
 
 
@@ -66,27 +68,23 @@ class GeminiModel:
         user_prompt: str,
         schema: type[BaseModel],
     ) -> AgentModelResult:
+        started = time.perf_counter()
         if not self._env.api_key:
-            return AgentModelResult(
-                parsed=None,
-                raw_text=None,
-                model_mode="rule_based_fallback",
-                model_name=None,
-                fallback_reason=self._env.fallback_reason
-                or "no Gemini API key provided",
-                error="live Gemini has no API key",
+            return self._failure(
+                self._env.fallback_reason or "no Gemini API key provided",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
             )
 
         try:
             client = self._get_client()
         except Exception as exc:
-            return AgentModelResult(
-                parsed=None,
-                raw_text=None,
-                model_mode="rule_based_fallback",
-                model_name=self._env.model_name,
-                fallback_reason=f"failed to import/construct Gemini SDK: {exc}",
-                error=f"Gemini SDK unavailable: {exc}",
+            return self._failure(
+                f"Gemini SDK unavailable: {preview(str(exc))}",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
             )
 
         try:
@@ -97,46 +95,46 @@ class GeminiModel:
             )
             raw_text = (response.text or "").strip()
         except Exception as exc:
-            return AgentModelResult(
-                parsed=None,
-                raw_text=None,
-                model_mode="rule_based_fallback",
-                model_name=self._env.model_name,
-                fallback_reason=f"Gemini API call failed: {exc}",
-                error=f"Gemini API error: {exc}",
+            return self._failure(
+                f"Gemini API call failed: {exc.__class__.__name__}: {preview(str(exc))}",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
             )
 
         if not raw_text:
-            return AgentModelResult(
-                parsed=None,
-                raw_text=None,
-                model_mode="gemini_live",
-                model_name=self._env.model_name,
-                fallback_reason="Gemini returned an empty response; fallback interpretation applied",
-                error="empty Gemini response",
+            return self._failure(
+                "Gemini returned an empty response; fallback interpretation applied",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
+                live_mode=True,
             )
 
         data = _extract_json_object(raw_text)
         if data is None:
-            return AgentModelResult(
-                parsed=None,
+            return self._failure(
+                "Gemini output was not valid JSON; deterministic interpretation applied",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
                 raw_text=raw_text,
-                model_mode="gemini_live",
-                model_name=self._env.model_name,
-                fallback_reason="Gemini output was not valid JSON; deterministic interpretation applied",
-                error="could not parse JSON from Gemini output",
+                response_preview=preview(raw_text),
+                live_mode=True,
             )
 
         try:
             parsed = schema(**data)
         except (ValidationError, TypeError, ValueError) as exc:
-            return AgentModelResult(
-                parsed=None,
+            return self._failure(
+                f"Gemini output did not match schema: {pydantic_error_summary(exc)}",
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                started=started,
                 raw_text=raw_text,
-                model_mode="gemini_live",
-                model_name=self._env.model_name,
-                fallback_reason=f"Gemini output did not match schema: {exc}",
-                error=f"schema mismatch: {exc}",
+                response_shape_keys=sorted(str(k) for k in data.keys())[:20],
+                response_preview=preview(raw_text),
+                live_mode=True,
             )
 
         return AgentModelResult(
@@ -146,6 +144,15 @@ class GeminiModel:
             model_name=self._env.model_name,
             fallback_reason=None,
             error=None,
+            provider=self._env.provider,
+            effective_mode=self._env.effective_mode,
+            agent_name=agent_name,
+            prompt_version=prompt_version,
+            ok=True,
+            latency_ms=latency_ms(started),
+            http_status=None,
+            response_shape_keys=sorted(str(k) for k in data.keys())[:20],
+            response_preview=preview(raw_text),
         )
 
     # -- internals ----------------------------------------------------------
@@ -167,7 +174,54 @@ class GeminiModel:
             return types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 response_mime_type="application/json",
+                temperature=0,
+                max_output_tokens=self._env.max_output_tokens,
             )
         except Exception:
             # Older SDK shape — fall back to a plain dict the client tolerates.
-            return {"system_instruction": system_prompt}
+            return {
+                "system_instruction": system_prompt,
+                "temperature": 0,
+                "max_output_tokens": self._env.max_output_tokens,
+            }
+
+    def _failure(
+        self,
+        reason: str,
+        *,
+        agent_name: str,
+        prompt_version: str,
+        started: float,
+        raw_text: str | None = None,
+        response_shape_keys: list[str] | None = None,
+        response_preview: str | None = None,
+        live_mode: bool = False,
+    ) -> AgentModelResult:
+        duration_ms = latency_ms(started)
+        if self._env.strict_live_model and self._env.live_enabled:
+            raise LiveModelProviderError(
+                reason,
+                provider=self._env.provider,
+                effective_mode=self._env.effective_mode,
+                model_name=self._env.model_name,
+                agent_name=agent_name,
+                prompt_version=prompt_version,
+                response_shape_keys=response_shape_keys,
+                fallback_reason="provider_call_failed",
+            )
+        return AgentModelResult(
+            parsed=None,
+            raw_text=raw_text,
+            model_mode="gemini_live" if live_mode else "rule_based_fallback",
+            model_name=self._env.model_name,
+            fallback_reason=reason,
+            error=reason,
+            provider=self._env.provider,
+            effective_mode=self._env.effective_mode,
+            agent_name=agent_name,
+            prompt_version=prompt_version,
+            ok=False,
+            latency_ms=duration_ms,
+            response_shape_keys=response_shape_keys or [],
+            response_preview=response_preview or preview(raw_text),
+        )

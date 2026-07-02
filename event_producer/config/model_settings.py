@@ -17,6 +17,9 @@ ProviderName = Literal["gemini", "openrouter", "openai_compatible", "local", "ol
 
 _ENV_KEYS = {
     "ENABLE_LIVE_MODEL",
+    "STRICT_LIVE_MODEL",
+    "MODEL_REQUEST_TIMEOUT_SECONDS",
+    "MODEL_MAX_OUTPUT_TOKENS",
     "MODEL_PROVIDER",
     "MODEL_NAME",
     "ENABLE_LIVE_GEMINI",
@@ -36,10 +39,12 @@ _LOCAL_PROVIDERS = {"local", "ollama", "lmstudio"}
 class ModelSettingsPublic(BaseModel):
     provider: str
     live_enabled: bool
+    strict_live_model: bool
     effective_mode: str
     model_name: str
     api_base_url: str | None = None
     has_api_key: bool
+    request_timeout_seconds: int
     fallback_reason: str | None = None
     env_path: str
     restart_required: bool = False
@@ -118,6 +123,8 @@ def updates_from_settings(settings: ModelSettingsUpdate, current: dict[str, str]
 
     updates: dict[str, str] = {
         "ENABLE_LIVE_MODEL": "true" if settings.live_enabled else "false",
+        "STRICT_LIVE_MODEL": "true" if settings.live_enabled else current.get("STRICT_LIVE_MODEL", "true"),
+        "MODEL_REQUEST_TIMEOUT_SECONDS": current.get("MODEL_REQUEST_TIMEOUT_SECONDS", "12") or "12",
         "MODEL_PROVIDER": provider,
     }
 

@@ -113,13 +113,65 @@ export interface CreativeConcept {
   model_mode?: AgentMode
 }
 
+export interface ScopeStrategyRecommendation {
+  title: string
+  recommendation_type: 'add' | 'cut' | 'reduce' | 'retier' | 'keep' | 'clarify'
+  category: string
+  tier: 'must' | 'should' | 'could' | 'wow'
+  rationale: string
+  budget_pressure: 'low' | 'medium' | 'high'
+  operational_risk: 'low' | 'medium' | 'high'
+  proposed_scope_item?: Record<string, unknown> | null
+}
+
+export interface ScopeStrategy {
+  strategy_summary?: string
+  must_have_logic?: string[]
+  tradeoffs?: string[]
+  recommendations?: ScopeStrategyRecommendation[]
+  questions_for_user?: string[]
+  model_mode?: AgentMode
+  fallback_reason?: string | null
+}
+
+export interface VendorDraft {
+  subject?: string
+  body?: string
+  ask_summary?: string
+  required_vendor_response_fields?: string[]
+  approval_diff?: string
+  risk_notes?: string[]
+  model_mode?: AgentMode
+  fallback_reason?: string | null
+  draft?: string
+}
+
 export interface ModelModeSummary {
   brief_intake?: string
   creative_concept?: string
+  orchestrator?: string
+  scope_strategy?: string
   budget_manager?: string
   production_manager?: string
   vendor_coordinator?: string
+  vendor_draft?: string
   security?: string
+}
+
+export interface RuntimeModelTestResult {
+  provider: string
+  effective_mode: string
+  model_name: string
+  has_api_key: boolean
+  ok: boolean
+  latency_ms?: number | null
+  http_status?: number | null
+  response_shape_keys?: string[]
+  response_preview?: string | null
+  error?: string | null
+  fallback_reason?: string | null
+  agent_name?: string | null
+  prompt_version?: string | null
 }
 
 export const MODE_LABEL: Record<AgentMode, string> = {

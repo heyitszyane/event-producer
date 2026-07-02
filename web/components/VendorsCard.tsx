@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react'
+import type { AgentMode, VendorDraft } from '../types/agentic'
+import { MODE_CLASS, MODE_LABEL } from '../types/agentic'
 import { displayLabel } from '../lib/humanize'
 
 export interface Vendor {
@@ -14,6 +16,7 @@ export interface Vendor {
 
 interface VendorsCardProps {
   vendors: Vendor[]
+  vendorDraft?: VendorDraft | null
 }
 
 const blankVendor: Vendor = {
@@ -41,7 +44,7 @@ function renderStars(rating: string | number): React.ReactNode {
   return <span aria-label={`Sample fixture rating ${String(rating)} out of 5`}>{stars} <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--text-xs)' }}>(sample fixture rating {String(rating)})</span></span>
 }
 
-export default function VendorsCard({ vendors }: VendorsCardProps) {
+export default function VendorsCard({ vendors, vendorDraft }: VendorsCardProps) {
   const [draftVendors, setDraftVendors] = useState<Vendor[]>(vendors || [])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Vendor>(blankVendor)
@@ -101,6 +104,28 @@ export default function VendorsCard({ vendors }: VendorsCardProps) {
       <div className="block block--info">
         Vendor rows are frontend-session drafts. They are not sent, persisted, or locked until a human approves a vendor-facing action.
       </div>
+
+      {vendorDraft && (
+        <div className="war-inset">
+          <div className="war-inset__topline">
+            <strong>{vendorDraft.subject || 'Vendor draft'}</strong>
+            <div className="cluster">
+              {vendorDraft.model_mode && (
+                <span className={`badge ${MODE_CLASS[vendorDraft.model_mode as AgentMode] ?? 'badge--muted'}`}>
+                  Drafted by: {MODE_LABEL[vendorDraft.model_mode as AgentMode]}
+                </span>
+              )}
+              <span className="badge badge--approval">Blocked by Approval Wall</span>
+            </div>
+          </div>
+          {vendorDraft.fallback_reason && <div className="block block--warn">Fallback: {vendorDraft.fallback_reason}</div>}
+          <p className="small">{vendorDraft.ask_summary}</p>
+          <pre className="diff-block" style={{ whiteSpace: 'pre-wrap' }}>
+            {vendorDraft.body || vendorDraft.draft || 'No draft body returned.'}
+          </pre>
+          {vendorDraft.approval_diff && <p className="small"><strong>Approval diff:</strong> {vendorDraft.approval_diff}</p>}
+        </div>
+      )}
 
       {editingId && (
         <div className="vendor-editor">

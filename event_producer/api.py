@@ -39,6 +39,7 @@ from event_producer.models.schemas import (
     ScopeItemCreate,
     ScopeItemUpdate,
 )
+from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
 
 # ---------------------------------------------------------------------------
@@ -117,11 +118,44 @@ class RuntimeModelResponse(BaseModel):
 
     provider: str
     live_enabled: bool
+    strict_live_model: bool
     effective_mode: str
     model_name: str
     api_base_url: str | None
     has_api_key: bool
+    request_timeout_seconds: int
     fallback_reason: str | None = None
+
+
+class RuntimeModelTestRequest(BaseModel):
+    """Optional tiny prompt override for ``POST /runtime/model/test``."""
+
+    prompt: str | None = None
+
+
+class RuntimeModelTestResponse(BaseModel):
+    """Non-secret provider call diagnostic response."""
+
+    provider: str
+    effective_mode: str
+    model_name: str
+    has_api_key: bool
+    ok: bool
+    latency_ms: int | None = None
+    http_status: int | None = None
+    response_shape_keys: list[str] = []
+    response_preview: str | None = None
+    error: str | None = None
+    fallback_reason: str | None = None
+    agent_name: str | None = None
+    prompt_version: str | None = None
+
+
+class _ProviderProbe(BaseModel):
+    """Expected tiny JSON object returned by provider diagnostics."""
+
+    ok: bool
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -202,19 +236,33 @@ def create_app() -> FastAPI:
     # ---- Routes ----------------------------------------------------------
 
     @app.post("/run")
-    async def run_event(req: RunEventRequest) -> dict[str, Any]:
+    async def run_event(req: RunEventRequest) -> Any:
         """Run the full event production pipeline and return the result."""
         producer: EventProducerApp = app.state.event_producer
-        result = producer.run_event(
-            brief=req.brief,
-            budget_cap=req.budget_cap,
-            contingency_pct=req.contingency_pct,
-            attendees=req.attendees,
-            event_type=req.event_type,
-            venue_type=req.venue_type,
-            date=req.date,
-            manual_constraints=req.manual_constraints,
-        )
+        try:
+            result = producer.run_event(
+                brief=req.brief,
+                budget_cap=req.budget_cap,
+                contingency_pct=req.contingency_pct,
+                attendees=req.attendees,
+                event_type=req.event_type,
+                venue_type=req.venue_type,
+                date=req.date,
+                manual_constraints=req.manual_constraints,
+            )
+        except LiveModelProviderError as exc:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "code": "LIVE_MODEL_PROVIDER_FAILED",
+                        "message": exc.message,
+                        "provider": exc.provider,
+                        "model_name": exc.model_name,
+                        "agent_name": exc.agent_name,
+                    }
+                },
+            )
         return result
 
     @app.get("/event/{event_id}")
@@ -253,11 +301,79 @@ def create_app() -> FastAPI:
         return RuntimeModelResponse(
             provider=env.provider,
             live_enabled=env.live_enabled,
+            strict_live_model=env.strict_live_model,
             effective_mode=env.effective_mode,
             model_name=env.model_name,
             api_base_url=env.api_base_url or None,
             has_api_key=bool(env.api_key),
+            request_timeout_seconds=env.request_timeout_seconds,
             fallback_reason=env.fallback_reason or None,
+        )
+
+    @app.post("/runtime/model/test")
+    async def runtime_model_test(
+        req: RuntimeModelTestRequest | None = None,
+    ) -> RuntimeModelTestResponse:
+        """Run one tiny selected-provider call and return non-secret diagnostics."""
+        producer: EventProducerApp = app.state.event_producer
+        env = producer._model_env
+        if env.effective_mode == "rule_based_fallback":
+            return RuntimeModelTestResponse(
+                provider=env.provider,
+                effective_mode=env.effective_mode,
+                model_name=env.model_name,
+                has_api_key=bool(env.api_key),
+                ok=False,
+                error=env.fallback_reason or "live provider not configured",
+                fallback_reason=env.fallback_reason or "live_provider_not_configured",
+                agent_name="provider_diagnostic",
+                prompt_version="provider_diagnostic.v1",
+            )
+
+        prompt = (
+            (req.prompt if req else None)
+            or 'Return exactly JSON: {"ok": true, "message": "provider reachable"}.'
+        )
+        try:
+            result = producer._agent_model.generate_structured(
+                agent_name="provider_diagnostic",
+                prompt_version="provider_diagnostic.v1",
+                system_prompt=(
+                    "You are a connectivity diagnostic. Return only a JSON object "
+                    "matching the requested schema. Do not include secrets."
+                ),
+                user_prompt=prompt,
+                schema=_ProviderProbe,
+            )
+        except LiveModelProviderError as exc:
+            return RuntimeModelTestResponse(
+                provider=exc.provider,
+                effective_mode=exc.effective_mode,
+                model_name=exc.model_name or env.model_name,
+                has_api_key=bool(env.api_key),
+                ok=False,
+                http_status=exc.http_status,
+                response_shape_keys=exc.response_shape_keys,
+                error=exc.message,
+                fallback_reason=exc.fallback_reason or "provider_test_failed",
+                agent_name=exc.agent_name,
+                prompt_version=exc.prompt_version,
+            )
+
+        return RuntimeModelTestResponse(
+            provider=result.provider or env.provider,
+            effective_mode=result.effective_mode or env.effective_mode,
+            model_name=result.model_name or env.model_name,
+            has_api_key=bool(env.api_key),
+            ok=result.ok and result.parsed is not None,
+            latency_ms=result.latency_ms,
+            http_status=result.http_status,
+            response_shape_keys=result.response_shape_keys,
+            response_preview=result.response_preview or result.raw_text,
+            error=result.error,
+            fallback_reason=result.fallback_reason,
+            agent_name=result.agent_name,
+            prompt_version=result.prompt_version,
         )
 
     def _public_model_settings(*, restart_required: bool = False) -> ModelSettingsPublic:
@@ -266,10 +382,12 @@ def create_app() -> FastAPI:
         return ModelSettingsPublic(
             provider=env.provider,
             live_enabled=env.live_enabled,
+            strict_live_model=env.strict_live_model,
             effective_mode=env.effective_mode,
             model_name=env.model_name,
             api_base_url=env.api_base_url or None,
             has_api_key=bool(env.api_key),
+            request_timeout_seconds=env.request_timeout_seconds,
             fallback_reason=env.fallback_reason or None,
             env_path=str(env_path()),
             restart_required=restart_required,
@@ -685,7 +803,7 @@ def create_app() -> FastAPI:
     @app.post("/event/{event_id}/chat")
     async def orchestrator_chat(
         event_id: str, req: OrchestratorChatRequest
-    ) -> OrchestratorChatResponse:
+    ) -> Any:
         """Chat with the orchestrator; returns proposed actions, no mutation.
 
         Proposals are stored server-side; the response includes the stored
@@ -697,9 +815,33 @@ def create_app() -> FastAPI:
         event_spec = producer.event_store.get_event(event_id)
         scope_items = producer.event_store.get_scope(event_id)
         budget_summary = producer.event_store.get_budget(event_id)
+        schedule_result = producer.event_store.get_schedule(event_id)
+        run_of_show = producer.event_store.get_run_of_show(event_id)
+        approvals = producer.event_store.get_approvals(event_id)
 
         if not event_spec:
             raise HTTPException(status_code=404, detail="Event not found")
+
+        if (
+            producer._model_env.live_enabled
+            and producer._model_env.strict_live_model
+            and producer._model_env.effective_mode == "rule_based_fallback"
+        ):
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "code": "LIVE_MODEL_PROVIDER_FAILED",
+                        "message": (
+                            "Live provider is not callable for Orchestrator: "
+                            f"{producer._model_env.fallback_reason}"
+                        ),
+                        "provider": producer._model_env.provider,
+                        "model_name": producer._model_env.model_name,
+                        "agent_name": "orchestrator",
+                    }
+                },
+            )
 
         # Build context for the orchestrator agent
         context = {
@@ -707,10 +849,27 @@ def create_app() -> FastAPI:
             "event_spec": event_spec.model_dump(),
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_summary": budget_summary.model_dump() if budget_summary else None,
+            "schedule_result": schedule_result.model_dump() if schedule_result else None,
+            "approvals": [a.model_dump() for a in approvals],
+            "risk_flags": [r.model_dump() for r in run_of_show.risk_flags] if run_of_show else [],
         }
 
         # The orchestrator agent returns proposed actions
-        result = producer._orchestrator.run(req.message, context)
+        try:
+            result = producer._orchestrator.run(req.message, context)
+        except LiveModelProviderError as exc:
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "code": "LIVE_MODEL_PROVIDER_FAILED",
+                        "message": exc.message,
+                        "provider": exc.provider,
+                        "model_name": exc.model_name,
+                        "agent_name": exc.agent_name,
+                    }
+                },
+            )
 
         # Store each proposed action as a Proposal object for apply/dismiss
         stored_proposals: list[dict[str, Any]] = []

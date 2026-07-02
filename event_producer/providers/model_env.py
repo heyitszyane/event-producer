@@ -32,10 +32,20 @@ _KEY_NAMES = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 _OPENAI_COMPATIBLE_KEYS = ("OPENAI_COMPATIBLE_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY")
 _LOCAL_PROVIDERS = {"local", "ollama", "lmstudio"}
 _OPENAI_COMPATIBLE_PROVIDERS = {"openai_compatible", "openrouter", *_LOCAL_PROVIDERS}
+_DEFAULT_TIMEOUT_SECONDS = 12
+_DEFAULT_MAX_OUTPUT_TOKENS = 900
 
 
 def _provider_label(provider: str) -> str:
     return "Gemini" if provider == "gemini" else provider
+
+
+def _positive_int(value: str | None, default: int) -> int:
+    try:
+        parsed = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 class ModelEnv:
@@ -65,12 +75,18 @@ class ModelEnv:
         model_name: str,
         api_base_url: str,
         fallback_reason: str,
+        strict_live_model: bool = True,
+        request_timeout_seconds: int = _DEFAULT_TIMEOUT_SECONDS,
+        max_output_tokens: int = _DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
         self.provider = provider
         self.live_enabled = live_enabled
         self.api_key = api_key
         self.model_name = model_name
         self.api_base_url = api_base_url
+        self.strict_live_model = strict_live_model
+        self.request_timeout_seconds = request_timeout_seconds
+        self.max_output_tokens = max_output_tokens
 
         local_live_without_key = provider in _LOCAL_PROVIDERS and bool(api_base_url)
         if live_enabled and (api_key or local_live_without_key):
@@ -102,6 +118,15 @@ class ModelEnv:
         live_raw = (e.get("ENABLE_LIVE_MODEL", "") or "").strip().lower()
         legacy_live_raw = (e.get("ENABLE_LIVE_GEMINI", "") or "").strip().lower()
         live_enabled = live_raw == "true" or (provider == "gemini" and legacy_live_raw == "true")
+        strict_live_model = (e.get("STRICT_LIVE_MODEL", "true") or "").strip().lower() == "true"
+        request_timeout_seconds = _positive_int(
+            e.get("MODEL_REQUEST_TIMEOUT_SECONDS"),
+            _DEFAULT_TIMEOUT_SECONDS,
+        )
+        max_output_tokens = _positive_int(
+            e.get("MODEL_MAX_OUTPUT_TOKENS"),
+            _DEFAULT_MAX_OUTPUT_TOKENS,
+        )
 
         api_key = ""
         api_base_url = ""
@@ -174,6 +199,9 @@ class ModelEnv:
             model_name=model_name,
             api_base_url=api_base_url,
             fallback_reason=reason,
+            strict_live_model=strict_live_model,
+            request_timeout_seconds=request_timeout_seconds,
+            max_output_tokens=max_output_tokens,
         )
 
     def require_key(self) -> str:

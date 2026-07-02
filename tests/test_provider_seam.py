@@ -22,6 +22,9 @@ def _clean_env(monkeypatch, **overrides: str) -> None:
     for k in (
         "ENABLE_LIVE_MODEL",
         "ENABLE_LIVE_GEMINI",
+        "STRICT_LIVE_MODEL",
+        "MODEL_REQUEST_TIMEOUT_SECONDS",
+        "MODEL_MAX_OUTPUT_TOKENS",
         "MODEL_PROVIDER",
         "MODEL_NAME",
         "GEMINI_API_KEY",
@@ -108,6 +111,40 @@ def test_env_openrouter_provider(monkeypatch) -> None:
     assert env.api_key == "or-key"
     assert env.api_base_url == "https://openrouter.ai/api/v1/chat/completions"
     assert env.model_name == "anthropic/claude-sonnet-4"
+
+
+def test_env_openrouter_provider_without_key_records_fallback(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="openrouter",
+    )
+    env = ModelEnv.from_env()
+    assert env.provider == "openrouter"
+    assert env.effective_mode == "rule_based_fallback"
+    assert "no openrouter api key" in env.fallback_reason.lower()
+
+
+def test_env_request_timeout_default_and_invalid(monkeypatch) -> None:
+    _clean_env(monkeypatch)
+    assert ModelEnv.from_env().request_timeout_seconds == 12
+
+    _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="0")
+    assert ModelEnv.from_env().request_timeout_seconds == 12
+
+    _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="not-a-number")
+    assert ModelEnv.from_env().request_timeout_seconds == 12
+
+    _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="7")
+    assert ModelEnv.from_env().request_timeout_seconds == 7
+
+
+def test_env_strict_live_default_and_override(monkeypatch) -> None:
+    _clean_env(monkeypatch)
+    assert ModelEnv.from_env().strict_live_model is True
+
+    _clean_env(monkeypatch, STRICT_LIVE_MODEL="false")
+    assert ModelEnv.from_env().strict_live_model is False
 
 
 def test_env_local_provider_defaults_to_local_endpoint(monkeypatch) -> None:

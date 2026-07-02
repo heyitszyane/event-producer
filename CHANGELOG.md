@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7H.4 — UI runtime visibility and docs honesty
+
+- Added a Settings **Test provider** control that calls
+  `POST /runtime/model/test` and renders provider, model, effective mode,
+  success/failure, latency, sanitized error, and response preview without
+  exposing secrets.
+- Added a compact post-run runtime summary showing provider/model, live/fallback
+  mode for live-capable agents, deterministic budget/schedule cores, and the
+  human Approval Wall; degraded agent fallbacks now surface near the top.
+- Updated AI Production Crew and strict-live error UX so model names,
+  fallback reasons, provider/model/agent failures, and the Settings diagnostic
+  path are visible from the UI.
+- Updated public docs to frame live provider mode as the intended capstone demo,
+  deterministic fallback as degraded/resilience mode, and budget/scheduler/
+  approval components as source-of-truth controls.
+
+### P7H.3 — Live scope strategy and vendor draft surfaces
+
+- Added a live/fallback Scope Strategy Agent with prompt, typed schema,
+  trace entry, `model_mode_summary.scope_strategy`, and visible frontend module
+  for strategy summary, tradeoffs, recommendations, and fallback reasons.
+- Added live/fallback Vendor Draft output with subject/body/approval diff,
+  `model_mode_summary.vendor_draft`, vendor-area preview, and pending
+  approval notes while preserving the structural Approval Wall.
+- Added safety tests proving Scope Strategy does not mutate budget/schedule,
+  vendor drafts stay pending and unsent, strict provider failures surface
+  clearly, and LLM-supplied payment instructions are scrubbed rather than
+  bypassing the action gate.
+
 ### P7F — Consolidated external-audit fix pass
 
 Closes the highest-priority post-P7E audit blockers without adding production

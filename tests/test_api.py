@@ -24,8 +24,21 @@ from event_producer.security.action_gate import enforce
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """TestClient with X-Demo-User header set for all requests."""
+    for key in (
+        "ENABLE_LIVE_MODEL",
+        "ENABLE_LIVE_GEMINI",
+        "STRICT_LIVE_MODEL",
+        "MODEL_PROVIDER",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "LOCAL_LLM_API_BASE_URL",
+        "LOCAL_LLM_MODEL",
+    ):
+        monkeypatch.delenv(key, raising=False)
     app = create_app()
     return TestClient(app, headers={"X-Demo-User": "demo"})
 
@@ -68,10 +81,12 @@ class TestRuntimeModel:
         assert data == {
             "provider": "local",
             "live_enabled": True,
+            "strict_live_model": True,
             "effective_mode": "openai_compatible_live",
             "model_name": "local-test-model",
             "api_base_url": "http://127.0.0.1:1234/v1/chat/completions",
             "has_api_key": True,
+            "request_timeout_seconds": 12,
             "fallback_reason": None,
         }
         assert "should-not-leak" not in str(data)
@@ -114,6 +129,8 @@ class TestModelSettings:
         assert data["provider"] == "lmstudio"
         assert data["effective_mode"] == "openai_compatible_live"
         assert data["has_api_key"] is True
+        assert data["strict_live_model"] is True
+        assert data["request_timeout_seconds"] == 12
         assert data["env_path"] == str(env_file)
         assert "secret-lmst" not in str(data)
 
@@ -152,6 +169,8 @@ class TestModelSettings:
 
         written = env_file.read_text(encoding="utf-8")
         assert "ENABLE_LIVE_MODEL=true" in written
+        assert "STRICT_LIVE_MODEL=true" in written
+        assert "MODEL_REQUEST_TIMEOUT_SECONDS=12" in written
         assert "MODEL_PROVIDER=lmstudio" in written
         assert "LOCAL_LLM_MODEL=qwen/qwen3.5-9b" in written
         assert "OPENAI_COMPATIBLE_API_KEY=new-secret" in written
@@ -574,9 +593,11 @@ class TestP7aAgenticIntake:
         summary = data["model_mode_summary"]
         assert summary["brief_intake"] == "rule_based_fallback"
         assert summary["creative_concept"] == "rule_based_fallback"
+        assert summary["scope_strategy"] == "rule_based_fallback"
         assert summary["budget_manager"] == "deterministic_engine"
         assert summary["production_manager"] == "deterministic_engine"
         assert summary["vendor_coordinator"] == "human_approval_gate"
+        assert summary["vendor_draft"] == "rule_based_fallback"
         assert summary["security"] == "scripted_fixture"
 
     def test_live_without_key_falls_back_with_reason(

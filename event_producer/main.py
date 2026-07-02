@@ -35,6 +35,10 @@ from event_producer.agents.production_manager import (
     ProductionManagerReasonAgent,
 )
 from event_producer.agents.risk_flagger import RiskFlaggerAgent
+from event_producer.agents.scope_strategy import (
+    ScopeStrategyFormatterAgent,
+    ScopeStrategyReasonAgent,
+)
 from event_producer.agents.vendor_coordinator import (
     VendorCoordinatorFormatterAgent,
     VendorCoordinatorReasonAgent,
@@ -54,11 +58,13 @@ from event_producer.models.schemas import (
     RiskFlag,
     RunOfShow,
     ScheduleResult,
+    ScopeStrategyResult,
     ScopeItem,
     Vendor,
     VendorMessage,
 )
 from event_producer.providers.event_store import EventStore
+from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.providers.model_env import ModelEnv
 from event_producer.providers.model_router import build_agent_model
 from event_producer.providers.rate_card import FxRateProvider, StaticFxRateProvider
@@ -289,6 +295,8 @@ class EventProducerApp:
         self._brief_intake_formatter = BriefIntakeFormatterAgent()
         self._creative_reason = CreativeConceptReasonAgent(provider=self._agent_model)
         self._creative_formatter = CreativeConceptFormatterAgent()
+        self._scope_strategy_reason = ScopeStrategyReasonAgent(provider=self._agent_model)
+        self._scope_strategy_formatter = ScopeStrategyFormatterAgent()
 
         # --- Agents: Brief/Scope ---
         self._brief_scope_reason = BriefScopeReasonAgent(event_store=self._event_store)
@@ -313,11 +321,15 @@ class EventProducerApp:
             event_store=self._event_store,
             vendor_sourcer=self._vendor_sourcer,
             audit_log=self._audit_log,
+            provider=self._agent_model,
         )
         self._vendor_formatter = VendorCoordinatorFormatterAgent()
 
         # --- Agents: Orchestrator ---
-        self._orchestrator = OrchestratorAgent(event_store=self._event_store)
+        self._orchestrator = OrchestratorAgent(
+            event_store=self._event_store,
+            provider=self._agent_model,
+        )
 
     @property
     def event_store(self) -> InMemoryEventStore:
@@ -384,6 +396,21 @@ class EventProducerApp:
         approvals: list[Approval] = []
         model_mode_summary: dict[str, str] = {}
 
+        if (
+            self._model_env.live_enabled
+            and self._model_env.strict_live_model
+            and self._model_env.effective_mode == "rule_based_fallback"
+        ):
+            raise LiveModelProviderError(
+                f"Live provider is not callable for /run: {self._model_env.fallback_reason}",
+                provider=self._model_env.provider,
+                effective_mode=self._model_env.effective_mode,
+                model_name=self._model_env.model_name,
+                agent_name="brief_intake",
+                prompt_version="brief_intake.v1",
+                fallback_reason=self._model_env.fallback_reason,
+            )
+
         # ------------------------------------------------------------------
         # Step 0 (P7A): Brief Intake — interpret the messy brief.
         # Read-only / extractive. Does NOT touch scope/budget/schedule.
@@ -441,9 +468,11 @@ class EventProducerApp:
         # only the two AI-agent modes are dynamic.
         model_mode_summary["brief_intake"] = brief_intake.model_mode
         model_mode_summary["creative_concept"] = "rule_based_fallback"  # set below after creative runs
+        model_mode_summary["scope_strategy"] = "rule_based_fallback"  # set below after strategy runs
         model_mode_summary["budget_manager"] = "deterministic_engine"
         model_mode_summary["production_manager"] = "deterministic_engine"
         model_mode_summary["vendor_coordinator"] = "human_approval_gate"
+        model_mode_summary["vendor_draft"] = "rule_based_fallback"  # set below after draft runs
         model_mode_summary["security"] = "scripted_fixture"
 
         # ------------------------------------------------------------------
@@ -701,6 +730,60 @@ class EventProducerApp:
         ))
 
         # ------------------------------------------------------------------
+        # Step 1.5 (P7H.3): Scope Strategy (advisory only).
+        # ------------------------------------------------------------------
+        scope_strategy_request = {
+            "brief_intake": brief_intake.model_dump(),
+            "creative_concept": creative.model_dump(),
+            "resolved_constraints": {
+                "attendees": resolved_attendees,
+                "budget_cap": resolved_budget_cap,
+                "contingency_pct": resolved_contingency_pct,
+                "event_type": resolved_event_type,
+                "venue_type": resolved_venue_type,
+                "date": resolved_date,
+            },
+            "scope_items": [item.model_dump() for item in scope_items],
+        }
+        scope_strategy_raw = self._scope_strategy_reason.run(scope_strategy_request)
+        scope_strategy: ScopeStrategyResult = self._scope_strategy_formatter.run(
+            provider_text=scope_strategy_raw["provider_text"],
+            request=scope_strategy_request,
+            model_mode=scope_strategy_raw["model_mode"],
+            fallback_reason=scope_strategy_raw.get("fallback_reason"),
+        )
+        agent_trace.append(AgentTraceStep(
+            id="trace-scope-strategy",
+            role="Scope Strategy Agent",
+            label="Reasoned over scope tradeoffs before deterministic costing",
+            status="warning" if scope_strategy.fallback_reason else "complete",
+            input_summary=(
+                f"{len(scope_items)} candidate scope items, attendees={resolved_attendees}, "
+                f"budget_cap={resolved_budget_cap}"
+            ),
+            output_summary=(
+                f"{scope_strategy.strategy_summary} "
+                f"Recommendations: {len(scope_strategy.recommendations)}"
+            ),
+            artifacts=["scope_strategy"],
+            deterministic_core=None,
+            approval_required=False,
+            model_mode=scope_strategy_raw["model_mode"],
+            model_name=scope_strategy_raw.get("model_name"),
+            prompt_version=scope_strategy_raw.get("prompt_version"),
+            fallback_reason=scope_strategy_raw.get("fallback_reason"),
+        ))
+        chat_log.append(ChatLogMessage(
+            role="agent",
+            agent="Scope Strategy Agent",
+            content=(
+                f"{scope_strategy.strategy_summary} "
+                f"{len(scope_strategy.recommendations)} advisory recommendation(s); no scope was mutated."
+            ),
+        ))
+        model_mode_summary["scope_strategy"] = scope_strategy.model_mode
+
+        # ------------------------------------------------------------------
         # Step 2: Budget
         # ------------------------------------------------------------------
         budget_request = {
@@ -817,12 +900,29 @@ class EventProducerApp:
                 "action": "draft_rfp",
                 "vendor_id": sample_vendor.id,
                 "event_id": event_id,
+                "scope_items": [item.model_dump() for item in scope_items],
+                "vendor_category": sample_vendor.category,
+                "schedule_context": {
+                    "task_count": task_count,
+                    "critical_path": schedule_result.critical_path if schedule_result else [],
+                    "event_date": event_spec.date,
+                },
             }
             vendor_raw = self._vendor_reason.run(vendor_request)
             vendor_validated = self._vendor_formatter.run(vendor_raw)
+            if isinstance(vendor_validated.get("vendor_draft"), dict):
+                vendor_validated = {
+                    **vendor_validated["vendor_draft"],
+                    **vendor_validated,
+                }
             vendor_draft = vendor_validated
 
             # Create a real pending approval for the vendor draft
+            approval_diff = (
+                vendor_validated.get("approval_diff")
+                or vendor_validated.get("vendor_draft", {}).get("approval_diff")
+                or f"Send RFP to {sample_vendor.name} for {sample_vendor.category} booking."
+            )
             approval = Approval(
                 id=f"aprv-{event_id[:8]}-vendor",
                 action="send_vendor_message",
@@ -830,27 +930,28 @@ class EventProducerApp:
                 approved_by="",
                 status="pending",
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                notes=f"Send RFP to {sample_vendor.name} for {sample_vendor.category} booking.",
+                notes=f"{approval_diff} Draft requires human approval before send.",
             )
             self._event_store.save_approval(event_id, approval)
             approvals.append(approval)
+            model_mode_summary["vendor_draft"] = str(vendor_validated.get("model_mode") or "rule_based_fallback")
 
         # Trace + chat
         vendor_name = sample_vendors[0].name if sample_vendors else "unknown"
         agent_trace.append(AgentTraceStep(
             id="trace-vendor",
-            role="Vendor Coordinator",
-            label="Drafted vendor-facing action",
+            role="Vendor Draft Agent",
+            label="Drafted vendor-facing copy behind the approval wall",
             status="pending_approval",
             input_summary="Venue / AV / F&B needs from scope",
             output_summary=f"Prepared outbound vendor draft to {vendor_name} blocked behind human approval",
             artifacts=["vendors", "approvals"],
             deterministic_core=None,
             approval_required=True,
-            model_mode="human_approval_gate",
-            model_name=None,
-            prompt_version=None,
-            fallback_reason=None,
+            model_mode=vendor_draft.get("model_mode", "rule_based_fallback") if isinstance(vendor_draft, dict) else "rule_based_fallback",
+            model_name=vendor_draft.get("model_name") if isinstance(vendor_draft, dict) else None,
+            prompt_version=vendor_draft.get("prompt_version") if isinstance(vendor_draft, dict) else None,
+            fallback_reason=vendor_draft.get("fallback_reason") if isinstance(vendor_draft, dict) else None,
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -1021,6 +1122,7 @@ class EventProducerApp:
             "model_mode_summary": model_mode_summary,
             "brief_intake": brief_intake.model_dump(),
             "creative_concept": creative.model_dump(),
+            "scope_strategy": scope_strategy.model_dump(),
             "constraint_resolution": constraint_resolution,
         }
 

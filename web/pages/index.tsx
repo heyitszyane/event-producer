@@ -14,18 +14,24 @@ import IntakeHero from '../components/IntakeHero'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
-import { apiFetch, getApiBase } from '../lib/api'
+import ScopeStrategy from '../components/ScopeStrategy'
+import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import { humanizeValue } from '../lib/humanize'
 import type {
+  AgentMode,
   BriefIntake,
   ConstraintResolution,
   CreativeConcept as CreativeConceptData,
+  ScopeStrategy as ScopeStrategyData,
+  VendorDraft,
   ModelModeSummary,
+  RuntimeModelTestResult,
   AgentTraceStep,
   ProposedAction,
   OrchestratorChatResponse,
   RecomputeNotice,
 } from '../types/agentic'
+import { MODE_CLASS, MODE_LABEL } from '../types/agentic'
 
 // Backend-supported event types (must match _SCOPE_CATALOGUE keys)
 const EVENT_TYPES = [
@@ -41,6 +47,8 @@ export interface RunEventResponse {
   model_mode_summary?: ModelModeSummary
   brief_intake?: BriefIntake | null
   creative_concept?: CreativeConceptData | null
+  scope_strategy?: ScopeStrategyData | null
+  vendor_draft?: VendorDraft | null
   event_spec?: {
     name?: string
     description?: string
@@ -232,10 +240,12 @@ type ProviderName = 'gemini' | 'openrouter' | 'openai_compatible' | 'local' | 'o
 interface ModelSettings {
   provider: ProviderName
   live_enabled: boolean
+  strict_live_model: boolean
   effective_mode: string
   model_name: string
   api_base_url?: string | null
   has_api_key: boolean
+  request_timeout_seconds: number
   fallback_reason?: string | null
   env_path: string
   restart_required: boolean
@@ -336,6 +346,8 @@ export default function Dashboard() {
   const [chatInput, setChatInput] = useState('')
   const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
   const [chatReply, setChatReply] = useState<string | null>(null)
+  const [chatModelMode, setChatModelMode] = useState<string | null>(null)
+  const [chatFallbackReason, setChatFallbackReason] = useState<string | null>(null)
   const [producerLoading, setProducerLoading] = useState(false)
   const [producerError, setProducerError] = useState<string | null>(null)
   const [recomputeNotice, setRecomputeNotice] = useState<RecomputeNotice | null>(null)
@@ -351,6 +363,28 @@ export default function Dashboard() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null)
   const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [providerTestResult, setProviderTestResult] = useState<RuntimeModelTestResult | null>(null)
+  const [providerTesting, setProviderTesting] = useState(false)
+
+  function formatApiError(err: unknown): string {
+    if (err instanceof ApiRequestError && err.payload.code === 'LIVE_MODEL_PROVIDER_FAILED') {
+      return [
+        'Live provider failed in strict mode.',
+        `Provider: ${err.payload.provider || 'unknown'}`,
+        `Model: ${err.payload.model_name || 'unknown'}`,
+        `Agent: ${err.payload.agent_name || 'unknown'}`,
+        `Error: ${err.payload.message}`,
+        'Use Settings -> Test provider to diagnose the configured provider.',
+      ].join('\n')
+    }
+    if (err instanceof TypeError && err.message === 'Failed to fetch') {
+      return (
+        `Backend is unreachable at ${getApiBase()}. Start the backend on the same host/port, ` +
+        `or set NEXT_PUBLIC_API_BASE_URL to the backend you are running.`
+      )
+    }
+    return err instanceof Error ? err.message : String(err)
+  }
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '') as SectionId
@@ -419,10 +453,34 @@ export default function Dashboard() {
       applyModelSettings(data)
       setSettingsApiKey('')
       setSettingsMessage('Saved to local .env and refreshed the running backend.')
+      setProviderTestResult(null)
     } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : String(err))
+      setSettingsError(formatApiError(err))
     } finally {
       setSettingsSaving(false)
+    }
+  }
+
+  async function testProvider() {
+    setProviderTesting(true)
+    setSettingsMessage(null)
+    setSettingsError(null)
+    try {
+      const res = await apiFetch('/runtime/model/test', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      const data: RuntimeModelTestResult = await res.json()
+      setProviderTestResult(data)
+      if (data.ok) {
+        setSettingsMessage('Provider test succeeded.')
+      } else {
+        setSettingsError(data.error || data.fallback_reason || 'Provider test failed.')
+      }
+    } catch (err) {
+      setSettingsError(formatApiError(err))
+    } finally {
+      setProviderTesting(false)
     }
   }
 
@@ -496,14 +554,7 @@ export default function Dashboard() {
       setHasRun(true)
       setRecomputeNotice(null)
     } catch (err) {
-      if (err instanceof TypeError && err.message === 'Failed to fetch') {
-        setError(
-          `Backend is unreachable at ${getApiBase()}. Start the backend on the same host/port, ` +
-          `or set NEXT_PUBLIC_API_BASE_URL to the backend you are running.`
-        )
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      setError(formatApiError(err))
     } finally {
       setLoading(false)
     }
@@ -549,9 +600,11 @@ export default function Dashboard() {
       const data: OrchestratorChatResponse = await res.json()
       setChatReply(data.reply)
       setOrchestratorProposals(data.proposals)
+      setChatModelMode(data.model_mode)
+      setChatFallbackReason(data.fallback_reason || null)
       setChatInput('')
     } catch (err) {
-      setProducerError(err instanceof Error ? err.message : String(err))
+      setProducerError(formatApiError(err))
     } finally {
       setProducerLoading(false)
     }
@@ -591,7 +644,7 @@ export default function Dashboard() {
       applyMutationPayload(data)
       setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
     } catch (err) {
-      setProducerError(err instanceof Error ? err.message : String(err))
+      setProducerError(formatApiError(err))
     }
   }
 
@@ -604,7 +657,7 @@ export default function Dashboard() {
       })
       setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
     } catch (err) {
-      setProducerError(err instanceof Error ? err.message : String(err))
+      setProducerError(formatApiError(err))
     }
   }
 
@@ -634,7 +687,7 @@ export default function Dashboard() {
       const data = await res.json()
       applyMutationPayload(data)
     } catch (err) {
-      setProducerError(err instanceof Error ? err.message : String(err))
+      setProducerError(formatApiError(err))
     }
   }
 
@@ -643,6 +696,24 @@ export default function Dashboard() {
   const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : hasRealismRisk ? 'AT RISK' : result ? 'ON TRACK' : 'AWAITING BRIEF'
   const eventTitle = eventNameOverride || generateEventName(brief, result?.event_spec?.name)
   const headerTitle = eventTitle
+  const producerModeLabel = chatModelMode ? humanizeValue(chatModelMode) : 'Awaiting question'
+  const producerModeClass = chatModelMode?.includes('live') ? 'badge--live' : chatModelMode ? 'badge--fallback' : 'badge--muted'
+  const firstModelTrace = agentTrace.find((step) => step.model_name)
+  const runtimeProvider = modelSettings?.provider ? humanizeValue(modelSettings.provider) : firstModelTrace?.model_mode ? humanizeValue(firstModelTrace.model_mode) : 'Awaiting run'
+  const runtimeModel = firstModelTrace?.model_name || modelSettings?.model_name || '-'
+  const degradedSteps = agentTrace.filter((step) => step.fallback_reason)
+  const runtimeSummaryRows: Array<{ label: string; value: string; mode?: string }> = [
+    { label: 'Provider', value: runtimeProvider },
+    { label: 'Model', value: runtimeModel },
+    { label: 'Brief Intake', value: humanizeValue(result?.model_mode_summary?.brief_intake || 'awaiting run'), mode: result?.model_mode_summary?.brief_intake },
+    { label: 'Creative', value: humanizeValue(result?.model_mode_summary?.creative_concept || 'awaiting run'), mode: result?.model_mode_summary?.creative_concept },
+    { label: 'Scope Strategy', value: humanizeValue(result?.model_mode_summary?.scope_strategy || 'awaiting run'), mode: result?.model_mode_summary?.scope_strategy },
+    { label: 'AI Producer', value: humanizeValue(result?.model_mode_summary?.orchestrator || chatModelMode || 'awaiting question'), mode: result?.model_mode_summary?.orchestrator || chatModelMode || undefined },
+    { label: 'Vendor Draft', value: humanizeValue(result?.model_mode_summary?.vendor_draft || 'awaiting run'), mode: result?.model_mode_summary?.vendor_draft },
+    { label: 'Budget', value: 'Deterministic engine', mode: 'deterministic_engine' },
+    { label: 'Schedule', value: 'Deterministic engine', mode: 'deterministic_engine' },
+    { label: 'Approval Wall', value: 'Human-gated', mode: 'human_approval_gate' },
+  ]
   const producerConsole = result ? (
     <section className="war-panel producer-console" id="orchestrator-chat">
       <div className="war-panel__header">
@@ -650,7 +721,10 @@ export default function Dashboard() {
           <span className="war-eyebrow">Producer actions</span>
           <h2>Ask the AI Producer</h2>
         </div>
-        <span className="badge badge--fallback">event-aware proposals</span>
+        <div className="cluster">
+          <span className={`badge ${producerModeClass}`}>{producerModeLabel}</span>
+          <span className="badge badge--info">{orchestratorProposals.length} proposal{orchestratorProposals.length === 1 ? '' : 's'}</span>
+        </div>
       </div>
       <div className="prompt-chips">
         {PRODUCER_PROMPTS.map((prompt) => (
@@ -682,6 +756,11 @@ export default function Dashboard() {
           <strong>Producer reply:</strong> {chatReply}
         </div>
       )}
+      {chatFallbackReason && (
+        <div className="block block--warn">
+          Degraded fallback: {chatFallbackReason}
+        </div>
+      )}
       {orchestratorProposals.length > 0 && (
         <div className="proposal-ledger">
           {orchestratorProposals.map((p) => (
@@ -695,7 +774,10 @@ export default function Dashboard() {
                 <p className="muted">Budget impact: ${String(p.payload.estimated_cost)}</p>
               )}
               <div className="cluster">
-                <button onClick={() => applyProposal(p)} className="btn btn--primary btn--sm" type="button">Apply</button>
+                {p.requires_approval_gate && <span className="badge badge--approval">approval gate</span>}
+                <button onClick={() => applyProposal(p)} className="btn btn--primary btn--sm" type="button" disabled={p.requires_approval_gate}>
+                  {p.requires_approval_gate ? 'Approval required' : 'Apply'}
+                </button>
                 <button onClick={() => dismissProposal(p)} className="btn btn--ghost btn--sm" type="button">Dismiss</button>
               </div>
             </div>
@@ -839,6 +921,7 @@ export default function Dashboard() {
               onPromptChipClick={sendProducerPrompt}
             />
             {producerConsole}
+            <ScopeStrategy strategy={result?.scope_strategy ?? null} />
             <CreativeConcept concept={result?.creative_concept ?? null} onAddToScope={handleAddToScope} />
           </div>
         )
@@ -861,7 +944,7 @@ export default function Dashboard() {
           </div>
         )
       case 'vendors':
-        return <VendorsCard vendors={vendors} />
+        return <VendorsCard vendors={vendors} vendorDraft={result?.vendor_draft ?? null} />
       case 'risks':
         return (
           <div className="war-stack">
@@ -960,10 +1043,37 @@ export default function Dashboard() {
                   <button className="btn btn--ghost" type="button" onClick={() => loadModelSettings()} disabled={settingsSaving}>
                     Refresh Status
                   </button>
+                  <button className="btn btn--ghost" type="button" onClick={testProvider} disabled={settingsSaving || providerTesting}>
+                    {providerTesting ? 'Testing...' : 'Test provider'}
+                  </button>
                 </div>
               </form>
               {settingsMessage && <div className="callout callout--success">{settingsMessage}</div>}
               {settingsError && <div className="error-bar" role="alert">{settingsError}</div>}
+              {providerTestResult && (
+                <div className={providerTestResult.ok ? 'provider-test provider-test--ok' : 'provider-test provider-test--fail'}>
+                  <div className="provider-test__header">
+                    <strong>{providerTestResult.ok ? 'Provider reachable' : 'Provider test failed'}</strong>
+                    <span className={`badge ${providerTestResult.ok ? 'badge--live' : 'badge--fallback'}`}>
+                      {providerTestResult.ok ? 'success' : 'failure'}
+                    </span>
+                  </div>
+                  <table className="data-table settings-table">
+                    <tbody>
+                      <tr><th>Provider</th><td>{humanizeValue(providerTestResult.provider)}</td></tr>
+                      <tr><th>Model</th><td>{providerTestResult.model_name || '-'}</td></tr>
+                      <tr><th>Effective mode</th><td>{humanizeValue(providerTestResult.effective_mode)}</td></tr>
+                      <tr><th>Latency</th><td>{providerTestResult.latency_ms !== null && providerTestResult.latency_ms !== undefined ? `${providerTestResult.latency_ms} ms` : '-'}</td></tr>
+                      <tr><th>HTTP</th><td>{providerTestResult.http_status || '-'}</td></tr>
+                      <tr><th>Key loaded</th><td>{providerTestResult.has_api_key ? 'Yes' : 'No'}</td></tr>
+                      {!providerTestResult.ok && <tr><th>Error</th><td>{providerTestResult.error || providerTestResult.fallback_reason || '-'}</td></tr>}
+                    </tbody>
+                  </table>
+                  {providerTestResult.response_preview && (
+                    <pre className="diff-block provider-test__preview">{providerTestResult.response_preview}</pre>
+                  )}
+                </div>
+              )}
             </section>
             <section className="war-panel settings-panel">
               <div className="war-panel__header">
@@ -1106,8 +1216,28 @@ export default function Dashboard() {
 
           {error && (
             <div className="error-bar" role="alert">
-              <span>{error.includes('Failed to fetch') || error.includes('unreachable') ? error : `Error: ${error}`}</span>
+              <span>{error.includes('Live provider failed') || error.includes('unreachable') ? error : `Error: ${error}`}</span>
               <button onClick={() => setError(null)} className="dismiss-btn" aria-label="Dismiss error">x</button>
+            </div>
+          )}
+
+          <section className="runtime-summary" aria-label="Runtime summary">
+            {runtimeSummaryRows.map((row) => {
+              const mode = row.mode as AgentMode | undefined
+              return (
+                <div key={row.label}>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                  {mode && MODE_LABEL[mode] && (
+                    <em className={`badge ${MODE_CLASS[mode] ?? 'badge--muted'}`}>{MODE_LABEL[mode]}</em>
+                  )}
+                </div>
+              )
+            })}
+          </section>
+          {degradedSteps.length > 0 && (
+            <div className="callout callout--warning runtime-degraded" role="status">
+              Degraded mode: {degradedSteps[0].role} used fallback because {degradedSteps[0].fallback_reason}.
             </div>
           )}
 

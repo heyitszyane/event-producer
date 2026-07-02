@@ -10,17 +10,34 @@ Reason -> Formatter split:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
-from event_producer.models.schemas import Approval, Task, Vendor, VendorMessage
+from event_producer.models.schemas import (
+    AgentMode,
+    Approval,
+    Task,
+    Vendor,
+    VendorDraftResult,
+    VendorMessage,
+)
 from event_producer.security.action_gate import enforce
 from event_producer.security.audit_log import AuditLog
 from event_producer.security.injection_flag import check as check_injection
 from event_producer.security.injection_flag import is_flagged
 
 if TYPE_CHECKING:
+    from event_producer.providers.agent_model import AgentModelProvider
     from event_producer.providers.event_store import EventStore
     from event_producer.providers.vendor_sourcer import VendorSourcer
+
+_PROMPT_PATH = Path(__file__).parent / "prompts" / "vendor_draft_v1.md"
+
+
+def _load_prompt() -> str:
+    return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 class VendorCoordinatorReasonAgent:
@@ -37,6 +54,8 @@ class VendorCoordinatorReasonAgent:
         event_store: EventStore,
         vendor_sourcer: VendorSourcer,
         audit_log: AuditLog,
+        provider: AgentModelProvider | None = None,
+        prompt_version: str = "vendor_draft.v1",
     ) -> None:
         """Initialize the vendor reason agent.
 
@@ -48,6 +67,9 @@ class VendorCoordinatorReasonAgent:
         self._event_store = event_store
         self._vendor_sourcer = vendor_sourcer
         self._audit_log = audit_log
+        self._provider = provider
+        self._prompt = _load_prompt()
+        self._prompt_version = prompt_version
 
     def run(self, request: dict) -> dict:
         """Handle a vendor coordination task.
@@ -104,23 +126,69 @@ class VendorCoordinatorReasonAgent:
             except Exception:
                 pass
 
-        # Build a structured RFP message
-        message_parts = []
-        if event_spec:
-            message_parts.append(f"Request for Proposal: {event_spec.name}")
-            message_parts.append(f"Event Date: {event_spec.date}")
-            message_parts.append(f"Attendees: {event_spec.attendees}")
-            message_parts.append(f"Venue Type: {event_spec.venue_type}")
-            message_parts.append(f"Duration: {event_spec.duration_hours} hours")
-        if vendor:
-            message_parts.append(f"Vendor: {vendor.name} ({vendor.category})")
+        context = self._draft_context(request, event_spec=event_spec, vendor=vendor)
+        if self._provider is not None:
+            res = self._provider.generate_structured(
+                agent_name="vendor_draft",
+                prompt_version=self._prompt_version,
+                system_prompt=self._prompt,
+                user_prompt=json.dumps(context, default=str, sort_keys=True),
+                schema=VendorDraftResult,
+            )
+            draft_result = VendorDraftFormatterAgent().run(
+                provider_text=res.raw_text or (res.parsed.model_dump_json() if res.parsed else None),
+                request=context,
+                model_mode=cast(AgentMode, res.model_mode),
+                fallback_reason=res.fallback_reason,
+            )
+            return {
+                "draft": draft_result.body,
+                "vendor_id": vendor_id,
+                "action": "send_vendor_message",
+                "vendor_draft": draft_result.model_dump(),
+                "model_mode": draft_result.model_mode,
+                "model_name": res.model_name,
+                "prompt_version": self._prompt_version,
+                "fallback_reason": draft_result.fallback_reason,
+            }
 
-        draft_body = "\n".join(message_parts) if message_parts else f"RFP request for vendor {vendor_id}"
-
+        draft_result = VendorDraftFormatterAgent().fallback_from_request(
+            request=context,
+            model_mode="rule_based_fallback",
+            fallback_reason="Live vendor draft provider not configured.",
+        )
         return {
-            "draft": draft_body,
+            "draft": draft_result.body,
             "vendor_id": vendor_id,
             "action": "send_vendor_message",
+            "vendor_draft": draft_result.model_dump(),
+            "model_mode": draft_result.model_mode,
+            "model_name": None,
+            "prompt_version": self._prompt_version,
+            "fallback_reason": draft_result.fallback_reason,
+        }
+
+    def _draft_context(self, request: dict, *, event_spec, vendor) -> dict:
+        scope_items = request.get("scope_items") or []
+        selected_scope = [
+            item.model_dump() if hasattr(item, "model_dump") else item
+            for item in scope_items
+            if (item.get("selected", True) if isinstance(item, dict) else getattr(item, "selected", True))
+        ]
+        schedule_context = request.get("schedule_context") or {}
+        vendor_category = request.get("vendor_category") or (vendor.category if vendor else "")
+        return {
+            "event_spec": event_spec.model_dump() if event_spec else None,
+            "selected_scope": selected_scope[:12],
+            "schedule_context": schedule_context,
+            "vendor": vendor.model_dump() if vendor else None,
+            "vendor_category": vendor_category,
+            "approval_required": True,
+            "safety_rules": [
+                "Draft only; do not send.",
+                "Human approval is required before send.",
+                "No payment instructions.",
+            ],
         }
 
     def _process_inbound(self, request: dict) -> dict:
@@ -242,6 +310,105 @@ class VendorCoordinatorReasonAgent:
             "vendor": vendor_dict,
             "normalized": True,
         }
+
+
+class VendorDraftFormatterAgent:
+    """Coerce provider output into a valid ``VendorDraftResult``."""
+
+    def run(
+        self,
+        *,
+        provider_text: str | None,
+        request: dict,
+        model_mode: AgentMode,
+        fallback_reason: str | None,
+    ) -> VendorDraftResult:
+        parsed = self._try_parse(provider_text)
+        if parsed is not None:
+            parsed["model_mode"] = model_mode
+            if fallback_reason:
+                parsed["fallback_reason"] = fallback_reason
+            result = VendorDraftResult(**parsed)
+            return self._scrub_payment_instructions(result)
+
+        return self.fallback_from_request(
+            request=request,
+            model_mode=model_mode,
+            fallback_reason=fallback_reason,
+        )
+
+    def fallback_from_request(
+        self,
+        *,
+        request: dict,
+        model_mode: AgentMode,
+        fallback_reason: str | None,
+    ) -> VendorDraftResult:
+        event_spec = request.get("event_spec") or {}
+        vendor = request.get("vendor") or {}
+        vendor_name = vendor.get("name") or "Vendor team"
+        category = request.get("vendor_category") or vendor.get("category") or "event services"
+        event_name = event_spec.get("name") or "the event"
+        event_date = event_spec.get("date") or "the target date"
+        attendees = event_spec.get("attendees") or "the expected"
+
+        body = (
+            f"Hello {vendor_name},\n\n"
+            f"Request for Proposal: We are preparing {event_name} on {event_date} for {attendees} attendees "
+            f"and would like a proposal for {category} support.\n\n"
+            "Please confirm availability, recommended scope, lead time, itemized quote, "
+            "and any operational constraints we should account for.\n\n"
+            "This is a draft request only. It requires human approval before send, and "
+            "no booking or payment is confirmed by this message.\n\n"
+            "Thank you."
+        )
+        return VendorDraftResult(
+            subject=f"RFP request for {event_name}",
+            body=body,
+            ask_summary=f"Request availability and quote details for {category}.",
+            required_vendor_response_fields=[
+                "availability",
+                "itemized_quote",
+                "lead_time",
+                "operational_constraints",
+            ],
+            approval_diff=(
+                f"Would send a draft RFP to {vendor_name} for {category}; no outbound message executes until approved."
+            ),
+            risk_notes=[
+                "Human approval required before vendor-facing send.",
+                "No payment instructions included.",
+            ],
+            model_mode=model_mode,
+            fallback_reason=fallback_reason,
+        )
+
+    @staticmethod
+    def _try_parse(text: str | None) -> dict | None:
+        if not text:
+            return None
+        cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.S)
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            data = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _scrub_payment_instructions(result: VendorDraftResult) -> VendorDraftResult:
+        body = re.sub(
+            r"(?im)^.*\b(?:iban|wire|bank account|payment link|pay now|routing number)\b.*$",
+            "[Payment instruction removed: human approval wall requires separate review.]",
+            result.body,
+        )
+        risk_notes = list(result.risk_notes)
+        if body != result.body:
+            risk_notes.append("LLM-supplied payment instruction was removed from the draft.")
+        return result.model_copy(update={"body": body, "risk_notes": risk_notes})
 
 
 class VendorCoordinatorFormatterAgent:

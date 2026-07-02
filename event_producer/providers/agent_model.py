@@ -16,9 +16,38 @@ Design invariants:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
+
+
+class LiveModelProviderError(RuntimeError):
+    """Typed strict-live failure raised by live provider calls."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        effective_mode: str,
+        model_name: str | None,
+        agent_name: str | None,
+        prompt_version: str | None,
+        http_status: int | None = None,
+        response_shape_keys: list[str] | None = None,
+        fallback_reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.provider = provider
+        self.effective_mode = effective_mode
+        self.model_name = model_name
+        self.agent_name = agent_name
+        self.prompt_version = prompt_version
+        self.http_status = http_status
+        self.response_shape_keys = response_shape_keys or []
+        self.fallback_reason = fallback_reason
+
 
 class AgentModelResult(BaseModel):
     """Result of a single ``generate_structured`` call across any provider.
@@ -36,6 +65,32 @@ class AgentModelResult(BaseModel):
     model_name: str | None = None
     fallback_reason: str | None = None
     error: str | None = None
+    provider: str | None = None
+    effective_mode: str | None = None
+    agent_name: str | None = None
+    prompt_version: str | None = None
+    ok: bool = False
+    latency_ms: int | None = None
+    http_status: int | None = None
+    response_shape_keys: list[str] = []
+    response_preview: str | None = None
+
+    def diagnostic_dump(self) -> dict[str, Any]:
+        """Return non-secret provider diagnostics suitable for API responses."""
+        return {
+            "provider": self.provider,
+            "effective_mode": self.effective_mode or self.model_mode,
+            "model_name": self.model_name,
+            "agent_name": self.agent_name,
+            "prompt_version": self.prompt_version,
+            "ok": self.ok,
+            "latency_ms": self.latency_ms,
+            "http_status": self.http_status,
+            "response_shape_keys": self.response_shape_keys,
+            "fallback_reason": self.fallback_reason,
+            "error": self.error,
+            "response_preview": self.response_preview or self.raw_text,
+        }
 
 
 @runtime_checkable

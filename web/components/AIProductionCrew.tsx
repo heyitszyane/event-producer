@@ -91,6 +91,12 @@ export default function AIProductionCrew({
             <span className={`badge ${MODE_CLASS[modelModeSummary.creative_concept as AgentMode] ?? 'badge--muted'}`}>
               Runtime: {MODE_LABEL[modelModeSummary.creative_concept as AgentMode]} Creative
             </span>
+            <span className={`badge ${MODE_CLASS[modelModeSummary.scope_strategy as AgentMode] ?? 'badge--muted'}`}>
+              Runtime: {MODE_LABEL[modelModeSummary.scope_strategy as AgentMode]} Strategy
+            </span>
+            <span className={`badge ${MODE_CLASS[modelModeSummary.orchestrator as AgentMode] ?? 'badge--muted'}`}>
+              Runtime: {MODE_LABEL[modelModeSummary.orchestrator as AgentMode]} Orchestrator
+            </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.budget_manager as AgentMode] ?? 'badge--muted'}`}>
               Runtime: {MODE_LABEL[modelModeSummary.budget_manager as AgentMode]} Budget
             </span>
@@ -98,7 +104,10 @@ export default function AIProductionCrew({
               Runtime: {MODE_LABEL[modelModeSummary.production_manager as AgentMode]} Schedule
             </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.vendor_coordinator as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.vendor_coordinator as AgentMode]} Vendor
+              Runtime: {MODE_LABEL[modelModeSummary.vendor_coordinator as AgentMode]} Gate
+            </span>
+            <span className={`badge ${MODE_CLASS[modelModeSummary.vendor_draft as AgentMode] ?? 'badge--muted'}`}>
+              Runtime: {MODE_LABEL[modelModeSummary.vendor_draft as AgentMode]} Vendor Draft
             </span>
           </div>
         )}
@@ -134,6 +143,16 @@ export default function AIProductionCrew({
                   <li key={summary}>{summary}</li>
                 ))}
               </ul>
+              {step.model_name && (
+                <p className="small muted" style={{ margin: '0 0 var(--space-2)' }}>
+                  Model: {step.model_name}
+                </p>
+              )}
+              {step.fallback_reason && (
+                <div className="block block--warn" style={{ marginBottom: 'var(--space-2)' }}>
+                  Fallback: {step.fallback_reason}
+                </div>
+              )}
               {step.status === 'warning' && briefIntake?.market_realism_warnings?.length ? (
                 <p style={{ fontSize: 'var(--text-xs)', color: 'var(--status-warn)', margin: 0 }}>
                   <strong>Warning:</strong> {briefIntake.market_realism_warnings[0]}

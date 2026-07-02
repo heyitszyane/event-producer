@@ -144,21 +144,22 @@ class TestP6dDefaultDemoContract:
         trace = default_run_response.get("agent_trace", [])
         assert len(trace) > 0
 
-    def test_agent_trace_has_7_roles(self, default_run_response: dict) -> None:
-        """P7A: agent_trace has exactly 7 role steps (added Brief Intake + Creative Concept)."""
+    def test_agent_trace_has_8_roles(self, default_run_response: dict) -> None:
+        """P7H.3: agent_trace has 8 role steps after adding Scope Strategy."""
         trace = default_run_response.get("agent_trace", [])
-        assert len(trace) == 7
+        assert len(trace) == 8
 
     def test_agent_trace_required_roles(self, default_run_response: dict) -> None:
-        """P7A: agent_trace contains all required role names, including the two AI agents."""
+        """P7H.3: agent_trace contains all required role names."""
         trace = default_run_response.get("agent_trace", [])
         roles = {step["role"] for step in trace}
         assert "Brief Intake Agent" in roles
         assert "Creative Concept Agent" in roles
+        assert "Scope Strategy Agent" in roles
         assert "Brief/Scope Agent" in roles
         assert "Budget Manager" in roles
         assert "Production Manager" in roles
-        assert "Vendor Coordinator" in roles
+        assert "Vendor Draft Agent" in roles
         assert "Risk/Gap Flagger" in roles
 
     def test_agent_trace_budget_engine_label(self, default_run_response: dict) -> None:
@@ -174,9 +175,9 @@ class TestP6dDefaultDemoContract:
         assert prod_step["deterministic_core"] == "CPM Scheduler"
 
     def test_agent_trace_vendor_approval_required(self, default_run_response: dict) -> None:
-        """Vendor Coordinator trace step has approval_required=True and pending_approval status."""
+        """Vendor Draft trace step has approval_required=True and pending_approval status."""
         trace = default_run_response.get("agent_trace", [])
-        vendor_step = next(s for s in trace if s["role"] == "Vendor Coordinator")
+        vendor_step = next(s for s in trace if s["role"] == "Vendor Draft Agent")
         assert vendor_step["approval_required"] is True
         assert vendor_step["status"] == "pending_approval"
 

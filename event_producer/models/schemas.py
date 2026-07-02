@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -838,6 +838,50 @@ class CreativeConceptResult(BaseModel):
     model_mode: AgentMode = "rule_based_fallback"
 
 
+class ScopeStrategyRecommendation(BaseModel):
+    """Advisory scope strategy recommendation from the live/fallback strategist."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    title: str
+    recommendation_type: Literal["add", "cut", "reduce", "retier", "keep", "clarify"]
+    category: str
+    tier: _TIER_LITERAL = "could"
+    rationale: str
+    budget_pressure: Literal["low", "medium", "high"] = "medium"
+    operational_risk: Literal["low", "medium", "high"] = "medium"
+    proposed_scope_item: dict | None = None
+
+
+class ScopeStrategyResult(BaseModel):
+    """Live/fallback strategy layer that advises before deterministic engines run."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    strategy_summary: str = ""
+    must_have_logic: list[str] = Field(default_factory=list)
+    tradeoffs: list[str] = Field(default_factory=list)
+    recommendations: list[ScopeStrategyRecommendation] = Field(default_factory=list)
+    questions_for_user: list[str] = Field(default_factory=list)
+    model_mode: AgentMode = "rule_based_fallback"
+    fallback_reason: str | None = None
+
+
+class VendorDraftResult(BaseModel):
+    """Draft-only vendor-facing copy that still requires human approval."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    subject: str
+    body: str
+    ask_summary: str
+    required_vendor_response_fields: list[str] = Field(default_factory=list)
+    approval_diff: str
+    risk_notes: list[str] = Field(default_factory=list)
+    model_mode: AgentMode = "rule_based_fallback"
+    fallback_reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # P7A — request / response additions
 # ------------------------------------------------------------------------------
@@ -995,5 +1039,22 @@ class OrchestratorChatResponse(BaseModel):
 
     reply: str
     proposals: list[ProposedAction] = Field(default_factory=list)
+    model_mode: AgentMode = "rule_based_fallback"
+    fallback_reason: str | None = None
+
+
+class OrchestratorAgentResult(BaseModel):
+    """Live/fallback orchestrator model output before API storage.
+
+    The model may include extra explanatory fields, but proposed actions still
+    pass through the strict ``ProposedAction`` schema.
+    """
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    reply: str
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    rationale_summary: str = ""
+    risk_notes: list[str] = Field(default_factory=list)
     model_mode: AgentMode = "rule_based_fallback"
     fallback_reason: str | None = None
