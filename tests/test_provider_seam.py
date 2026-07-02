@@ -19,8 +19,22 @@ from event_producer.providers.model_router import build_agent_model
 
 
 def _clean_env(monkeypatch, **overrides: str) -> None:
-    for k in ("ENABLE_LIVE_GEMINI", "GEMINI_API_KEY", "GOOGLE_APIKEY",
-              "GOOGLE_API_KEY", "GEMINI_MODEL"):
+    for k in (
+        "ENABLE_LIVE_MODEL",
+        "ENABLE_LIVE_GEMINI",
+        "MODEL_PROVIDER",
+        "MODEL_NAME",
+        "GEMINI_API_KEY",
+        "GOOGLE_APIKEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_MODEL",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "OPENAI_COMPATIBLE_API_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_MODEL",
+        "LOCAL_LLM_API_BASE_URL",
+        "LOCAL_LLM_MODEL",
+    ):
         monkeypatch.delenv(k, raising=False)
     for k, v in overrides.items():
         if v is None:
@@ -80,6 +94,52 @@ def test_env_custom_model(monkeypatch) -> None:
     assert env.require_key() == "k"
 
 
+def test_env_openrouter_provider(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="openrouter",
+        OPENROUTER_API_KEY="or-key",
+        OPENROUTER_MODEL="anthropic/claude-sonnet-4",
+    )
+    env = ModelEnv.from_env()
+    assert env.provider == "openrouter"
+    assert env.effective_mode == "openai_compatible_live"
+    assert env.api_key == "or-key"
+    assert env.api_base_url == "https://openrouter.ai/api/v1/chat/completions"
+    assert env.model_name == "anthropic/claude-sonnet-4"
+
+
+def test_env_local_provider_defaults_to_local_endpoint(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="local",
+        LOCAL_LLM_MODEL="llama3.2:latest",
+    )
+    env = ModelEnv.from_env()
+    assert env.provider == "local"
+    assert env.effective_mode == "openai_compatible_live"
+    assert env.api_key == ""
+    assert env.api_base_url == "http://127.0.0.1:11434/v1/chat/completions"
+    assert env.model_name == "llama3.2:latest"
+
+
+def test_env_local_provider_keeps_optional_lm_studio_token(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="lmstudio",
+        OPENAI_COMPATIBLE_API_KEY="lmst-secret",
+        LOCAL_LLM_API_BASE_URL="http://100.79.109.78:1234/v1/chat/completions",
+    )
+    env = ModelEnv.from_env()
+    assert env.provider == "lmstudio"
+    assert env.effective_mode == "openai_compatible_live"
+    assert env.api_key == "lmst-secret"
+    assert env.api_base_url == "http://100.79.109.78:1234/v1/chat/completions"
+
+
 def test_env_require_key_raises_when_missing(monkeypatch) -> None:
     _clean_env(monkeypatch, ENABLE_LIVE_GEMINI="true")
     env = ModelEnv.from_env()
@@ -115,6 +175,30 @@ def test_router_live_when_callable(monkeypatch) -> None:
     env = ModelEnv.from_env()
     provider = build_agent_model(env)
     assert type(provider).__name__ == "GeminiModel"
+
+
+def test_router_openai_compatible_when_callable(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="openrouter",
+        OPENROUTER_API_KEY="k",
+    )
+    env = ModelEnv.from_env()
+    provider = build_agent_model(env)
+    assert type(provider).__name__ == "OpenAICompatibleModel"
+
+
+def test_router_local_provider_without_key_is_callable(monkeypatch) -> None:
+    _clean_env(
+        monkeypatch,
+        ENABLE_LIVE_MODEL="true",
+        MODEL_PROVIDER="local",
+        LOCAL_LLM_API_BASE_URL="http://127.0.0.1:1234/v1/chat/completions",
+    )
+    env = ModelEnv.from_env()
+    provider = build_agent_model(env)
+    assert type(provider).__name__ == "OpenAICompatibleModel"
 
 
 # ----------------------------------------------------------------------

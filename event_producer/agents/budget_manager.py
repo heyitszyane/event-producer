@@ -66,8 +66,9 @@ class BudgetManagerReasonAgent:
             ScopeItem(**item) if isinstance(item, dict) else item
             for item in scope_item_dicts
         ]
+        any_explicit_selection = any("selected" in item for item in scope_item_dicts if isinstance(item, dict))
         selected_items = [item for item in scope_items if item.selected]
-        budgeted_items = selected_items if selected_items else scope_items
+        budgeted_items = selected_items if any_explicit_selection else scope_items
 
         for scope_item in budgeted_items:
             lines.append(

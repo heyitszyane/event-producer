@@ -94,6 +94,82 @@ class TestScopeCustomization:
         assert delete.status_code == 200
         assert "Budget recalculated." in delete.json()["recompute_notice"]["message"]
 
+    def test_deselect_all_scope_items_budgets_zero_items(
+        self,
+        client: TestClient,
+        event_snapshot: dict,
+    ) -> None:
+        """Explicit selected=false for every item means zero included spend."""
+        event_id = event_snapshot["event_id"]
+        current = event_snapshot
+        for idx, item in enumerate(event_snapshot["scope_items"]):
+            if item["selected"]:
+                response = client.post(f"/event/{event_id}/scope-items/{idx}/toggle")
+                assert response.status_code == 200
+                current = response.json()
+
+        budget = current["budget_summary"]
+        assert budget["lines"] == []
+        assert Decimal(budget["included_totals"]) == Decimal("0.00")
+        assert Decimal(budget["headroom"]) == Decimal(budget["spendable"])
+        assert "Risk register and agent trace still reflect the last full pipeline run" in (
+            current["recompute_notice"]["message"]
+        )
+
+    def test_repeated_category_scope_items_recompute_schedule(
+        self,
+        client: TestClient,
+        event_snapshot: dict,
+    ) -> None:
+        """Repeated generic categories must not create duplicate schedule IDs."""
+        event_id = event_snapshot["event_id"]
+
+        first = client.post(
+            f"/event/{event_id}/scope-items",
+            json={
+                "name": "Sponsor Lounge Host",
+                "description": "Local host for sponsor lounge",
+                "category": "other",
+                "tier": "could",
+                "estimated_cost": "400",
+                "qty": "1",
+                "selected": True,
+            },
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            f"/event/{event_id}/scope-items",
+            json={
+                "name": "VIP Gift Prep",
+                "description": "Pack VIP gift bags",
+                "category": "other",
+                "tier": "could",
+                "estimated_cost": "250",
+                "qty": "1",
+                "selected": True,
+            },
+        )
+        assert second.status_code == 200
+
+        third = client.post(
+            f"/event/{event_id}/scope-items",
+            json={
+                "name": "Dessert Station",
+                "description": "Additional dessert catering station",
+                "category": "catering",
+                "tier": "should",
+                "estimated_cost": "900",
+                "qty": "1",
+                "selected": True,
+            },
+        )
+        assert third.status_code == 200
+        data = third.json()
+        assert data["schedule_result"] is not None
+        task_ids = [task["id"] for task in data["schedule_result"]["ordered_tasks"]]
+        assert len(task_ids) == len(set(task_ids))
+
     def test_proposal_apply_preserves_event_basis_and_recomputes(
         self, client: TestClient, event_snapshot: dict
     ) -> None:

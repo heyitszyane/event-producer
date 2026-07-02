@@ -3,6 +3,7 @@
 
 export type AgentMode =
   | 'gemini_live'
+  | 'openai_compatible_live'
   | 'rule_based_fallback'
   | 'deterministic_engine'
   | 'scripted_fixture'
@@ -123,6 +124,7 @@ export interface ModelModeSummary {
 
 export const MODE_LABEL: Record<AgentMode, string> = {
   gemini_live: 'Gemini live',
+  openai_compatible_live: 'OpenAI-compatible live',
   rule_based_fallback: 'Rule-based fallback',
   deterministic_engine: 'Deterministic engine',
   scripted_fixture: 'Scripted fixture',
@@ -132,6 +134,7 @@ export const MODE_LABEL: Record<AgentMode, string> = {
 
 export const MODE_CLASS: Record<AgentMode, string> = {
   gemini_live: 'badge--live',
+  openai_compatible_live: 'badge--live',
   rule_based_fallback: 'badge--fallback',
   deterministic_engine: 'badge--engine',
   scripted_fixture: 'badge--fixture',

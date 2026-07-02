@@ -135,9 +135,8 @@ def test_fixed_anchor(start_time: datetime) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_lead_time_violation(start_time: datetime) -> None:
-    """Lead-time conflict between Book Venue and Venue Confirm."""
-    # start_time is July 10 08:00; event date is July 12 08:00
+def test_lead_time_shifts_earliest_start(start_time: datetime) -> None:
+    """Lead time pushes a dependent task after dependency finish + lead time."""
     tasks = [
         ScheduleTask(id="Book Venue", name="Book Venue", duration=Decimal("0.5")),
         ScheduleTask(
@@ -148,15 +147,31 @@ def test_lead_time_violation(start_time: datetime) -> None:
     ]
     result = compute_schedule(tasks, start_time)
 
-    assert isinstance(result, SchedulerConflictReport)
-    assert len(result.lead_time_conflicts) >= 1
-    conflict_ids = [c.task_id for c in result.lead_time_conflicts]
-    assert "Venue Confirm" in conflict_ids
-    # Verify the message mentions "lead time"
-    venue_confirm_conflicts = [
-        c for c in result.lead_time_conflicts if c.task_id == "Venue Confirm"
+    assert isinstance(result, ScheduleResult)
+    by_id = {t.id: t for t in result.ordered_tasks}
+    assert by_id["Book Venue"].earliest_finish == datetime(2026, 7, 15, 8, 30)
+    assert by_id["Venue Confirm"].earliest_start == datetime(2026, 7, 18, 8, 30)
+
+
+def test_anchored_task_conflicts_when_lead_time_cannot_fit(
+    start_time: datetime,
+) -> None:
+    """An anchor before dependency finish + lead time returns a conflict."""
+    tasks = [
+        ScheduleTask(id="Book Venue", name="Book Venue", duration=Decimal("0.5")),
+        ScheduleTask(
+            id="Venue Confirm",
+            name="Venue Confirm",
+            duration=Decimal("0.5"),
+            dependencies=["Book Venue"],
+            lead_time=Decimal("3.0"),
+            anchor=datetime(2026, 7, 16, 8, 0),
+        ),
     ]
-    assert any("lead time" in c.message.lower() for c in venue_confirm_conflicts)
+    result = compute_schedule(tasks, start_time)
+
+    assert isinstance(result, SchedulerConflictReport)
+    assert any(c.task_id == "Venue Confirm" for c in result.anchor_conflicts)
 
 
 # ---------------------------------------------------------------------------

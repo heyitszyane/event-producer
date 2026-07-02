@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7F — Consolidated external-audit fix pass
+
+Closes the highest-priority post-P7E audit blockers without adding production
+auth, Firestore persistence, live Telegram, OCR, or autonomous execution.
+
+- Added event-scoped approval list/update routes:
+  `GET /event/{event_id}/approvals` and
+  `POST /event/{event_id}/approvals/{approval_id}`. Legacy `/approvals`
+  routes remain sample `demo-event` compatibility routes.
+- Fixed selected-scope budget semantics: when every interactive scope item is
+  explicitly deselected, included budget lines are zero rather than falling
+  back to all items.
+- Fixed schedule recompute robustness for repeated categories by generating
+  unique scope-derived task IDs, and preserved scheduler lead-time behavior by
+  making lead time part of CPM scheduling.
+- Aligned scripted security blocked-action names with action-gate constants
+  (`mark_paid`) and kept user-facing labels separate.
+- Extracted demo fallback constraints into a shared defaults module.
+- Added a Cloud Build static frontend guard requiring
+  `_NEXT_PUBLIC_API_BASE_URL` and checking that local backend URLs are not
+  baked into `web/out`.
+- Added optional OpenAI-compatible live model provider support for OpenRouter
+  and local endpoints while keeping Gemini as the default live provider and
+  deterministic fallback as the default runtime.
+- Added a non-secret `/runtime/model` API diagnostic so local live-provider
+  testing can confirm the loaded provider, mode, model, base URL, and fallback
+  reason.
+- Adjusted local OpenAI-compatible routing so LM Studio/Ollama/local servers do
+  not receive a fake `Bearer local` token; local auth is optional and uses
+  `OPENAI_COMPATIBLE_API_KEY` when configured.
+- Added a local provider Settings page (`10 Settings`) plus `/settings/model`,
+  allowing clone reviewers to choose Gemini, OpenRouter, LM Studio/Ollama/local
+  OpenAI-compatible providers, save a gitignored `.env`, and refresh the
+  running backend provider from the UI.
+- Added `./scripts/dev.sh` as a one-command local launcher for backend and
+  frontend dev servers.
+- Aligned local backend CORS defaults and `/run` frontend API handling so
+  127.0.0.1 development ports use the same shared API base/error path.
+- Tightened Paper War Room behavior with event-scoped approval actions, local
+  event-title draft labeling, local-only vendor draft row copy, shared API
+  error handling, display-label helpers, scope delete confirmation, and
+  component-local mutation errors.
+- Added accessibility and copy polish for skip-link navigation, live regions,
+  icon semantics, display labels, and non-exporting casefile copy.
+- Backend QA now reports `241 passed, 1 warning`. Frontend lint now runs
+  non-interactively via a checked-in Next ESLint config and pinned lint
+  dependencies.
+
+### P7E — Paper War Room frontend redesign
+
+Redesigns the frontend from a single scrolling dashboard into a Paper War Room
+mission-control shell. Backend contracts and P7D-FIX messy-brief precedence are
+unchanged.
+
+- Added persistent side navigation and route-like sections for Overview, Brief
+  Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and
+  Audit Log.
+- Added editable frontend-session provenance preview rows in Brief Intake;
+  manual edits are visibly marked and do not silently mutate backend canonical
+  state.
+- Updated AI Crew to show trace-derived task summaries and clear Runtime
+  labels instead of bare mode labels.
+- Updated Scope with user-facing tier labels, direct item/category inline
+  editing, no visible Selected column, and clearer Recompute feedback.
+- Added clamped budget health bars with dollar metrics and over-budget labels.
+- Added run-sheet draft edit modal with Save/Delete/Cancel while documenting
+  that backend schedule recompute remains canonical.
+- Refined the Paper War Room UI with an editable generated event name, cleaner
+  manual-constraints/provenance copy, user-facing category/dependency labels,
+  editable vendor draft rows, and reduced duplicated audit/AI prompt surfaces.
+- Preserved the approval/security wall and scripted fixture honesty boundaries;
+  no live Telegram, Firestore, auth, or production SaaS claim was added.
+
 ### P7D-FIX / 21B — Constraint provenance + demo-surface acceptance
 
 Repairs the P7D acceptance blocker where extracted brief truth could disagree

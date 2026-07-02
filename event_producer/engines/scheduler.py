@@ -228,11 +228,17 @@ def compute_schedule(
         task = tasks_by_id[tid]
         duration_td = _hours_to_timedelta(task.duration)
 
-        # Start after all predecessors finish
+        # Start after all predecessors finish, plus this task's required lead
+        # time when it has one.
         pred_finishes: list[datetime] = []
+        lead_td = (
+            _days_to_timedelta(task.lead_time)
+            if task.lead_time is not None and task.lead_time > _ZERO
+            else timedelta()
+        )
         for dep_id in task.dependencies:
             if dep_id in earliest_finish:
-                pred_finishes.append(earliest_finish[dep_id])
+                pred_finishes.append(earliest_finish[dep_id] + lead_td)
 
         if pred_finishes:
             dep_es = max(pred_finishes)
@@ -276,7 +282,13 @@ def compute_schedule(
             succ_starts: list[datetime] = []
             for succ_id in successors[tid]:
                 if succ_id in latest_start:
-                    succ_starts.append(latest_start[succ_id])
+                    succ = tasks_by_id[succ_id]
+                    succ_lead_td = (
+                        _days_to_timedelta(succ.lead_time)
+                        if succ.lead_time is not None and succ.lead_time > _ZERO
+                        else timedelta()
+                    )
+                    succ_starts.append(latest_start[succ_id] - succ_lead_td)
 
             if succ_starts:
                 lf = min(succ_starts)

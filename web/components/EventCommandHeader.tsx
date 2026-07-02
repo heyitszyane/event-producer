@@ -39,8 +39,8 @@ export interface EventCommandHeaderProps {
     attendees: number | ''
     eventType: string
     venueType: string
-  date: string
-}
+    date: string
+  }
   formHandlers: {
     setBrief: (v: string) => void
     setBudgetCap: (v: string) => void
@@ -65,7 +65,6 @@ export default function EventCommandHeader({
   loading,
   running,
 }: EventCommandHeaderProps) {
-  const eventName = eventSpec?.name || 'New Event'
   const eventType = eventSpec?.event_type || '—'
   const eventDate = eventSpec?.date || '—'
   const headcount = eventSpec?.attendees ? String(eventSpec.attendees) : '—'
@@ -80,74 +79,36 @@ export default function EventCommandHeader({
   }
 
   function OverrideBadge({ active }: { active: boolean }) {
-    return active ? <span className="badge badge--warn">manual override</span> : <span className="badge badge--muted">inactive</span>
+    return active ? <span className="badge badge--warn">manual override</span> : null
   }
 
   return (
-    <header className="header">
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-3) var(--space-6)' }}>
-        {/* Top row: event name + run button */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
-          <div style={{ flex: '1 1 auto', minWidth: 200 }}>
-            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }}>
-              {eventName}
-            </h1>
-            <p
-              className="header__sub"
-              style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}
-            >
+    <header className="event-constraints">
+      <div className="event-constraints__summary">
+        <div className="event-constraints__title">
+          <div>
+            <span className="war-eyebrow">MANUAL CONSTRAINTS</span>
+            <p className="event-constraints__sub">
               Optional manual constraints. Filled/enabled values override AI extraction.
             </p>
             {running && (
-              <p className="header__meta" style={{ marginTop: 'var(--space-1)' }}>
+              <p className="event-constraints__meta">
                 {eventType} &middot; {eventDate} &middot; {headcount} attendees &middot; {venue}
               </p>
             )}
           </div>
-
-          <button
-            onClick={onRun}
-            disabled={loading}
-            className={`btn btn--primary ${loading ? 'loading-pulse' : ''}`}
-            aria-label={running ? 'Re-run event' : 'Run event'}
-          >
-            {loading ? 'Running...' : running ? 'Re-run' : 'Update constraints'}
-          </button>
         </div>
       </div>
 
-      {/* Form panel — always visible but compact */}
-      <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--surface-tertiary)' }}>
+      <div className="event-constraints__body">
         <form
           onSubmit={onRun}
-          style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-4) var(--space-6)' }}
+          className="event-constraints__form"
         >
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-3)' }}>
-            {/* Brief — mirrors the intake hero above (kept for compact edits) */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                Brief{' '}
-                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>
-                  (primary input is above)
-                </span>
-              </span>
-              <input
-                type="text"
-                value={formData.brief}
-                onChange={(e) => formHandlers.setBrief(e.target.value)}
-                placeholder="Describe the event"
-                className={`input ${fieldErrors.brief ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.brief}
-                aria-describedby={fieldErrors.brief ? 'error-brief' : undefined}
-              />
-              {fieldErrors.brief && (
-                <span id="error-brief" className="field-error" role="alert">{fieldErrors.brief}</span>
-              )}
-            </label>
-
+          <div className="event-constraints__grid">
             {/* Budget Cap */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Budget Cap <OverrideBadge active={manualActive.budgetCap} /></span>
+            <label className="event-field">
+              <span>Budget Cap <OverrideBadge active={manualActive.budgetCap} /></span>
               <input
                 type="text"
                 value={formData.budgetCap}
@@ -163,8 +124,8 @@ export default function EventCommandHeader({
             </label>
 
             {/* Contingency % - empty by default, brief extraction primary */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Contingency % <OverrideBadge active={manualActive.contingencyPct} /></span>
+            <label className="event-field">
+              <span>Contingency % <OverrideBadge active={manualActive.contingencyPct} /></span>
               <input
                 type="number"
                 value={formData.contingencyPct}
@@ -180,8 +141,8 @@ export default function EventCommandHeader({
             </label>
 
             {/* Attendees - empty by default, brief extraction primary */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Attendees <OverrideBadge active={manualActive.attendees} /></span>
+            <label className="event-field">
+              <span>Attendees <OverrideBadge active={manualActive.attendees} /></span>
               <input
                 type="number"
                 value={formData.attendees}
@@ -200,8 +161,8 @@ export default function EventCommandHeader({
             </label>
 
             {/* Event Type */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Event Type <OverrideBadge active={manualActive.eventType} /></span>
+            <label className="event-field">
+              <span>Event Type <OverrideBadge active={manualActive.eventType} /></span>
               <select
                 value={formData.eventType}
                 onChange={(e) => formHandlers.setEventType(e.target.value)}
@@ -220,8 +181,8 @@ export default function EventCommandHeader({
             </label>
 
             {/* Venue Type */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Venue Type <OverrideBadge active={manualActive.venueType} /></span>
+            <label className="event-field">
+              <span>Venue Type <OverrideBadge active={manualActive.venueType} /></span>
               <select
                 value={formData.venueType}
                 onChange={(e) => formHandlers.setVenueType(e.target.value)}
@@ -240,8 +201,8 @@ export default function EventCommandHeader({
             </label>
 
             {/* Date */}
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-              <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)' }}>Date <OverrideBadge active={manualActive.date} /></span>
+            <label className="event-field">
+              <span>Date <OverrideBadge active={manualActive.date} /></span>
               <input
                 type="date"
                 value={formData.date}
@@ -256,7 +217,7 @@ export default function EventCommandHeader({
             </label>
           </div>
 
-          <div style={{ marginTop: 'var(--space-3)', display: 'flex', justifyContent: 'flex-end' }}>
+          <div className="event-constraints__actions">
             <button
               type="submit"
               disabled={loading}

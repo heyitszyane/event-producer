@@ -16,9 +16,9 @@ Business**.
 
 ## Current status
 
-**P7D-FIX / 21B — Constraint provenance + demo-surface acceptance** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
+**P7F — Consolidated external-audit fix pass** · Branch: `main` · [CHANGELOG](CHANGELOG.md)
 
-- **225 tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **236 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
   structured fields are optional manual overrides. Placeholder/default values
@@ -28,27 +28,33 @@ Business**.
   resolves to 100 attendees end-to-end, costs per-attendee scope at quantity
   100, and flags the budget as at risk/over budget instead of showing a clean
   green plan.
-- **Live Gemini provider seam** (P7A). Optional, server-side, lazy-loaded. The
+- **Live model provider seam** (P7A/P7F). Optional, server-side, lazy-loaded. The
   app runs the deterministic fallback by default and records the fallback
   reason in the agent trace. Mode badges on the trace make the difference
-  visible. See [Gemini setup](#optional-live-gemini).
+  visible. Gemini is the default live provider; OpenRouter and local
+  OpenAI-compatible endpoints can be selected through `.env`.
 - **Editable scope + orchestrator proposals** (P7B/P7D-FIX). Scope items can be
   added, edited, deleted, toggled, and retiered via API endpoints. Recompute
-  responses include before/after headroom and schedule status. The top
-  "Ask the AI Producer" surface returns proposals that can be applied or
-  dismissed.
+  responses include before/after headroom, schedule status, and a notice when
+  risk/trace data still reflects the last full run. Explicit deselect-all
+  budgets zero included spend. The top "Ask the AI Producer" surface returns
+  proposals that can be applied or dismissed.
 - **Security action-gate is structural** — enforced in code (`action_gate.py`),
   not in prompts. No financial or state-changing action executes without a
   human-approved `Approval` object.
 - **Scripted deterministic security beat** — 3 vendor/payment-change fixtures
   treated as untrusted data; no external action executed, no state mutation
   executed.
-- **Mission-control frontend** — Next.js 14 static export on Firebase Hosting,
-  FastAPI backend on Cloud Run.
+- **Paper War Room frontend** — Next.js 14 static export with a persistent
+  side nav and route-like sections for Overview, Brief Intake, AI Crew, Scope,
+  Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log. FastAPI backend
+  remains the API source. Event title edits and vendor rows are
+  frontend-session drafts only; they do not mutate backend event identity or
+  persist vendor records.
 - **AI Production Crew surface** — Brief Intake, Creative Concept, Budget
   Engine/Manager, Run-of-Show/Production Manager, Approval Wall/Vendor
-  Coordinator, and Risk/Gap Flagger are visible as top-level crew cards with
-  mode badges and summaries.
+  Coordinator, and Risk/Gap Flagger are visible as crew cards with Runtime
+  badges and trace-derived task summaries.
 - **Honest-claims rule:** all public docs distinguish implemented, scripted
   deterministic demo, structural seam, and deferred work.
 
@@ -63,7 +69,7 @@ Messy event brief
   -> Vendor Coordinator drafts an outbound action
   -> structural approval wall blocks vendor-facing execution
   -> scripted security beat shows vendor/payment-change text treated as untrusted data
-  -> mission-control UI renders the state for human review
+  -> Paper War Room UI renders the state for human review
 ```
 
 ## What is implemented
@@ -76,7 +82,8 @@ Messy event brief
   dependency resolution, lead-time validation, anchor constraints, cycle
   detection, conflict reporting. 25+ tests.
 - **Agent crew** — 5 role agents + orchestrator with reason->formatter splits.
-  Rule-based (not live Gemini). 15+ tests.
+  Deterministic by default, with optional live model calls for Brief Intake and
+  Creative Concept. 15+ tests.
 - **Agent trace** — 7 structural role-agent steps recorded during the run
   (`AgentTraceStep` schema). Rendered as a secondary technical trace.
 - **Security action-gate** — `enforce()` blocks 8 gated actions
@@ -86,13 +93,15 @@ Messy event brief
 - **REST API** — FastAPI with `/run`, `/event/{id}`, `/event/{id}/chat`,
   `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`,
   `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}`, `/approvals`,
-  `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate
-  integration. Consistent error envelope. CORS driven by `ALLOWED_ORIGINS`.
-- **Frontend mission-control dashboard** — React components for intake,
-  requirements provenance, AI Production Crew, creative concepts, scope,
-  budget, run-of-show, approvals, security, vendors, risks, and production log.
-  Two-column responsive grid, design token system, accessibility landmarks.
-  Static export.
+  `/approvals/{id}`, `/event/{id}/approvals`,
+  `/event/{id}/approvals/{approval_id}`, `/chat`, `/healthz`. HITL approval
+  flow with action-gate integration. The `/approvals` routes are legacy
+  sample-demo routes; the main run path uses event-scoped approvals.
+  Consistent error envelope. CORS driven by `ALLOWED_ORIGINS`.
+- **Frontend Paper War Room** — React components for intake, editable
+  requirements provenance preview, AI Production Crew, creative concepts,
+  scope, budget, run sheet, approvals, security, vendors, risks, and audit log.
+  The shell uses a persistent side nav and route-like sections. Static export.
 - **MCP event-store wrapper** — `McpServer` wraps the `EventStore` ABC. Honest
   CRUD/list/delete via the provider seam. No private introspection.
 - **Deployment lane** — Cloud Run (FastAPI) + Firebase Hosting (static export).
@@ -107,8 +116,9 @@ Messy event brief
   load-bearing control.
 - **Vendor messages** — `InMemoryVendorSourcer` returns 5 hardcoded vendors.
   Vendor coordinator drafts RFPs from templates. No live outbound messaging.
-- **Agent reasoning** — Rule-based, not live Gemini. Agents produce structured
-  output via deterministic logic (catalogue lookups, engine calls).
+- **Agent reasoning** — Deterministic by default. Brief Intake and Creative
+  Concept can call a configured live model provider; the rest of the crew uses
+  typed deterministic logic (catalogue lookups, engine calls).
 - **Chat / production log** — Messages generated from agent step summaries,
   not from live LLM chat.
 - **Demo seed data** — `scripts/seed_demo.py` runs the networking event
@@ -124,13 +134,13 @@ Messy event brief
 - **VendorSourcer** — `InMemoryVendorSourcer` returns hardcoded vendors. Live
   vendor directory lookup is deferred.
 - **Model routing / agent skills** — Reason/formatter split is represented
-  structurally. Live Gemini/Flash routing and formal ADK Agent Skills
-  packaging are deferred.
+  structurally. Live provider routing exists for Gemini plus
+  OpenAI-compatible endpoints; formal ADK Agent Skills packaging is deferred.
 
 ## What is deferred / not implemented
 
 - Firestore persistence (in-memory only)
-- Live Gemini is **optional**: the server-side provider seam exists and is
+- Live model calls are **optional**: the server-side provider seam exists and is
   wired; the app defaults to an honest deterministic fallback and records the
   fallback reason. ADK integration remains deferred.
 - Live Telegram relay (scripted fixtures only)
@@ -165,37 +175,72 @@ registered as LLM tools. Agents that both reason and emit typed JSON use a
 ## Run locally
 
 ```bash
-# Backend (run the pipeline directly)
-pip install -r requirements.txt
-python3 -m event_producer.main
+# One-command local dev harness
+./scripts/dev.sh
+```
 
+Then open the frontend, go to **10 Settings**, choose Gemini, OpenRouter,
+LM Studio, Ollama, or another OpenAI-compatible provider, paste the provider
+key if needed, and save. The app writes only your local gitignored `.env` and
+refreshes the running backend provider.
+
+Manual commands are still available:
+
+```bash
 # API server
 python3 -m uvicorn event_producer.main:create_app --factory --host 127.0.0.1 --port 8080 --reload
 
+# API server with local secrets from .env
+python3 -m uvicorn event_producer.main:create_app --factory --host 127.0.0.1 --port 8080 --reload --env-file .env
+
 # Frontend
 pnpm -C web install --frozen-lockfile
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8080 pnpm -C web run dev
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 pnpm -C web run dev
 ```
 
 For the frontend to reach the backend at build/runtime, set:
 
 ```bash
-export NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
+export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
 ```
+
+Local development may use `http://127.0.0.1:8080` or `http://localhost:8080`.
+Firebase/static deployment must set `NEXT_PUBLIC_API_BASE_URL` to the Cloud Run
+backend URL before `pnpm -C web run build`; there is no runtime server-side
+proxy in Firebase Hosting. `deploy/cloudbuild.yaml` fails deployed frontend
+builds when `_NEXT_PUBLIC_API_BASE_URL` is empty or when local backend URLs are
+found in `web/out`.
+
+To confirm which model provider the backend loaded at startup, call
+`GET /runtime/model` with the demo header. The response is non-secret: provider,
+mode, model name, base URL, whether a key was loaded, and fallback reason only.
+Local settings writes are accepted only from local dev hosts.
 
 ### Environment Variables
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
 | `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | No (defaults to localhost) |
-| `ENABLE_LIVE_GEMINI` | Enables the live Gemini provider seam (exact `true` to enable; any other value or unset -> fallback) | No (default: fallback) |
-| `GEMINI_API_KEY` | Server-side Gemini API key. Only read by the backend; never sent to the browser. See `.env.example`. | Only for live mode |
-| `GOOGLE_API_KEY` | Legacy alias used if `GEMINI_API_KEY` is empty. | Only for live mode |
+| `ENABLE_LIVE_MODEL` | Enables the selected live model provider (exact `true`; otherwise fallback) | No (default: fallback) |
+| `MODEL_PROVIDER` | `gemini`, `openrouter`, `openai_compatible`, `local`, `ollama`, or `lmstudio` | No (default: `gemini`) |
+| `MODEL_NAME` | Generic model id override for non-Gemini providers | No |
+| `ENABLE_LIVE_GEMINI` | Legacy Gemini-only toggle; still supported | No (default: fallback) |
+| `GEMINI_API_KEY` | Server-side Gemini API key. Only read by the backend; never sent to the browser. See `.env.example`. | Only for Gemini live mode |
+| `GOOGLE_API_KEY` | Legacy alias used if `GEMINI_API_KEY` is empty. | Only for Gemini live mode |
 | `GEMINI_MODEL` | Model id for the live provider (default `gemini-2.5-flash`). | No |
-| `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL | For frontend build against backend |
+| `OPENROUTER_API_KEY` | OpenRouter API key for `MODEL_PROVIDER=openrouter` | Only for OpenRouter live mode |
+| `OPENROUTER_MODEL` | OpenRouter model id | No |
+| `OPENAI_COMPATIBLE_API_KEY` | API key for a generic OpenAI-compatible endpoint | Only for hosted compatible endpoints |
+| `OPENAI_COMPATIBLE_API_BASE_URL` | Chat-completions endpoint for OpenAI-compatible providers | Only for generic compatible endpoints |
+| `LOCAL_LLM_API_BASE_URL` | Local chat-completions endpoint for `local` / `ollama` / `lmstudio` | No |
+| `LOCAL_LLM_MODEL` | Local model id | No |
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL | For frontend build against backend; required for static deployment |
 
 > **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON.
 > These are gitignored. Copy `.env.example` to `.env` to configure live mode.
+> Local OpenAI-compatible servers may run without auth. If LM Studio requires an
+> API token, set `OPENAI_COMPATIBLE_API_KEY` to that token; otherwise no
+> Authorization header is sent for local providers.
 
 ## Demo seed briefs
 
@@ -252,7 +297,7 @@ Click "Try example" in the UI to load this seed brief.
 Run it:
 
 ```bash
-curl -X POST http://localhost:8080/run \
+curl -X POST http://127.0.0.1:8080/run \
   -H "Content-Type: application/json" \
   -H "X-Demo-User: demo-user" \
   -d '{
@@ -294,7 +339,7 @@ curl -X POST http://localhost:8080/run \
   `external_action_executed: false`, `state_mutation_executed: false`
 - **model_mode_summary**: per-role mapping of `brief_intake`, `creative_concept`,
   `budget_manager`, `production_manager`, `vendor_coordinator`, `security` to one
-  of `gemini_live | rule_based_fallback | deterministic_engine | scripted_fixture | human_approval_gate`.
+  of `gemini_live | openai_compatible_live | rule_based_fallback | deterministic_engine | scripted_fixture | human_approval_gate`.
 
 ## Security model
 
@@ -335,13 +380,14 @@ Modules:
 - **BudgetCard** — budget basis, realism warnings, lines, category rollups,
   tier pills, headroom, variance
 - **RunOfShowCard** — ordered tasks, critical path, anchor highlighting
-- **ApprovalInbox** — approvals auto-expanded when pending; structural gate
-  banner
+- **ApprovalInbox** — event-scoped approvals auto-expanded when pending;
+  structural gate banner and mutation error/status feedback
 - **SecurityBeat** — 3 scripted fixtures, blocked actions, no-execution status
 - **ScopeCard** — add/edit/delete/toggle/retier scope items with recompute
   feedback
 - **RiskCard** — risk/gap flags
-- **VendorsCard** — vendor cards with lock status
+- **VendorsCard** — frontend-session vendor draft rows with local-only copy;
+  no backend vendor persistence or outreach claim
 - **ChatPane** — production log (read-only) from `chat_log`
 - **ConflictReportCard** — schedule conflicts when present
 
@@ -357,7 +403,7 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-225 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+241 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
 security demo, P7B scope mutation and orchestrator proposals, P7D constraint
 override semantics, budget realism warnings, and P7D-FIX recompute/provenance
@@ -412,8 +458,9 @@ This project demonstrates:
 - **Eval framework** — Gherkin scenario files + unit tests
 - **Deployment** — Cloud Run + Firebase Hosting with QA-gated Cloud Build
 
-Honesty boundaries: this is a capstone prototype. Production auth, live Gemini,
-Firestore, Telegram, OCR, and calendar write-back are **not implemented**.
+Honesty boundaries: this is a capstone prototype. Production auth, Firestore,
+Telegram, OCR, and calendar write-back are **not implemented**. Live model calls
+are optional and limited to the configured provider seam.
 
 ## Concepts Demonstrated
 
@@ -426,7 +473,7 @@ Firestore, Telegram, OCR, and calendar write-back are **not implemented**.
 | MCP | `event_producer/mcp/` -- wrapper over event-store via provider seam |
 | Eval framework | `tests/` -- Gherkin eval cases + unit tests |
 | Separated evaluation | Build itself runs planner->generator->evaluator |
-| Model-routing seam | Reason/formatter split is represented structurally; live Gemini/Flash routing is deferred |
+| Model-routing seam | Reason/formatter split plus optional Gemini/OpenAI-compatible live provider routing |
 
 ## Safety Rules
 

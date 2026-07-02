@@ -3,8 +3,8 @@
 This is the moat between the agents and any concrete model backend. Agents call
 the ``AgentModelProvider`` protocol; the concrete implementation is chosen by
 the composition root based on ``ModelEnv``. This keeps agents swappable across
-live Gemini, rule-based fallback, or mocked/test providers without touching
-agent logic.
+live model providers, rule-based fallback, or mocked/test providers without
+touching agent logic.
 
 Design invariants:
     - The protocol returns a structured ``AgentModelResult``; it never raises

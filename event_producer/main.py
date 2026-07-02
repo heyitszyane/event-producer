@@ -39,6 +39,7 @@ from event_producer.agents.vendor_coordinator import (
     VendorCoordinatorFormatterAgent,
     VendorCoordinatorReasonAgent,
 )
+from event_producer.config.defaults import DEFAULT_EVENT_CONSTRAINTS
 from event_producer.models.schemas import (
     AgentTraceStep,
     Approval,
@@ -281,7 +282,7 @@ class EventProducerApp:
         self._fx_provider: FxRateProvider = StaticFxRateProvider()
         self._audit_log = AuditLog()
 
-        # --- P7A: provider seam (Gemini live vs deterministic fallback) ---
+        # --- P7A/P7F: provider seam (live model vs deterministic fallback) ---
         self._model_env: ModelEnv = env if env is not None else ModelEnv.from_env()
         self._agent_model = build_agent_model(self._model_env)
         self._brief_intake_reason = BriefIntakeReasonAgent(provider=self._agent_model)
@@ -494,21 +495,21 @@ class EventProducerApp:
             if _manual("attendees", attendees)
             else brief_intake.attendees
             if brief_intake.attendees is not None
-            else 50  # safe fallback for the engines (catalogue scales per-head)
+            else DEFAULT_EVENT_CONSTRAINTS["attendees"]
         )
         resolved_budget_cap = (
             budget_cap
             if _manual("budget_cap", budget_cap)
             else brief_intake.budget_cap
             if brief_intake.budget_cap is not None
-            else "20000"
+            else DEFAULT_EVENT_CONSTRAINTS["budget_cap"]
         )
         resolved_contingency_pct = (
             contingency_pct
             if _manual("contingency_pct", contingency_pct)
             else brief_intake.contingency_pct
             if brief_intake.contingency_pct is not None
-            else "15"
+            else DEFAULT_EVENT_CONSTRAINTS["contingency_pct"]
         )
         resolved_event_type = (
             event_type
@@ -522,14 +523,17 @@ class EventProducerApp:
             if _manual("venue_type", venue_type)
             else brief_intake.venue_type
             if brief_intake.venue_type is not None
-            else "indoor"
+            else DEFAULT_EVENT_CONSTRAINTS["venue_type"]
         )
         resolved_date = (
             date
             if _manual("date", date)
             else brief_intake.date
             if brief_intake.date is not None
-            else (datetime.now(timezone.utc) + timedelta(days=45)).strftime("%Y-%m-%d")
+            else (
+                datetime.now(timezone.utc)
+                + timedelta(days=int(DEFAULT_EVENT_CONSTRAINTS["fallback_date_offset_days"]))
+            ).strftime("%Y-%m-%d")
         )
 
         # If we fell back on a field that wasn't extracted, record it in the
@@ -537,13 +541,15 @@ class EventProducerApp:
         if (not _manual("attendees", attendees) and brief_intake.attendees is None
                 and len(brief_intake.assumptions) < 6):
             brief_intake.assumptions.append(
-                "No attendees specified; using a default of 50 pax for costing."
+                "No attendees specified; using a default of "
+                f"{DEFAULT_EVENT_CONSTRAINTS['attendees']} pax for costing."
             )
         if (not _manual("budget_cap", budget_cap) and brief_intake.budget_cap is None
-                and "Using a default budget of 20000 for costing."
+                and f"Using a default budget of {DEFAULT_EVENT_CONSTRAINTS['budget_cap']} for costing."
                 not in brief_intake.assumptions):
             brief_intake.assumptions.append(
-                "No budget cap specified; using a default of 20000 for costing."
+                "No budget cap specified; using a default of "
+                f"{DEFAULT_EVENT_CONSTRAINTS['budget_cap']} for costing."
             )
 
         # P7D: Attach source map to brief_intake for provenance display
@@ -928,7 +934,7 @@ class EventProducerApp:
             "state_mutation_executed": False,
             "blocked_actions": [
                 "change_payment_details",
-                "mark_invoice_paid",
+                "mark_paid",
                 "send_vendor_message",
             ],
             "gate": {

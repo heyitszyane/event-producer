@@ -1,7 +1,7 @@
 # REPO_SITEMAP.md -- Event Producer Folder Map
 
-> This file describes the **current** repository layout as of P7D-FIX / 21B
-> (constraint provenance and demo-surface acceptance).
+> This file describes the **current** repository layout as of P7F
+> (consolidated external-audit fix pass on top of P7E/P7D-FIX behavior).
 
 ---
 
@@ -47,7 +47,14 @@ Package marker. Exports top-level symbols if needed.
 Application entry point. Wires agents, engines, and providers into a runnable app. Contains `InMemoryEventStore` (full CRUD implementation of the `EventStore` ABC) and `EventProducerApp` (composition root).
 
 #### `event_producer/api.py`
-FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/event/{id}/scope-items/{idx}/toggle`, `/event/{id}/scope-items/{idx}/retier`, `/approvals`, `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Scope/proposal mutation responses include recompute notices with before/after headroom and schedule status.
+FastAPI REST API wrapper. Exposes `/run`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/event/{id}/scope-items/{idx}/toggle`, `/event/{id}/scope-items/{idx}/retier`, `/event/{id}/approvals`, `/event/{id}/approvals/{approval_id}`, legacy sample `/approvals`, legacy sample `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Scope/proposal mutation responses include recompute notices with before/after headroom, schedule status, and stale-agent-output honesty.
+
+#### `event_producer/config/`
+Small shared configuration constants.
+
+| File | Purpose |
+|---|---|
+| `defaults.py` | Documented fallback constraints used by the deterministic demo pipeline |
 
 #### `event_producer/agents/`
 Role-based agents plus reasoner/formatter splits. Each agent file owns a single responsibility:
@@ -64,8 +71,9 @@ Role-based agents plus reasoner/formatter splits. Each agent file owns a single 
 | `risk_flagger.py` | Identifies and surfaces risks across all domains |
 
 Most role agents are rule-based (deterministic). Brief Intake and Creative
-Concept can use the optional server-side Gemini provider seam when explicitly
-enabled; otherwise they run honest fallback mode.
+Concept can use the optional server-side model provider seam when explicitly
+enabled; otherwise they run honest fallback mode. Gemini is the default live
+provider; OpenRouter and local/OpenAI-compatible endpoints are also supported.
 
 #### `event_producer/engines/`
 Deterministic, pure-Python cores with no external dependencies. These are the "math" layer -- fully testable in isolation.
@@ -93,6 +101,13 @@ Abstract interfaces that define the **seam** between the agent layer and externa
 | File | Interface |
 |---|---|
 | `event_store.py` | Persistence for event data (CRUD contract). Includes `list_events()`, `delete_event()`, `save_approval()`, `get_approvals()`. |
+| `agent_model.py` | Protocol for structured live/fallback model calls |
+| `model_env.py` | Server-side model provider/env resolution |
+| `model_router.py` | Chooses fallback, Gemini, or OpenAI-compatible provider |
+| `../config/model_settings.py` | Local-dev provider settings reader/writer for gitignored `.env` |
+| `gemini_model.py` | Lazy live Gemini provider |
+| `openai_compatible_model.py` | Lazy live OpenAI-compatible provider for OpenRouter/local endpoints |
+| `fallback_model.py` | Honest deterministic fallback provider |
 | `rate_card.py` | Vendor rate lookup and caching (FX rates) |
 | `vendor_sourcer.py` | Vendor discovery and qualification |
 
@@ -114,9 +129,11 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/package.json` | Node dependencies and scripts |
 | `web/next.config.js` | Next.js config (static export) |
 | `web/pages/` | Next.js page components (file-system routing) |
-| `web/pages/index.tsx` | Main dashboard page |
+| `web/pages/index.tsx` | Main Paper War Room page with persistent side nav and route-like section state |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard) |
+| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorsCard). P7E keeps the component set but re-homes it inside Overview, Brief Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log sections. |
+| `web/lib/api.ts` | Browser API helper for API base resolution, demo header injection, and backend error parsing |
+| `web/lib/humanize.ts` | User-facing display-label helpers for enum/action/category/provenance strings |
 | `web/types/agentic.ts` | Shared frontend types for model modes, provenance, proposals, and recompute notices |
 | `web/styles/globals.css` | Design token system + component classes (single source of truth for styling) |
 | `web/public/` | Static assets |
@@ -211,4 +228,4 @@ These files have outsized blast radius. Changes here can cascade across the enti
 
 ---
 
-*Last updated: 2026-07-01 (P7D-FIX / 21B)*
+*Last updated: 2026-07-02 (P7F consolidated external-audit fix pass)*

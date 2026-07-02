@@ -1,6 +1,7 @@
 import type { AgentMode, AgentTraceStep, ModelModeSummary } from '../types/agentic'
 import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
 import { BriefIntake } from '../types/agentic'
+import { humanizeSummary } from '../lib/humanize'
 
 interface AIProductionCrewProps {
   trace: AgentTraceStep[]
@@ -47,16 +48,16 @@ const STATUS_CONFIG: Record<
   },
 }
 
-// P7D prompt chips for quick interaction
-const PROMPT_CHIPS = [
-  "Make this feel more premium",
-  "Suggest cuts to stay under budget",
-  "Add low-cost networking mechanics",
-  "Flag unrealistic assumptions",
-  "Rebalance scope under budget",
-  "Suggest vendor/service additions",
-  "Make this more brand/photo-ready",
-]
+function taskSummaries(step: AgentTraceStep): string[] {
+  const summaries = [step.output_summary, step.input_summary, step.label]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map(humanizeSummary)
+    .filter((value) => Boolean(value.trim()))
+  if (step.model_mode === 'deterministic_engine') {
+    return summaries.slice(0, 1)
+  }
+  return summaries.slice(0, 3)
+}
 
 export default function AIProductionCrew({
   trace,
@@ -64,7 +65,6 @@ export default function AIProductionCrew({
   briefIntake,
   budgetSummary,
   scheduleCount = 0,
-  onPromptChipClick,
 }: AIProductionCrewProps) {
   if (!trace || trace.length === 0) {
     return (
@@ -86,23 +86,26 @@ export default function AIProductionCrew({
         {modelModeSummary && (
           <div className="card__header-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
             <span className={`badge ${MODE_CLASS[modelModeSummary.brief_intake as AgentMode] ?? 'badge--muted'}`}>
-              {MODE_LABEL[modelModeSummary.brief_intake as AgentMode]} Brief Intake
+              Runtime: {MODE_LABEL[modelModeSummary.brief_intake as AgentMode]} Brief Intake
             </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.creative_concept as AgentMode] ?? 'badge--muted'}`}>
-              {MODE_LABEL[modelModeSummary.creative_concept as AgentMode]} Creative
+              Runtime: {MODE_LABEL[modelModeSummary.creative_concept as AgentMode]} Creative
             </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.budget_manager as AgentMode] ?? 'badge--muted'}`}>
-              {MODE_LABEL[modelModeSummary.budget_manager as AgentMode]} Budget
+              Runtime: {MODE_LABEL[modelModeSummary.budget_manager as AgentMode]} Budget
             </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.production_manager as AgentMode] ?? 'badge--muted'}`}>
-              {MODE_LABEL[modelModeSummary.production_manager as AgentMode]} Schedule
+              Runtime: {MODE_LABEL[modelModeSummary.production_manager as AgentMode]} Schedule
             </span>
             <span className={`badge ${MODE_CLASS[modelModeSummary.vendor_coordinator as AgentMode] ?? 'badge--muted'}`}>
-              {MODE_LABEL[modelModeSummary.vendor_coordinator as AgentMode]} Vendor
+              Runtime: {MODE_LABEL[modelModeSummary.vendor_coordinator as AgentMode]} Vendor
             </span>
           </div>
         )}
       </div>
+      <p className="runtime-helper">
+        Runtime shows whether this output came from a live model provider, rule-based fallback, a deterministic engine, a human approval gate, or a scripted fixture.
+      </p>
 
       <div className="agent-crew-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-3)' }}>
         {trace.map((step) => {
@@ -122,23 +125,15 @@ export default function AIProductionCrew({
                 <strong style={{ fontSize: 'var(--text-sm)' }}>{step.role}</strong>
                 {step.model_mode && (
                   <span className={`badge ${MODE_CLASS[step.model_mode] ?? 'badge--muted'}`} style={{ fontSize: 'var(--text-xs)' }}>
-                    {MODE_LABEL[step.model_mode]}
+                    Runtime: {MODE_LABEL[step.model_mode]}
                   </span>
                 )}
               </div>
-              <p style={{ fontSize: 'var(--text-sm)', margin: '0 0 var(--space-2)', opacity: 0.9 }}>
-                {step.label}
-              </p>
-              {step.input_summary && (
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', margin: '0 0 var(--space-1)' }}>
-                  <strong>Input:</strong> {step.input_summary}
-                </p>
-              )}
-              {step.output_summary && (
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', margin: '0 0 var(--space-1)' }}>
-                  <strong>Output:</strong> {step.output_summary}
-                </p>
-              )}
+              <ul className="agent-task-summaries">
+                {(taskSummaries(step).length ? taskSummaries(step) : ['No recent task recorded yet.']).map((summary) => (
+                  <li key={summary}>{summary}</li>
+                ))}
+              </ul>
               {step.status === 'warning' && briefIntake?.market_realism_warnings?.length ? (
                 <p style={{ fontSize: 'var(--text-xs)', color: 'var(--status-warn)', margin: 0 }}>
                   <strong>Warning:</strong> {briefIntake.market_realism_warnings[0]}
@@ -153,26 +148,6 @@ export default function AIProductionCrew({
           )
         })}
       </div>
-
-      {/* P7D: Prompt chips for quick interaction */}
-      {onPromptChipClick && (
-        <div className="prompt-chips" style={{ marginTop: 'var(--space-4)', paddingTop: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 'var(--space-2)' }}>Quick suggestions:</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-            {PROMPT_CHIPS.map((chip) => (
-              <button
-                key={chip}
-                onClick={() => onPromptChipClick(chip)}
-                className="btn btn--ghost btn--sm"
-                style={{ fontSize: 'var(--text-xs)' }}
-                type="button"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   )
 }

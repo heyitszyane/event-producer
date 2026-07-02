@@ -18,6 +18,16 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from event_producer.config.defaults import DEFAULT_EVENT_CONSTRAINTS
+from event_producer.config.model_settings import (
+    ModelSettingsPublic,
+    ModelSettingsUpdate,
+    apply_to_process_env,
+    env_path,
+    read_env_file,
+    updates_from_settings,
+    write_env_values,
+)
 from event_producer.main import EventProducerApp
 from event_producer.models.schemas import (
     Approval,
@@ -29,7 +39,7 @@ from event_producer.models.schemas import (
     ScopeItemCreate,
     ScopeItemUpdate,
 )
-from event_producer.security.action_gate import enforce
+from event_producer.security.action_gate import enforce, requires_approval
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -102,6 +112,18 @@ class OrchestratorChatResponse(BaseModel):
     fallback_reason: str | None = None
 
 
+class RuntimeModelResponse(BaseModel):
+    """Non-secret model/provider diagnostics for local smoke testing."""
+
+    provider: str
+    live_enabled: bool
+    effective_mode: str
+    model_name: str
+    api_base_url: str | None
+    has_api_key: bool
+    fallback_reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
@@ -143,7 +165,19 @@ def create_app() -> FastAPI:
     # OPTIONS preflight requests before auth blocks them.
     # Set ALLOWED_ORIGINS env var in production (comma-separated list).
     _allowed_origins = os.environ.get(
-        "ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080"
+        "ALLOWED_ORIGINS",
+        ",".join(
+            [
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:3002",
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:3001",
+                "http://127.0.0.1:3002",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080",
+            ]
+        ),
     )
     app.add_middleware(
         CORSMiddleware,
@@ -211,6 +245,59 @@ def create_app() -> FastAPI:
         """Liveness probe."""
         return {"status": "ok"}
 
+    @app.get("/runtime/model")
+    async def runtime_model() -> RuntimeModelResponse:
+        """Return non-secret model-provider state loaded at backend startup."""
+        producer: EventProducerApp = app.state.event_producer
+        env = producer._model_env
+        return RuntimeModelResponse(
+            provider=env.provider,
+            live_enabled=env.live_enabled,
+            effective_mode=env.effective_mode,
+            model_name=env.model_name,
+            api_base_url=env.api_base_url or None,
+            has_api_key=bool(env.api_key),
+            fallback_reason=env.fallback_reason or None,
+        )
+
+    def _public_model_settings(*, restart_required: bool = False) -> ModelSettingsPublic:
+        producer: EventProducerApp = app.state.event_producer
+        env = producer._model_env
+        return ModelSettingsPublic(
+            provider=env.provider,
+            live_enabled=env.live_enabled,
+            effective_mode=env.effective_mode,
+            model_name=env.model_name,
+            api_base_url=env.api_base_url or None,
+            has_api_key=bool(env.api_key),
+            fallback_reason=env.fallback_reason or None,
+            env_path=str(env_path()),
+            restart_required=restart_required,
+        )
+
+    @app.get("/settings/model")
+    async def get_model_settings() -> ModelSettingsPublic:
+        """Return non-secret local model settings for the dev settings panel."""
+        return _public_model_settings()
+
+    def _settings_write_allowed(request: Request) -> bool:
+        host = request.url.hostname or ""
+        return host in {"127.0.0.1", "localhost", "testserver"}
+
+    @app.post("/settings/model")
+    async def update_model_settings(
+        settings: ModelSettingsUpdate, request: Request
+    ) -> ModelSettingsPublic:
+        """Persist local provider settings to .env and refresh the in-process app."""
+        if not _settings_write_allowed(request):
+            raise HTTPException(status_code=403, detail="Settings writes are local-dev only")
+        current = read_env_file()
+        updates = updates_from_settings(settings, current)
+        write_env_values(updates)
+        apply_to_process_env(updates)
+        app.state.event_producer = EventProducerApp()
+        return _public_model_settings()
+
     # ---- Demo approvals (persisted via EventStore) -----------------------
     _DEMO_EVENT_ID = "demo-event"
 
@@ -248,9 +335,84 @@ def create_app() -> FastAPI:
     for _ap in _SAMPLE_APPROVALS:
         app.state.event_producer.event_store.save_approval(_DEMO_EVENT_ID, _ap)
 
+    def _demo_actor(request: Request) -> str:
+        return request.headers.get("x-demo-user") or "demo-user"
+
+    def _update_event_approval(
+        event_id: str,
+        approval_id: str,
+        body: ApprovalAction,
+        actor: str,
+    ) -> dict[str, Any]:
+        producer: EventProducerApp = app.state.event_producer
+        approvals = producer.event_store.get_approvals(event_id)
+        approval = next((a for a in approvals if a.id == approval_id), None)
+        if approval is None:
+            raise HTTPException(status_code=404, detail="Approval not found")
+
+        if body.action == "reject":
+            approval.status = "rejected"
+            approval.approved_by = actor
+            producer.audit_log.log(
+                action="approval_rejected",
+                actor=actor,
+                details=f"Rejected approval {approval_id}",
+                approval_id=approval_id,
+                event_id=event_id,
+            )
+            producer.event_store.save_approval(event_id, approval)
+            return approval.model_dump()
+
+        approval.status = "approved"
+        approval.approved_by = actor
+        if requires_approval(approval.action):
+            enforce(approval.action, approval)
+            producer.audit_log.log(
+                action="vendor_send_simulated"
+                if approval.action == "send_vendor_message"
+                else "approval_gate_released",
+                actor=actor,
+                details=f"Approved gated action {approval.action} for approval {approval_id}",
+                approval_id=approval_id,
+                event_id=event_id,
+            )
+        else:
+            producer.audit_log.log(
+                action="approval_approved",
+                actor=actor,
+                details=f"Approved non-gated sample action {approval.action}",
+                approval_id=approval_id,
+                event_id=event_id,
+            )
+
+        producer.event_store.save_approval(event_id, approval)
+        return approval.model_dump()
+
+    @app.get("/event/{event_id}/approvals")
+    async def list_event_approvals(event_id: str) -> list[dict[str, Any]]:
+        """List approvals for one event."""
+        producer: EventProducerApp = app.state.event_producer
+        if producer.event_store.get_event(event_id) is None and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+        approvals = producer.event_store.get_approvals(event_id)
+        return [a.model_dump() for a in approvals]
+
+    @app.post("/event/{event_id}/approvals/{approval_id}")
+    async def update_event_approval(
+        event_id: str,
+        approval_id: str,
+        body: ApprovalAction,
+        request: Request,
+    ) -> dict[str, Any]:
+        """Approve or reject an event-scoped approval through the action-gate."""
+        producer: EventProducerApp = app.state.event_producer
+        if producer.event_store.get_event(event_id) is None and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+        return _update_event_approval(event_id, approval_id, body, _demo_actor(request))
+
     @app.get("/approvals")
     async def list_approvals() -> list[dict[str, Any]]:
-        """List pending approvals (retrieved from EventStore)."""
+        """Legacy sample route: list approvals for the demo-event fixture."""
         producer: EventProducerApp = app.state.event_producer
         approvals = producer.event_store.get_approvals(_DEMO_EVENT_ID)
         return [a.model_dump() for a in approvals]
@@ -259,45 +421,10 @@ def create_app() -> FastAPI:
     async def update_approval(
         approval_id: str,
         body: ApprovalAction,
+        request: Request,
     ) -> dict[str, Any]:
-        """Approve or reject a pending approval through the action-gate.
-
-        When approving a gated action (e.g., send_vendor_message), the
-        action-gate enforce() is called to demonstrate the structural
-        security boundary. Rejected approvals do not execute.
-        """
-        producer: EventProducerApp = app.state.event_producer
-        approvals = producer.event_store.get_approvals(_DEMO_EVENT_ID)
-        approval = next((a for a in approvals if a.id == approval_id), None)
-        if approval is None:
-            raise HTTPException(status_code=404, detail="Approval not found")
-
-        if body.action == "reject":
-            approval.status = "rejected"
-            approval.approved_by = "demo-user"
-            producer.event_store.save_approval(_DEMO_EVENT_ID, approval)
-            return approval.model_dump()
-
-        # body.action == "approve"
-        approval.status = "approved"
-        approval.approved_by = "demo-user"
-
-        # Enforce the action-gate for gated actions
-        if approval.action in {"send_vendor_message", "change_payment_details",
-                               "mark_paid", "reschedule", "change_scope",
-                               "approve_budget", "lock_scope", "release_funds"}:
-            enforce(approval.action, approval)
-            # Simulated vendor send: log to audit
-            producer.audit_log.log(
-                action="vendor_send_simulated",
-                actor="demo-user",
-                details=f"Simulated send for approval {approval_id}",
-                approval_id=approval_id,
-                event_id=_DEMO_EVENT_ID,
-            )
-
-        producer.event_store.save_approval(_DEMO_EVENT_ID, approval)
-        return approval.model_dump()
+        """Legacy sample route: update an approval under demo-event."""
+        return _update_event_approval(_DEMO_EVENT_ID, approval_id, body, _demo_actor(request))
 
     @app.post("/chat")
     async def chat(req: ChatRequest) -> dict[str, str]:
@@ -334,11 +461,11 @@ def create_app() -> FastAPI:
         previous_headroom = existing_budget.headroom if existing_budget else None
         budget_cap = (
             existing_budget.budget_cap if existing_budget
-            else Decimal("20000")  # fallback for demo
+            else Decimal(str(DEFAULT_EVENT_CONSTRAINTS["budget_cap"]))
         )
         contingency_pct = (
             existing_budget.contingency_pct if existing_budget
-            else Decimal("15")  # safe fallback documented in UI default
+            else Decimal(str(DEFAULT_EVENT_CONSTRAINTS["contingency_pct"]))
         )
 
         budget_request = {
@@ -400,7 +527,8 @@ def create_app() -> FastAPI:
                 "message": (
                     "Budget recalculated. "
                     f"Headroom changed from {previous_headroom_text} to {current_headroom_text}. "
-                    f"{schedule_message}"
+                    f"{schedule_message} Risk register and agent trace still reflect the last full pipeline run; "
+                    "rerun the event to refresh all agent outputs."
                 ),
             },
         }

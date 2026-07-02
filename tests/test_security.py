@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from event_producer.models.schemas import Approval, VendorMessage
+from event_producer.main import EventProducerApp
 from event_producer.security.action_gate import enforce, requires_approval
 from event_producer.security.audit_log import AuditLog
 from event_producer.security.injection_flag import check, is_flagged
@@ -32,6 +33,22 @@ class TestActionGate:
         assert requires_approval("approve_budget") is True
         assert requires_approval("lock_scope") is True
         assert requires_approval("release_funds") is True
+
+    def test_security_beat_blocked_actions_match_gate_constants(self) -> None:
+        """Security beat blocked actions are enforceable action-gate constants."""
+        app = EventProducerApp()
+        result = app.run_event(
+            brief="50 pax networking event with $20000 budget.",
+            budget_cap="20000",
+            contingency_pct="15",
+            attendees=50,
+            event_type="networking",
+            venue_type="indoor",
+            date="2026-08-15",
+        )
+
+        for action in result["security_beat"]["blocked_actions"]:
+            assert requires_approval(action), f"{action} must match the action gate"
 
     def test_action_gate_enforce_blocks_unapproved(self) -> None:
         """PermissionError without approval."""

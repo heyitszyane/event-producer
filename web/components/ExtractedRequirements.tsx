@@ -1,27 +1,36 @@
-import type { BriefIntake, ConstraintResolution, ConstraintResolutionField, RequirementSource } from '../types/agentic'
+import { useEffect, useMemo, useState } from 'react'
+import type { BriefIntake, ConstraintResolution, RequirementSource } from '../types/agentic'
 import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
+import { humanizeKey } from '../lib/humanize'
 
 interface Props {
   intake: BriefIntake | null
   resolution?: ConstraintResolution
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
-  return <span className="chip">{children}</span>
+interface ProvenanceRow {
+  id: string
+  field: string
+  value: string
+  source: RequirementSource | 'user_added'
+  status: string
 }
 
-function ListOrMissing({ items, empty }: { items?: string[]; empty: string }) {
-  if (!items || items.length === 0) {
-    return <span className="muted">{empty}</span>
-  }
-  return (
-    <ul className="bullets">
-      {items.map((it) => (
-        <li key={it}>{it}</li>
-      ))}
-    </ul>
-  )
-}
+const KNOWN_FIELDS = [
+  'event_type',
+  'attendees',
+  'budget_cap',
+  'contingency_pct',
+  'date',
+  'location',
+  'venue_type',
+  'goals',
+  'must_haves',
+  'nice_to_haves',
+  'constraints',
+  'assumptions',
+  'missing_questions',
+]
 
 function SourceBadge({ source }: { source?: RequirementSource }) {
   if (!source) return null
@@ -44,41 +53,55 @@ function SourceBadge({ source }: { source?: RequirementSource }) {
   )
 }
 
-function field(label: string, value: string | number | null | undefined, source?: RequirementSource, resolved?: ConstraintResolutionField) {
-  if (value === null || value === undefined || value === '') return null
-  return (
-    <div className="kv">
-      <span className="kv__label">{label}</span>
-      <span className="kv__value">
-        {String(value)}
-        <SourceBadge source={source} />
-        {source === 'manual_override' && resolved?.brief_value !== null && resolved?.brief_value !== undefined && (
-          <span className="muted" style={{ display: 'block', marginTop: '2px', fontSize: 'var(--text-xs)' }}>
-            Brief said: {String(resolved.brief_value)}
-          </span>
-        )}
-      </span>
-    </div>
-  )
-}
-
-function resolvedValue(
-  resolution: ConstraintResolution | undefined,
-  key: string,
-  fallback: string | number | null | undefined,
-) {
-  return resolution?.[key]?.resolved_value ?? fallback
-}
-
-function resolvedSource(
-  resolution: ConstraintResolution | undefined,
-  key: string,
-  fallback?: RequirementSource,
-) {
-  return resolution?.[key]?.source ?? fallback
-}
-
 export default function ExtractedRequirements({ intake, resolution }: Props) {
+  const baseRows = useMemo<ProvenanceRow[]>(() => {
+    if (!intake) return []
+    const readValue = (key: string): string => {
+      const resolved = resolution?.[key]?.resolved_value
+      const raw = (intake as unknown as Record<string, unknown>)[key]
+      const value = resolved ?? raw
+      if (Array.isArray(value)) return value.join('; ')
+      return value === null || value === undefined ? '' : String(value)
+    }
+    return KNOWN_FIELDS
+      .map((key) => ({
+        id: `base-${key}`,
+        field: key,
+        value: readValue(key),
+        source: resolution?.[key]?.source ?? intake.source_map?.[key as keyof typeof intake.source_map] ?? 'missing',
+        status: resolution?.[key]?.source === 'manual_override' ? 'manual override' : 'backend extracted',
+      }))
+      .filter((row) => row.value || row.source === 'missing')
+  }, [intake, resolution])
+
+  const [rows, setRows] = useState<ProvenanceRow[]>([])
+
+  useEffect(() => {
+    setRows(baseRows)
+  }, [baseRows])
+
+  function updateRow(id: string, patch: Partial<ProvenanceRow>) {
+    setRows((prev) => prev.map((row) => row.id === id ? {
+      ...row,
+      ...patch,
+      source: row.source === 'user_added' ? 'user_added' : 'manual_override',
+      status: patch.status ?? (row.source === 'user_added' ? 'user added' : 'edited manual override'),
+    } : row))
+  }
+
+  function addRow() {
+    setRows((prev) => [
+      ...prev,
+      {
+        id: `added-${Date.now()}`,
+        field: 'assumptions',
+        value: '',
+        source: 'user_added',
+        status: 'user added draft',
+      },
+    ])
+  }
+
   if (!intake) {
     return (
       <section
@@ -87,7 +110,7 @@ export default function ExtractedRequirements({ intake, resolution }: Props) {
         aria-labelledby="extracted-heading"
       >
         <div className="card__header">
-          <h2 id="extracted-heading">Extracted requirements</h2>
+          <h2 id="extracted-heading">Extraction Provenance Preview</h2>
         </div>
         <div className="empty-state">
           Run an event to see the brief interpreted here.
@@ -108,66 +131,73 @@ export default function ExtractedRequirements({ intake, resolution }: Props) {
       aria-labelledby="extracted-heading"
     >
       <div className="card__header">
-        <h2 id="extracted-heading">Extracted requirements</h2>
+        <h2 id="extracted-heading">Extraction Provenance Preview</h2>
         <div className="card__header-badges">
           {mode && (
             <span className={`badge ${MODE_CLASS[mode] ?? 'badge--muted'}`}>
               {MODE_LABEL[mode]}
             </span>
           )}
-          {intake.confidence && (
-            <span className="badge badge--info">
-              confidence: {intake.confidence}
-            </span>
-          )}
         </div>
       </div>
 
-      {/* P7D: field provenance — show where each value came from */}
-      <div className="kvs">
-        {field('Event type', resolvedValue(resolution, 'event_type', intake.event_type), resolvedSource(resolution, 'event_type', intake.source_map?.event_type), resolution?.event_type)}
-        {field('Attendee basis', resolvedValue(resolution, 'attendees', intake.attendees), resolvedSource(resolution, 'attendees', intake.source_map?.attendees), resolution?.attendees)}
-        {field('Budget cap', resolvedValue(resolution, 'budget_cap', intake.budget_cap), resolvedSource(resolution, 'budget_cap', intake.source_map?.budget_cap), resolution?.budget_cap)}
-        {field('Contingency', resolvedValue(resolution, 'contingency_pct', intake.contingency_pct), resolvedSource(resolution, 'contingency_pct', intake.source_map?.contingency_pct), resolution?.contingency_pct)}
-        {field('Venue type', resolvedValue(resolution, 'venue_type', intake.venue_type), resolvedSource(resolution, 'venue_type', intake.source_map?.venue_type), resolution?.venue_type)}
-        {field('Date', resolvedValue(resolution, 'date', intake.date), resolvedSource(resolution, 'date', intake.source_map?.date), resolution?.date)}
-        {field('Location', resolvedValue(resolution, 'location', intake.location), resolvedSource(resolution, 'location', intake.source_map?.location), resolution?.location)}
-        {field('Tone', intake.tone)}
-        {field('Audience', intake.audience_profile)}
+      <div className="block block--info">
+        Inline edits are session drafts. They become backend inputs only when mapped into manual constraints and the event is re-run or recomputed.
       </div>
 
-      {intake.goals && intake.goals.length > 0 && (
-        <div className="block">
-          <h3 className="block__title">Goals</h3>
-          <div className="chips">
-            {intake.goals.map((g) => (
-              <Chip key={g}>{g}</Chip>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="grid-2">
-        <div className="block">
-          <h3 className="block__title">Must-haves</h3>
-          <ListOrMissing items={intake.must_haves} empty="None specified" />
-        </div>
-        <div className="block">
-          <h3 className="block__title">Nice-to-haves</h3>
-          <ListOrMissing items={intake.nice_to_haves} empty="None specified" />
-        </div>
+      <div className="table-actions">
+        <button className="btn btn--primary btn--sm" type="button" onClick={addRow}>
+          Add provenance row
+        </button>
       </div>
 
-      <div className="grid-2">
-        <div className="block">
-          <h3 className="block__title">Assumptions</h3>
-          <ListOrMissing items={intake.assumptions} empty="No assumptions" />
-        </div>
-        <div className="block">
-          <h3 className="block__title">Constraints</h3>
-          <ListOrMissing items={intake.constraints} empty="None detected" />
-        </div>
-      </div>
+      <table className="data-table provenance-table">
+        <thead>
+          <tr>
+            <th scope="col">Requirement</th>
+            <th scope="col">Value</th>
+            <th scope="col">Source</th>
+            <th scope="col">Notes/Status</th>
+            <th scope="col">Remove Row</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td data-label="Requirement">
+                <input
+                  className="input input--inline"
+                  value={humanizeKey(row.field)}
+                  onChange={(e) => updateRow(row.id, { field: e.target.value })}
+                />
+              </td>
+              <td data-label="Value">
+                <input
+                  className="input input--inline"
+                  value={row.value}
+                  placeholder="Add value"
+                  onChange={(e) => updateRow(row.id, { value: e.target.value })}
+                />
+              </td>
+              <td data-label="Source">
+                <SourceBadge source={row.source === 'user_added' ? 'manual_override' : row.source} />
+              </td>
+              <td data-label="Notes/Status">
+                <input
+                  className="input input--inline"
+                  value={row.status}
+                  onChange={(e) => updateRow(row.id, { status: e.target.value })}
+                />
+              </td>
+              <td data-label="Remove Row">
+                <button className="btn btn--ghost btn--sm" type="button" onClick={() => setRows((prev) => prev.filter((item) => item.id !== row.id))}>
+                  Remove
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       {warnings.length > 0 && (
         <div className="block block--warn">

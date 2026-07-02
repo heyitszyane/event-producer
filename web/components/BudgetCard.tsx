@@ -1,3 +1,5 @@
+import { humanizeKey } from '../lib/humanize'
+
 export interface BudgetSummary {
   lines: Array<{
     label: string
@@ -63,10 +65,41 @@ const TIER_COLORS: Record<string, string> = {
   wow: 'var(--tier-wow)',
 }
 const TIER_LABELS: Record<string, string> = {
-  must: 'MUST',
-  should: 'SHOULD',
-  could: 'COULD',
-  wow: 'WOW',
+  must: 'Essential',
+  should: 'Recommended',
+  could: 'Optional',
+  wow: 'Stretch',
+}
+
+function numeric(value: string | undefined | null): number {
+  const num = parseFloat(String(value ?? '0'))
+  return Number.isFinite(num) ? num : 0
+}
+
+function BudgetHealthRow({
+  label,
+  value,
+  max,
+  overBy,
+}: {
+  label: string
+  value: number
+  max: number
+  overBy?: number
+}) {
+  const pct = max > 0 ? Math.min(Math.max((value / max) * 100, 0), 100) : 0
+  return (
+    <div className="budget-health-row">
+      <div className="budget-health-row__meta">
+        <span>{label}</span>
+        <strong>{formatCurrency(String(value))}</strong>
+        {overBy && overBy > 0 ? <em>OVER BY {formatCurrency(String(overBy))}</em> : null}
+      </div>
+      <div className="budget-health-row__track">
+        <div className="budget-health-row__fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
 }
 
 export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardProps) {
@@ -97,6 +130,14 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
 
   const categories = Object.entries(budget.category_rollups || {})
   const maxCategoryVal = Math.max(...categories.map(([, v]) => parseFloat(v || '0')), 1)
+  const budgetCap = numeric(budget.budget_cap)
+  const spendable = numeric(budget.spendable)
+  const selectedSpend = numeric(budget.included_totals)
+  const fullRequested = Math.max(
+    selectedSpend,
+    budget.lines.reduce((sum, line) => sum + (numeric(line.qty) * numeric(line.unit_cost)), 0)
+  )
+  const requestedOverBy = Math.max(fullRequested - budgetCap, 0)
 
   return (
     <section className="card" id="budget" aria-labelledby="budget-heading">
@@ -167,18 +208,25 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
           <span className="sr-only">Status:</span>{statusBadge.label}
         </div>
 
+        <div className="budget-health">
+          <BudgetHealthRow label="Budget Cap" value={budgetCap} max={budgetCap} />
+          <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} />
+          <BudgetHealthRow label="Selected Scope Spend" value={selectedSpend} max={budgetCap} />
+          <BudgetHealthRow label="Full Requested Scope" value={fullRequested} max={budgetCap} overBy={requestedOverBy} />
+        </div>
+
         {/* Category rollup bars */}
         {categories.length > 0 && (
           <div style={{ marginBottom: 'var(--space-4)' }}>
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Spend by Category
+              Category Spend
             </h3>
             {categories.map(([cat, val]) => {
               const numVal = parseFloat(val || '0')
               const pct = (numVal / maxCategoryVal) * 100
               return (
                 <div key={cat} className="rollup-bar">
-                  <span className="rollup-bar__label">{cat}</span>
+                  <span className="rollup-bar__label">{humanizeKey(cat)}</span>
                   <div className="rollup-bar__track">
                     <div className="rollup-bar__fill" style={{ width: `${pct}%` }} />
                   </div>

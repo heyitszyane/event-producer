@@ -1,3 +1,5 @@
+import { displayLabel } from '../lib/humanize'
+
 interface SecurityBeatFixture {
   id: string
   channel: string
@@ -56,7 +58,7 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
     >
       <div className="card__header">
         <h2 id="security-beat-heading">
-          🛡 Security Posture
+          <span aria-hidden="true">🛡</span> Security Posture
         </h2>
         <span className={`badge ${isDeferred ? 'badge--warn' : isScripted ? 'badge--ok' : 'badge--warn'}`}>
           {isDeferred ? 'Deferred' : isScripted ? 'Scripted Demo' : securityBeat.status}
@@ -66,15 +68,15 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
       <div className="security-beat__body">
         {/* Gate checks — always shown */}
         <div className="security-beat__gate-check">
-          <span className="security-beat__check-icon">✅</span>
+          <span className="security-beat__check-icon" aria-hidden="true">✅</span>
           <span>Structural action gate is active</span>
         </div>
         <div className="security-beat__gate-check">
-          <span className="security-beat__check-icon">✅</span>
+          <span className="security-beat__check-icon" aria-hidden="true">✅</span>
           <span>Vendor data treated as untrusted</span>
         </div>
         <div className="security-beat__gate-check">
-          <span className="security-beat__check-icon">✅</span>
+          <span className="security-beat__check-icon" aria-hidden="true">✅</span>
           <span>No external action executed without approval</span>
         </div>
 
@@ -127,7 +129,7 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', marginTop: 'var(--space-1)' }}>
                     {blockedActions.map((a) => (
                       <span key={a} className="badge badge--critical" style={{ fontSize: 'var(--text-xs)' }}>
-                        {a}
+                        {displayLabel(a)}
                       </span>
                     ))}
                   </div>
@@ -139,13 +141,13 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
             <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-2)', background: 'var(--surface-secondary)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
               <div style={{ fontSize: 'var(--text-sm)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>External action executed</span>
-                <span style={{ fontWeight: 600, color: externalExecuted ? 'var(--color-critical)' : 'var(--color-ok)' }}>
+                <span style={{ fontWeight: 600, color: externalExecuted ? 'var(--status-critical)' : 'var(--status-ok)' }}>
                   {externalExecuted ? 'YES ⚠' : 'No'}
                 </span>
               </div>
               <div style={{ fontSize: 'var(--text-sm)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ color: 'var(--text-secondary)' }}>State mutation executed</span>
-                <span style={{ fontWeight: 600, color: stateMutation ? 'var(--color-critical)' : 'var(--color-ok)' }}>
+                <span style={{ fontWeight: 600, color: stateMutation ? 'var(--status-critical)' : 'var(--status-ok)' }}>
                   {stateMutation ? 'YES ⚠' : 'No'}
                 </span>
               </div>
@@ -167,11 +169,11 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
                         {f.label}
                       </span>
                       <span className="badge badge--warn" style={{ fontSize: 'var(--text-xs)' }}>
-                        {f.blocked_by.replace(/_/g, ' ')}
+                        {displayLabel(f.blocked_by)}
                       </span>
                     </div>
                     <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginBottom: 'var(--space-1)' }}>
-                      Channel: {f.channel.replace(/_/g, ' ')} &middot; Classifier: {f.classifier_role}
+                      Channel: {displayLabel(f.channel)} &middot; Classifier: {displayLabel(f.classifier_role)}
                       {f.ocr_implemented === false && ' &middot; OCR not implemented'}
                     </div>
                     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', fontStyle: 'italic', padding: 'var(--space-2)', background: 'var(--surface-primary)', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>
@@ -180,7 +182,7 @@ export default function SecurityBeat({ securityBeat }: SecurityBeatProps) {
                     <div style={{ marginTop: 'var(--space-1)', display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
                       {f.flags.map((flag) => (
                         <span key={flag} className="badge" style={{ fontSize: 'var(--text-xs)', background: 'var(--surface-tertiary)', color: 'var(--text-secondary)' }}>
-                          {flag}
+                          {displayLabel(flag)}
                         </span>
                       ))}
                     </div>

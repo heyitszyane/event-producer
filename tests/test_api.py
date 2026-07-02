@@ -7,10 +7,12 @@ through the HTTP interface using FastAPI's TestClient.
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from event_producer.config import model_settings
 from event_producer.api import create_app
 from event_producer.models.schemas import Approval
 from event_producer.security.action_gate import enforce
@@ -43,6 +45,120 @@ class TestHealthz:
         response = c.get("/healthz")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
+
+class TestRuntimeModel:
+    """Tests for non-secret runtime model diagnostics."""
+
+    def test_runtime_model_reports_local_provider_without_leaking_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ENABLE_LIVE_MODEL", "true")
+        monkeypatch.setenv("MODEL_PROVIDER", "local")
+        monkeypatch.setenv("LOCAL_LLM_API_BASE_URL", "http://127.0.0.1:1234/v1/chat/completions")
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "local-test-model")
+        monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "should-not-leak")
+
+        app = create_app()
+        c = TestClient(app, headers={"X-Demo-User": "demo"})
+        response = c.get("/runtime/model")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {
+            "provider": "local",
+            "live_enabled": True,
+            "effective_mode": "openai_compatible_live",
+            "model_name": "local-test-model",
+            "api_base_url": "http://127.0.0.1:1234/v1/chat/completions",
+            "has_api_key": True,
+            "fallback_reason": None,
+        }
+        assert "should-not-leak" not in str(data)
+
+
+class TestModelSettings:
+    """Tests for the local provider settings harness."""
+
+    def test_get_model_settings_does_not_leak_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "\n".join(
+                [
+                    "ENABLE_LIVE_MODEL=true",
+                    "MODEL_PROVIDER=lmstudio",
+                    "LOCAL_LLM_API_BASE_URL=http://100.79.109.78:1234/v1/chat/completions",
+                    "LOCAL_LLM_MODEL=qwen/qwen3.5-9b",
+                    "OPENAI_COMPATIBLE_API_KEY=secret-lmst",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(model_settings, "env_path", lambda: env_file)
+        monkeypatch.setattr("event_producer.api.env_path", lambda: env_file)
+        monkeypatch.setenv("ENABLE_LIVE_MODEL", "true")
+        monkeypatch.setenv("MODEL_PROVIDER", "lmstudio")
+        monkeypatch.setenv("LOCAL_LLM_API_BASE_URL", "http://100.79.109.78:1234/v1/chat/completions")
+        monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen/qwen3.5-9b")
+        monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "secret-lmst")
+
+        app = create_app()
+        c = TestClient(app, headers={"X-Demo-User": "demo"})
+        response = c.get("/settings/model")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"] == "lmstudio"
+        assert data["effective_mode"] == "openai_compatible_live"
+        assert data["has_api_key"] is True
+        assert data["env_path"] == str(env_file)
+        assert "secret-lmst" not in str(data)
+
+    def test_update_model_settings_writes_env_and_refreshes_runtime(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("ENABLE_LIVE_MODEL=false\nMODEL_PROVIDER=gemini\n", encoding="utf-8")
+        monkeypatch.setattr(model_settings, "env_path", lambda: env_file)
+        monkeypatch.setattr("event_producer.api.env_path", lambda: env_file)
+        monkeypatch.delenv("ENABLE_LIVE_MODEL", raising=False)
+        monkeypatch.delenv("MODEL_PROVIDER", raising=False)
+        monkeypatch.delenv("LOCAL_LLM_API_BASE_URL", raising=False)
+        monkeypatch.delenv("LOCAL_LLM_MODEL", raising=False)
+        monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+
+        app = create_app()
+        c = TestClient(app, headers={"X-Demo-User": "demo"})
+        response = c.post(
+            "/settings/model",
+            json={
+                "provider": "lmstudio",
+                "model_name": "qwen/qwen3.5-9b",
+                "api_base_url": "http://100.79.109.78:1234/v1/chat/completions",
+                "api_key": "new-secret",
+                "live_enabled": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"] == "lmstudio"
+        assert data["effective_mode"] == "openai_compatible_live"
+        assert data["has_api_key"] is True
+        assert "new-secret" not in str(data)
+
+        written = env_file.read_text(encoding="utf-8")
+        assert "ENABLE_LIVE_MODEL=true" in written
+        assert "MODEL_PROVIDER=lmstudio" in written
+        assert "LOCAL_LLM_MODEL=qwen/qwen3.5-9b" in written
+        assert "OPENAI_COMPATIBLE_API_KEY=new-secret" in written
+
+        runtime = c.get("/runtime/model").json()
+        assert runtime["provider"] == "lmstudio"
+        assert runtime["has_api_key"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +288,20 @@ class TestCors:
         # origin (not "*") so the value must match the Origin we sent.
         assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
 
+    def test_cors_preflight_allows_127_frontend_dev_port(self) -> None:
+        """Default local CORS allows 127.0.0.1 frontend dev origins."""
+        app = create_app()
+        c = TestClient(app)
+        response = c.options(
+            "/run",
+            headers={
+                "Origin": "http://127.0.0.1:3002",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://127.0.0.1:3002"
+
 
 # ---------------------------------------------------------------------------
 # GET /event/{event_id}
@@ -250,6 +380,53 @@ class TestApprovals:
         assert data["id"] == "aprv-001"
         assert data["status"] == "approved"
 
+    def test_event_scoped_approval_update(self, client: TestClient) -> None:
+        """Approving a /run approval updates the same event-scoped record."""
+        run = client.post("/run", json={"brief": "100 pax networking event with $20000 budget."})
+        assert run.status_code == 200
+        snapshot = run.json()
+        event_id = snapshot["event_id"]
+        approval = next(a for a in snapshot["approvals"] if a["status"] == "pending")
+
+        response = client.post(
+            f"/event/{event_id}/approvals/{approval['id']}",
+            json={"action": "approve"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == approval["id"]
+        assert data["status"] == "approved"
+        assert data["approved_by"] == "demo"
+
+        listed = client.get(f"/event/{event_id}/approvals")
+        assert listed.status_code == 200
+        stored = next(a for a in listed.json() if a["id"] == approval["id"])
+        assert stored["status"] == "approved"
+
+    def test_event_scoped_approval_reject_does_not_simulate_send(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Rejecting an event approval stores rejection without releasing the gate."""
+        run = client.post("/run", json={"brief": "80 pax launch party with $15000 budget."})
+        assert run.status_code == 200
+        snapshot = run.json()
+        event_id = snapshot["event_id"]
+        approval = next(a for a in snapshot["approvals"] if a["status"] == "pending")
+
+        response = client.post(
+            f"/event/{event_id}/approvals/{approval['id']}",
+            json={"action": "reject"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "rejected"
+        assert data["approved_by"] == "demo"
+        with pytest.raises(PermissionError, match="status is 'rejected'"):
+            enforce(data["action"], Approval(**data))
+
     def test_approval_action_invalid_returns_422(self, client: TestClient) -> None:
         """POST /approvals/{id} with invalid action returns 422."""
         body = {"action": "invalid"}
@@ -263,7 +440,7 @@ class TestApprovals:
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "approved"
-        assert data["approved_by"] == "demo-user"
+        assert data["approved_by"] == "demo"
 
     def test_unapproved_vendor_send_blocked(self) -> None:
         """enforce() raises PermissionError for unapproved send_vendor_message."""

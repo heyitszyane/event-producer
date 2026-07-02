@@ -9,6 +9,7 @@ Reason -> Formatter split:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -72,21 +73,22 @@ _OPERATIONAL_TASKS: list[tuple[str, str, Decimal, list[str], Decimal | None]] = 
 
 def _scope_item_to_schedule_task(
     item: dict,
-    scope_items_by_name: dict[str, dict],
+    task_id: str,
+    dependency_ids_by_category: dict[str, str],
 ) -> ScheduleTask:
     """Convert a scope item dict to a ScheduleTask.
 
     Args:
         item: Scope item dict with at least 'name' and 'category' keys.
-        scope_items_by_name: Lookup of all scope items by name for resolving
-            dependency names to IDs.
+        task_id: Stable unique task ID assigned to this scope item.
+        dependency_ids_by_category: Primary task ID for each dependency
+            category.
 
     Returns:
         A ScheduleTask ready for the CPM scheduler.
     """
     name: str = item["name"]
     category: str = item.get("category", "")
-    task_id: str = category if category else name.lower().replace(" ", "_")
 
     duration: Decimal = _CATEGORY_DURATION.get(category, Decimal("1"))
 
@@ -94,9 +96,9 @@ def _scope_item_to_schedule_task(
     dep_names: list[str] = _CATEGORY_DEPENDENCIES.get(category, [])
     dep_ids: list[str] = []
     for dep_name in dep_names:
-        # The dependency name IS the category key, which is used as the task ID
-        if dep_name in scope_items_by_name or dep_name in _CATEGORY_DURATION:
-            dep_ids.append(dep_name)
+        dep_id = dependency_ids_by_category.get(dep_name)
+        if dep_id:
+            dep_ids.append(dep_id)
 
     lead_time: Decimal | None = _CATEGORY_LEAD_TIME.get(category)
 
@@ -107,6 +109,12 @@ def _scope_item_to_schedule_task(
         dependencies=dep_ids,
         lead_time=lead_time,
     )
+
+
+def _slug(value: str) -> str:
+    """Return a stable, readable task-id segment."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "item"
 
 
 def _schedule_result_to_dict(result: ScheduleResult) -> dict:
@@ -210,35 +218,27 @@ class ProductionManagerReasonAgent:
         # 1. Parse start_time
         start_time: datetime = datetime.fromisoformat(start_time_str)
 
-        # 2. Build scope items lookup by category for dependency resolution
-        scope_items_by_name: dict[str, dict] = {}
-        for item in scope_items:
+        # 2. Build stable unique task IDs, plus a primary category lookup for
+        # dependency resolution when multiple scope items share one category.
+        task_ids_by_index: dict[int, str] = {}
+        dependency_ids_by_category: dict[str, str] = {}
+        for idx, item in enumerate(scope_items):
             cat = item.get("category", "")
-            if cat:
-                scope_items_by_name[cat] = item
-            scope_items_by_name[item["name"]] = item
+            task_id = f"scope-{idx + 1}-{_slug(cat)}-{_slug(item['name'])}"
+            task_ids_by_index[idx] = task_id
+            if cat and cat not in dependency_ids_by_category:
+                dependency_ids_by_category[cat] = task_id
 
         # 3. Convert scope items to ScheduleTask objects
         tasks: list[ScheduleTask] = [
-            _scope_item_to_schedule_task(item, scope_items_by_name)
-            for item in scope_items
+            _scope_item_to_schedule_task(
+                item,
+                task_ids_by_index[idx],
+                dependency_ids_by_category,
+            )
+            for idx, item in enumerate(scope_items)
         ]
         scope_task_ids: set[str] = {t.id for t in tasks}
-
-        # 3b. Strip lead_time from all scope-derived tasks.
-        # The CPM scheduler's forward pass does not natively add lead times —
-        # it only validates them — so keeping lead_time on scope tasks would
-        # always produce lead-time conflicts.  The operational timeline (below)
-        # provides the temporal structure instead.
-        for i, t in enumerate(tasks):
-            if t.lead_time is not None:
-                tasks[i] = ScheduleTask(
-                    id=t.id,
-                    name=t.name,
-                    duration=t.duration,
-                    dependencies=t.dependencies,
-                    lead_time=None,
-                )
 
         # 3c. Append operational run-of-show tasks (load_in → strike) when
         # the scope-derived task count is < 6.  These event-production tasks
@@ -277,7 +277,7 @@ class ProductionManagerReasonAgent:
                         name=t.name,
                         duration=t.duration,
                         dependencies=new_deps,
-                        lead_time=None,
+                        lead_time=t.lead_time,
                     )
 
         # 4. Call compute_schedule from code (NOT as an LLM tool)

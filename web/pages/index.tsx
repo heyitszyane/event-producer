@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ChangeEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
 import Head from 'next/head'
 import EventCommandHeader from '../components/EventCommandHeader'
 import AgentCrewTrace from '../components/AgentCrewTrace'
@@ -14,6 +14,8 @@ import IntakeHero from '../components/IntakeHero'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
+import { apiFetch, getApiBase } from '../lib/api'
+import { humanizeValue } from '../lib/humanize'
 import type {
   BriefIntake,
   ConstraintResolution,
@@ -24,9 +26,6 @@ import type {
   OrchestratorChatResponse,
   RecomputeNotice,
 } from '../types/agentic'
-
-// In production, set NEXT_PUBLIC_API_BASE_URL to the Cloud Run backend URL.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
 
 // Backend-supported event types (must match _SCOPE_CATALOGUE keys)
 const EVENT_TYPES = [
@@ -131,6 +130,134 @@ const PRODUCER_PROMPTS = [
   'Make this more brand/photo-ready',
 ]
 
+type SectionId =
+  | 'overview'
+  | 'brief'
+  | 'ai-crew'
+  | 'scope'
+  | 'budget'
+  | 'run-sheet'
+  | 'approvals'
+  | 'vendors'
+  | 'risks'
+  | 'audit'
+  | 'settings'
+
+const WAR_ROOM_SECTIONS: Array<{ id: SectionId; label: string; code: string }> = [
+  { id: 'overview', label: 'Overview', code: '00' },
+  { id: 'brief', label: 'Brief Intake', code: '01' },
+  { id: 'ai-crew', label: 'AI Crew', code: '02' },
+  { id: 'scope', label: 'Scope', code: '03' },
+  { id: 'budget', label: 'Budget', code: '04' },
+  { id: 'run-sheet', label: 'Run Sheet', code: '05' },
+  { id: 'approvals', label: 'Approvals', code: '06' },
+  { id: 'vendors', label: 'Vendors', code: '07' },
+  { id: 'risks', label: 'Risks', code: '08' },
+  { id: 'audit', label: 'Audit Log', code: '09' },
+  { id: 'settings', label: 'Settings', code: '10' },
+]
+
+function generateEventName(brief: string, fallback?: string): string {
+  if (fallback && fallback.trim()) return fallback.trim()
+  const trimmed = brief.trim()
+  if (!trimmed) return 'Untitled Event'
+  const firstSentence = trimmed.split(/[.!?]/)[0]?.trim() || trimmed
+  return firstSentence
+    .replace(/^need\s+(a|an|the)\s+/i, '')
+    .replace(/^planning\s+(a|an|the)\s+/i, '')
+    .slice(0, 44)
+    .trim() || 'Untitled Event'
+}
+
+const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
+  overview: {
+    route: '00 / Event Overview',
+    title: 'Event Overview',
+    desc: 'A command summary for the current event casefile: state, budget, agents, approval wall, and route links.',
+  },
+  brief: {
+    route: '01 / Brief Intake + Manual Constraints',
+    title: 'Brief Intake + Manual Constraints',
+    desc: 'Messy brief is the primary source. Manual overrides only appear when the user sets them.',
+  },
+  'ai-crew': {
+    route: '02 / AI Production Crew Working Board',
+    title: 'AI Production Crew Working Board',
+    desc: 'Readable agent operations, prompt chips, proposals, and technical trace demotion.',
+  },
+  scope: {
+    route: '03 / Scope Configurator',
+    title: 'Scope Configurator',
+    desc: 'Editable scope ledger for rentals, services, vendors, tiering, quantities, and selected state.',
+  },
+  budget: {
+    route: '04 / Deterministic Budget Ledger',
+    title: 'Deterministic Budget Ledger',
+    desc: 'Budget engine output, tier pressure, contingency, and selected-vs-requested feasibility.',
+  },
+  'run-sheet': {
+    route: '05 / Run Sheet + CPM Timeline',
+    title: 'Run Sheet + CPM Timeline',
+    desc: 'Deterministic schedule, critical path, event anchors, and recompute warnings.',
+  },
+  approvals: {
+    route: '06 / Structural Approval Wall',
+    title: 'Structural Approval Wall',
+    desc: 'Human-gated vendor-facing actions with plain-English diffs and no unapproved execution.',
+  },
+  vendors: {
+    route: '07 / Vendors Directory',
+    title: 'Vendor Directory',
+    desc: 'Vendor records, drafts, quote status, and data-not-instruction security fixture.',
+  },
+  risks: {
+    route: '08 / Risks, Gaps + Operational Checks',
+    title: 'Risks, Gaps + Operational Checks',
+    desc: 'Budget realism, missing vendors, permit checks, and lead-time warnings.',
+  },
+  audit: {
+    route: '09 / Production Log + Technical Trace',
+    title: 'Production Log + Technical Trace',
+    desc: 'Read-only evidence route for trace, provenance, logs, and public-claim proof.',
+  },
+  settings: {
+    route: '10 / Provider Settings',
+    title: 'Provider Settings',
+    desc: 'Configure Gemini, OpenRouter, LM Studio, or another local OpenAI-compatible model for this dev server.',
+  },
+}
+
+type ProviderName = 'gemini' | 'openrouter' | 'openai_compatible' | 'local' | 'ollama' | 'lmstudio'
+
+interface ModelSettings {
+  provider: ProviderName
+  live_enabled: boolean
+  effective_mode: string
+  model_name: string
+  api_base_url?: string | null
+  has_api_key: boolean
+  fallback_reason?: string | null
+  env_path: string
+  restart_required: boolean
+}
+
+const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
+  { value: 'gemini', label: 'Gemini' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'lmstudio', label: 'LM Studio' },
+  { value: 'ollama', label: 'Ollama' },
+  { value: 'local', label: 'Local OpenAI-compatible' },
+  { value: 'openai_compatible', label: 'Hosted OpenAI-compatible' },
+]
+
+function providerDefaults(provider: ProviderName): { modelName: string; apiBaseUrl: string } {
+  if (provider === 'gemini') return { modelName: 'gemini-2.5-flash', apiBaseUrl: '' }
+  if (provider === 'openrouter') return { modelName: 'google/gemini-2.5-flash', apiBaseUrl: '' }
+  if (provider === 'ollama') return { modelName: 'qwen2.5-coder:latest', apiBaseUrl: 'http://127.0.0.1:11434/v1/chat/completions' }
+  if (provider === 'lmstudio') return { modelName: 'qwen/qwen3.5-9b', apiBaseUrl: 'http://127.0.0.1:1234/v1/chat/completions' }
+  return { modelName: 'qwen2.5-coder:latest', apiBaseUrl: 'http://127.0.0.1:1234/v1/chat/completions' }
+}
+
 interface FieldErrors {
   brief?: string
   budgetCap?: string
@@ -182,25 +309,11 @@ function validateForm(data: FormData): { valid: boolean; errors: FieldErrors } {
   return { valid: Object.keys(errors).length === 0, errors }
 }
 
-async function parseApiError(res: Response): Promise<string> {
-  const text = await res.text()
-  try {
-    const data = JSON.parse(text)
-    if (data?.error?.message) {
-      return data.error.message
-    }
-    if (data?.detail) {
-      if (Array.isArray(data.detail)) {
-        return data.detail.map((d: { msg?: string; loc?: string[] }) =>
-          d.msg ? `${d.loc?.join('.') ? d.loc.join('.') + ': ' : ''}${d.msg}` : JSON.stringify(d)
-        ).join('; ')
-      }
-      return String(data.detail)
-    }
-    return data?.message || text
-  } catch {
-    return text || `HTTP ${res.status}`
-  }
+async function postRunRequest(body: Record<string, unknown>): Promise<Response> {
+  return apiFetch('/run', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 // P7D: attendees and contingency defaults are NOT pre-filled to avoid silently
@@ -224,7 +337,99 @@ export default function Dashboard() {
   const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
   const [chatReply, setChatReply] = useState<string | null>(null)
   const [producerLoading, setProducerLoading] = useState(false)
+  const [producerError, setProducerError] = useState<string | null>(null)
   const [recomputeNotice, setRecomputeNotice] = useState<RecomputeNotice | null>(null)
+  const [activeSection, setActiveSection] = useState<SectionId>('overview')
+  const [eventNameOverride, setEventNameOverride] = useState('')
+  const [editingEventName, setEditingEventName] = useState(false)
+  const [modelSettings, setModelSettings] = useState<ModelSettings | null>(null)
+  const [settingsProvider, setSettingsProvider] = useState<ProviderName>('gemini')
+  const [settingsModelName, setSettingsModelName] = useState('')
+  const [settingsApiBaseUrl, setSettingsApiBaseUrl] = useState('')
+  const [settingsApiKey, setSettingsApiKey] = useState('')
+  const [settingsLiveEnabled, setSettingsLiveEnabled] = useState(true)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '') as SectionId
+    if (WAR_ROOM_SECTIONS.some((section) => section.id === hash)) {
+      setActiveSection(hash)
+    }
+  }, [])
+
+  useEffect(() => {
+    async function loadInitialModelSettings() {
+      try {
+        const res = await apiFetch('/settings/model')
+        const data: ModelSettings = await res.json()
+        setModelSettings(data)
+        setSettingsProvider(data.provider)
+        setSettingsModelName(data.model_name || providerDefaults(data.provider).modelName)
+        setSettingsApiBaseUrl(data.api_base_url || providerDefaults(data.provider).apiBaseUrl)
+        setSettingsLiveEnabled(data.live_enabled)
+      } catch (err) {
+        setSettingsError(err instanceof Error ? err.message : String(err))
+      }
+    }
+    loadInitialModelSettings()
+  }, [])
+
+  function applyModelSettings(data: ModelSettings) {
+    setModelSettings(data)
+    setSettingsProvider(data.provider)
+    setSettingsModelName(data.model_name || providerDefaults(data.provider).modelName)
+    setSettingsApiBaseUrl(data.api_base_url || providerDefaults(data.provider).apiBaseUrl)
+    setSettingsLiveEnabled(data.live_enabled)
+  }
+
+  async function loadModelSettings() {
+    const res = await apiFetch('/settings/model')
+    const data: ModelSettings = await res.json()
+    applyModelSettings(data)
+  }
+
+  function handleProviderChange(nextProvider: ProviderName) {
+    const defaults = providerDefaults(nextProvider)
+    setSettingsProvider(nextProvider)
+    setSettingsModelName(defaults.modelName)
+    setSettingsApiBaseUrl(defaults.apiBaseUrl)
+    setSettingsMessage(null)
+    setSettingsError(null)
+  }
+
+  async function saveModelSettings(e: FormEvent) {
+    e.preventDefault()
+    setSettingsSaving(true)
+    setSettingsMessage(null)
+    setSettingsError(null)
+    try {
+      const res = await apiFetch('/settings/model', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider: settingsProvider,
+          model_name: settingsModelName.trim(),
+          api_base_url: settingsApiBaseUrl.trim(),
+          api_key: settingsApiKey.trim() ? settingsApiKey.trim() : null,
+          live_enabled: settingsLiveEnabled,
+        }),
+      })
+      const data: ModelSettings = await res.json()
+      applyModelSettings(data)
+      setSettingsApiKey('')
+      setSettingsMessage('Saved to local .env and refreshed the running backend.')
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
+
+  function navigate(section: SectionId) {
+    setActiveSection(section)
+    window.history.replaceState(null, '', `#${section}`)
+  }
 
   async function handleRun(e: FormEvent) {
     e.preventDefault()
@@ -285,18 +490,7 @@ export default function Dashboard() {
       }
       body.manual_constraints = manualConstraints
 
-      const res = await fetch(`${API_BASE}/run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User': 'demo-user',
-        },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const message = await parseApiError(res)
-        throw new Error(message)
-      }
+      const res = await postRunRequest(body)
       const data: RunEventResponse = await res.json()
       setResult(data)
       setHasRun(true)
@@ -304,8 +498,8 @@ export default function Dashboard() {
     } catch (err) {
       if (err instanceof TypeError && err.message === 'Failed to fetch') {
         setError(
-          `Backend is unreachable. Start the backend with: ` +
-          `python3 -m uvicorn event_producer.main:create_app --factory --host 127.0.0.1 --port 8080 --reload`
+          `Backend is unreachable at ${getApiBase()}. Start the backend on the same host/port, ` +
+          `or set NEXT_PUBLIC_API_BASE_URL to the backend you are running.`
         )
       } else {
         setError(err instanceof Error ? err.message : String(err))
@@ -322,30 +516,42 @@ export default function Dashboard() {
   const chatLog = result?.chat_log || []
   const riskFlags = result?.risk_flags || result?.run_of_show?.risk_flags || []
   const securityBeat = result?.security_beat
+  const attendeeSource = result?.constraint_resolution?.attendees?.source
 
   // Hero strip budget health
   const budgetSummary = result?.budget_summary
   const scheduleResult = result?.schedule_result
   const criticalCount = scheduleResult?.critical_path?.length || 0
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
+  const activeMeta = ROUTE_META[activeSection]
+  const headroomNumber = budgetSummary?.headroom ? Number(budgetSummary.headroom) : null
+  const runtimeCode = result?.model_mode_summary?.brief_intake
+    ? String(result.model_mode_summary.brief_intake).includes('rule')
+      ? 'RB'
+      : 'AI'
+    : '-'
+  const runtimeLabel = result?.model_mode_summary?.brief_intake
+    ? humanizeValue(result.model_mode_summary.brief_intake)
+    : 'Awaiting run'
+  const sourceLabel = attendeeSource === 'brief_extracted' ? 'attendees from brief' : attendeeSource ? `source: ${attendeeSource}` : 'awaiting run'
 
   // P7B — orchestrator chat handler
   async function sendProducerPrompt(message: string) {
     if (!result?.event_id || !message.trim()) return
 
     setProducerLoading(true)
-    const res = await fetch(`${API_BASE}/event/${result.event_id}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
-      body: JSON.stringify({ message }),
-    })
+    setProducerError(null)
     try {
-      if (res.ok) {
-        const data: OrchestratorChatResponse = await res.json()
-        setChatReply(data.reply)
-        setOrchestratorProposals(data.proposals)
-        setChatInput('')
-      }
+      const res = await apiFetch(`/event/${result.event_id}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+      })
+      const data: OrchestratorChatResponse = await res.json()
+      setChatReply(data.reply)
+      setOrchestratorProposals(data.proposals)
+      setChatInput('')
+    } catch (err) {
+      setProducerError(err instanceof Error ? err.message : String(err))
     } finally {
       setProducerLoading(false)
     }
@@ -376,25 +582,29 @@ export default function Dashboard() {
   // P7B — apply a proposal
   async function applyProposal(proposal: ProposedAction) {
     if (!result?.event_id) return
-    const res = await fetch(`${API_BASE}/event/${result.event_id}/proposals/${proposal.id}/apply`, {
-      method: 'POST',
-      headers: { 'X-Demo-User': 'demo-user' },
-    })
-    if (res.ok) {
+    setProducerError(null)
+    try {
+      const res = await apiFetch(`/event/${result.event_id}/proposals/${proposal.id}/apply`, {
+        method: 'POST',
+      })
       const data = await res.json()
       applyMutationPayload(data)
       setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+    } catch (err) {
+      setProducerError(err instanceof Error ? err.message : String(err))
     }
   }
 
   async function dismissProposal(proposal: ProposedAction) {
     if (!result?.event_id) return
-    const res = await fetch(`${API_BASE}/event/${result.event_id}/proposals/${proposal.id}/dismiss`, {
-      method: 'POST',
-      headers: { 'X-Demo-User': 'demo-user' },
-    })
-    if (res.ok) {
+    setProducerError(null)
+    try {
+      await apiFetch(`/event/${result.event_id}/proposals/${proposal.id}/dismiss`, {
+        method: 'POST',
+      })
       setOrchestratorProposals((prev) => prev.filter((p) => p.id !== proposal.id))
+    } catch (err) {
+      setProducerError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -408,314 +618,504 @@ export default function Dashboard() {
   }) {
     if (!result?.event_id) return
     const cost = suggestion.estimated_cost || '1000'
-    const res = await fetch(`${API_BASE}/event/${result.event_id}/scope-items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Demo-User': 'demo-user' },
-      body: JSON.stringify({
-        name: suggestion.title,
-        description: suggestion.description,
-        category: suggestion.category,
-        tier: (suggestion.tier as 'must' | 'should' | 'could' | 'wow') || 'could',
-        estimated_cost: cost,
-        qty: '1',
-      }),
-    })
-    if (res.ok) {
+    setProducerError(null)
+    try {
+      const res = await apiFetch(`/event/${result.event_id}/scope-items`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: suggestion.title,
+          description: suggestion.description,
+          category: suggestion.category,
+          tier: (suggestion.tier as 'must' | 'should' | 'could' | 'wow') || 'could',
+          estimated_cost: cost,
+          qty: '1',
+        }),
+      })
       const data = await res.json()
       applyMutationPayload(data)
+    } catch (err) {
+      setProducerError(err instanceof Error ? err.message : String(err))
     }
   }
 
   const realismWarnings = result?.brief_intake?.market_realism_warnings ?? []
   const hasRealismRisk = realismWarnings.length > 0
-  const attendeeSource = result?.constraint_resolution?.attendees?.source
+  const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : hasRealismRisk ? 'AT RISK' : result ? 'ON TRACK' : 'AWAITING BRIEF'
+  const eventTitle = eventNameOverride || generateEventName(brief, result?.event_spec?.name)
+  const headerTitle = eventTitle
+  const producerConsole = result ? (
+    <section className="war-panel producer-console" id="orchestrator-chat">
+      <div className="war-panel__header">
+        <div>
+          <span className="war-eyebrow">Producer actions</span>
+          <h2>Ask the AI Producer</h2>
+        </div>
+        <span className="badge badge--fallback">event-aware proposals</span>
+      </div>
+      <div className="prompt-chips">
+        {PRODUCER_PROMPTS.map((prompt) => (
+          <button key={prompt} className="btn btn--ghost btn--sm" type="button" onClick={() => sendProducerPrompt(prompt)} disabled={producerLoading}>
+            {prompt}
+          </button>
+        ))}
+      </div>
+      <form onSubmit={handleOrchestratorChat} className="ai-producer-form">
+        <textarea
+          value={chatInput}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
+          placeholder="Ask for cuts, premium swaps, vendor additions, or assumption checks"
+          disabled={!result?.event_id || producerLoading}
+          rows={5}
+          className="ai-producer-textarea"
+        />
+        <button type="submit" disabled={!result?.event_id || producerLoading || !chatInput.trim()} className="btn btn--primary">
+          {producerLoading ? 'Thinking...' : 'Ask'}
+        </button>
+      </form>
+      {producerError && (
+        <div className="error-bar" role="alert" aria-live="polite">
+          {producerError}
+        </div>
+      )}
+      {chatReply && (
+        <div className="block block--info">
+          <strong>Producer reply:</strong> {chatReply}
+        </div>
+      )}
+      {orchestratorProposals.length > 0 && (
+        <div className="proposal-ledger">
+          {orchestratorProposals.map((p) => (
+            <div key={p.id} className="war-inset">
+              <div className="war-inset__topline">
+                <strong>{p.title}</strong>
+                <span className="badge badge--info">{String(p.payload?.tier || p.type)}</span>
+              </div>
+              <p>{p.rationale}</p>
+              {p.payload?.estimated_cost !== undefined && p.payload?.estimated_cost !== null && (
+                <p className="muted">Budget impact: ${String(p.payload.estimated_cost)}</p>
+              )}
+              <div className="cluster">
+                <button onClick={() => applyProposal(p)} className="btn btn--primary btn--sm" type="button">Apply</button>
+                <button onClick={() => dismissProposal(p)} className="btn btn--ghost btn--sm" type="button">Dismiss</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {recomputeNotice?.message && (
+        <div className={recomputeNotice.schedule_status === 'warning' ? 'block block--warn' : 'block block--info'}>
+          {recomputeNotice.message}
+        </div>
+      )}
+    </section>
+  ) : null
+
+  const budgetBasis = result ? {
+    attendees: result.constraint_resolution?.attendees?.resolved_value ?? result.event_spec?.attendees,
+    location: result.constraint_resolution?.location?.resolved_value ? String(result.constraint_resolution.location.resolved_value) : result.brief_intake?.location ?? null,
+    contingencyPct: result.constraint_resolution?.contingency_pct?.resolved_value ?? result.budget_summary?.contingency_pct,
+    source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'mixed',
+  } : undefined
+
+  function renderActiveSection() {
+    if (loading) {
+      return (
+        <section className="war-panel">
+          <div className="loading-state">
+            <div className="loading-spinner" />
+            <p>Running event production pipeline...</p>
+          </div>
+        </section>
+      )
+    }
+
+    if (!result && activeSection !== 'brief' && activeSection !== 'overview' && activeSection !== 'settings') {
+      return (
+        <section className="war-panel empty-state">
+          <p>Start with Brief Intake, then run the AI production crew to populate the war room.</p>
+        </section>
+      )
+    }
+
+    switch (activeSection) {
+      case 'overview':
+        return (
+          <div className="war-overview-grid">
+            <div className="war-stack">
+              <section className="war-panel overview-panel">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Casefile / Current Event</span>
+                  <span className={`status-stamp ${eventState === 'ON TRACK' ? 'status-stamp--ok' : eventState === 'AT RISK' ? 'status-stamp--warn' : 'status-stamp--critical'}`}>
+                    {eventState}
+                  </span>
+                </div>
+                <p className="brief-basis body-copy">
+                  {result?.brief_intake?.normalized_brief || brief || 'No brief has been run yet.'}
+                </p>
+                <div className="war-navmap">
+                  <button type="button" onClick={() => navigate('brief')}><b>01 Intake</b><span>Brief is primary. Manual constraints only apply when set.</span></button>
+                  <button type="button" onClick={() => navigate('ai-crew')}><b>02 Agents</b><span>Production crew extracts, critiques, proposes, and gates actions.</span></button>
+                  <button type="button" onClick={() => navigate('scope')}><b>03 Config</b><span>Scope, budget, and run sheet update from structured mutations.</span></button>
+                  <button type="button" onClick={() => navigate('approvals')}><b>04 Approval</b><span>Vendor-facing actions are held behind the human wall.</span></button>
+                  <button type="button" onClick={() => navigate('audit')}><b>05 Audit</b><span>Trace, logs, provenance, and evidence.</span></button>
+                </div>
+              </section>
+              <AIProductionCrew
+                trace={agentTrace}
+                modelModeSummary={result?.model_mode_summary}
+                briefIntake={result?.brief_intake ?? null}
+                budgetSummary={result?.budget_summary}
+                scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
+              />
+            </div>
+            <div className="war-stack">
+              <section className="war-panel approval-card overview-approval">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Approval Wall</span>
+                  <span className="badge badge--critical">{pendingApprovalCount} pending</span>
+                </div>
+                {pendingApprovalCount > 0 ? (
+                  <>
+                    <h3>{approvals.find((approval) => approval.status === 'pending')?.action || 'Pending gated action'}</h3>
+                    <p className="small">External/vendor-facing action requires human approval. No outbound action has executed.</p>
+                    <div className="diff-block">
+                      Requested by {approvals.find((approval) => approval.status === 'pending')?.requested_by || 'Vendor Coordinator'}.
+                      State mutation remains blocked until approval.
+                    </div>
+                    <div className="cluster">
+                      <button className="btn btn--primary btn--sm" type="button" onClick={() => navigate('approvals')}>Open Approval Wall</button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="callout callout--success">No pending approvals. Vendor actions remain gated when they appear.</div>
+                )}
+              </section>
+              <section className="war-panel">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Budget Realism</span>
+                  <span className="badge badge--fallback">computed</span>
+                </div>
+                <div className={hasRealismRisk ? 'callout callout--warning' : 'callout callout--success'}>
+                  <b>{hasRealismRisk ? 'Full requested scope pressure.' : 'Selected scope basis.'}</b><br />
+                  <span className="small">{realismWarnings[0] || 'Run an event to see selected scope, headroom, and requested-scope pressure.'}</span>
+                </div>
+                <table className="data-table overview-basis-table">
+                  <tbody>
+                    <tr><th>Basis</th><th>Value</th></tr>
+                    <tr><td>Attendees</td><td>{String(result?.event_spec?.attendees || result?.brief_intake?.attendees || '-')} <span className="badge badge--ok">brief</span></td></tr>
+                    <tr><td>Budget cap</td><td>{budgetSummary?.budget_cap ? `$${Number(budgetSummary.budget_cap).toLocaleString()}` : '-'} <span className="badge badge--ok">brief</span></td></tr>
+                    <tr><td>Manual overrides</td><td>{budgetBasis?.source === 'brief' ? 'None set' : 'Mixed'} <span className="badge badge--fallback">safe</span></td></tr>
+                  </tbody>
+                </table>
+              </section>
+            </div>
+          </div>
+        )
+      case 'brief':
+        return (
+          <div className="war-stack">
+            <IntakeHero brief={brief} onBriefChange={setBrief} onSubmit={handleRun} loading={loading} hasRun={hasRun} />
+            <EventCommandHeader
+              eventSpec={result?.event_spec || null}
+              formData={{ brief, budgetCap, contingencyPct, attendees, eventType, venueType, date }}
+              formHandlers={{ setBrief, setBudgetCap, setContingencyPct, setAttendees: (v) => setAttendees(v), setEventType, setVenueType, setDate }}
+              fieldErrors={fieldErrors}
+              onRun={handleRun}
+              loading={loading}
+              running={hasRun}
+            />
+            <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
+          </div>
+        )
+      case 'ai-crew':
+        return (
+          <div className="war-stack">
+            <AIProductionCrew
+              trace={agentTrace}
+              modelModeSummary={result?.model_mode_summary}
+              briefIntake={result?.brief_intake ?? null}
+              budgetSummary={result?.budget_summary}
+              scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
+              onPromptChipClick={sendProducerPrompt}
+            />
+            {producerConsole}
+            <CreativeConcept concept={result?.creative_concept ?? null} onAddToScope={handleAddToScope} />
+          </div>
+        )
+      case 'scope':
+        return (
+          <div className="war-stack">
+            <ScopeCard items={result?.scope_items || []} eventId={result?.event_id} onMutation={applyMutationPayload} />
+            {recomputeNotice?.message && <div className="block block--info">{recomputeNotice.message}</div>}
+          </div>
+        )
+      case 'budget':
+        return <BudgetCard budget={result?.budget_summary || null} warnings={realismWarnings} basis={budgetBasis} />
+      case 'run-sheet':
+        return <RunOfShowCard schedule={result?.schedule_result} callSheet={result?.call_sheet || []} />
+      case 'approvals':
+        return (
+          <div className="war-stack">
+            <ApprovalInbox approvals={approvals} eventId={result?.event_id} defaultExpanded />
+            <SecurityBeat securityBeat={securityBeat || null} />
+          </div>
+        )
+      case 'vendors':
+        return <VendorsCard vendors={vendors} />
+      case 'risks':
+        return (
+          <div className="war-stack">
+            <RiskCard risks={riskFlags} />
+            {realismWarnings.length > 0 && (
+              <section className="war-panel">
+                <div className="war-panel__header"><h2>Budget Realism Risks</h2></div>
+                <ul className="bullets">{realismWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+              </section>
+            )}
+          </div>
+        )
+      case 'audit':
+        return (
+          <div className="war-stack">
+            <section className="war-panel production-log">
+              <div className="production-log-header">
+                <span>Production Log</span>
+                <span>{chatLog.length} entries</span>
+              </div>
+              <ChatPane messages={chatLog} showHeader={false} />
+            </section>
+            <AgentCrewTrace steps={agentTrace} />
+            <SecurityBeat securityBeat={securityBeat || null} />
+          </div>
+        )
+      case 'settings':
+        return (
+          <div className="settings-grid">
+            <section className="war-panel settings-panel">
+              <div className="war-panel__header">
+                <div>
+                  <span className="war-eyebrow">Model harness</span>
+                  <h2>Provider Settings</h2>
+                </div>
+                <span className={`badge ${modelSettings?.effective_mode === 'rule_based_fallback' ? 'badge--fallback' : 'badge--live'}`}>
+                  {modelSettings ? humanizeValue(modelSettings.effective_mode) : 'loading'}
+                </span>
+              </div>
+              <form className="settings-form" onSubmit={saveModelSettings}>
+                <label className="field-compact">
+                  Provider
+                  <select
+                    className="select"
+                    value={settingsProvider}
+                    onChange={(e) => handleProviderChange(e.target.value as ProviderName)}
+                  >
+                    {PROVIDER_OPTIONS.map((provider) => (
+                      <option key={provider.value} value={provider.value}>{provider.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-compact">
+                  Model
+                  <input
+                    className="input"
+                    value={settingsModelName}
+                    onChange={(e) => setSettingsModelName(e.target.value)}
+                    placeholder={providerDefaults(settingsProvider).modelName}
+                  />
+                </label>
+                {settingsProvider !== 'gemini' && settingsProvider !== 'openrouter' && (
+                  <label className="field-compact settings-form__wide">
+                    Base URL
+                    <input
+                      className="input"
+                      value={settingsApiBaseUrl}
+                      onChange={(e) => setSettingsApiBaseUrl(e.target.value)}
+                      placeholder={providerDefaults(settingsProvider).apiBaseUrl}
+                    />
+                  </label>
+                )}
+                <label className="field-compact settings-form__wide">
+                  API key
+                  <input
+                    className="input"
+                    type="password"
+                    value={settingsApiKey}
+                    onChange={(e) => setSettingsApiKey(e.target.value)}
+                    placeholder={modelSettings?.has_api_key ? 'Existing key loaded - leave blank to keep it' : 'Paste key if this provider requires one'}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field-compact field-compact--checkbox settings-form__wide">
+                  <input
+                    type="checkbox"
+                    checked={settingsLiveEnabled}
+                    onChange={(e) => setSettingsLiveEnabled(e.target.checked)}
+                  />
+                  Enable live model calls
+                </label>
+                <div className="settings-actions settings-form__wide">
+                  <button className="btn btn--primary" type="submit" disabled={settingsSaving}>
+                    {settingsSaving ? 'Saving...' : 'Save Provider'}
+                  </button>
+                  <button className="btn btn--ghost" type="button" onClick={() => loadModelSettings()} disabled={settingsSaving}>
+                    Refresh Status
+                  </button>
+                </div>
+              </form>
+              {settingsMessage && <div className="callout callout--success">{settingsMessage}</div>}
+              {settingsError && <div className="error-bar" role="alert">{settingsError}</div>}
+            </section>
+            <section className="war-panel settings-panel">
+              <div className="war-panel__header">
+                <span className="war-panel-title">Current Backend Runtime</span>
+                <span className={`badge ${modelSettings?.has_api_key ? 'badge--ok' : 'badge--fallback'}`}>
+                  {modelSettings?.has_api_key ? 'key loaded' : 'no key loaded'}
+                </span>
+              </div>
+              <table className="data-table settings-table">
+                <tbody>
+                  <tr><th>Provider</th><td>{modelSettings?.provider || '-'}</td></tr>
+                  <tr><th>Live calls</th><td>{modelSettings?.live_enabled ? 'Enabled' : 'Disabled'}</td></tr>
+                  <tr><th>Mode</th><td>{modelSettings ? humanizeValue(modelSettings.effective_mode) : '-'}</td></tr>
+                  <tr><th>Model</th><td>{modelSettings?.model_name || '-'}</td></tr>
+                  <tr><th>Base URL</th><td>{modelSettings?.api_base_url || '-'}</td></tr>
+                  <tr><th>.env</th><td>{modelSettings?.env_path || '-'}</td></tr>
+                </tbody>
+              </table>
+              <div className={modelSettings?.fallback_reason ? 'callout callout--warning' : 'callout callout--success'}>
+                {modelSettings?.fallback_reason || 'Provider settings are loaded for the current backend process.'}
+              </div>
+            </section>
+          </div>
+        )
+      default:
+        return null
+    }
+  }
 
   return (
     <>
       <Head>
-        <title>Event Producer — Mission Control</title>
+        <title>Event Producer — Paper War Room</title>
         <meta name="description" content="AI production crew for brand/experiential events" />
       </Head>
 
-      {/* ── Hero strip ── */}
-      {result && (
-        <div className="hero-strip">
-          <div className="hero-strip__inner">
-            <div className="hero-strip__identity">
-              <h1 className="hero-strip__title">
-                {String(result.event_spec?.name || 'Event')}
-              </h1>
-              <span className="hero-strip__meta">
-                {String(result.event_spec?.event_type || '—')} &middot;{' '}
-                {String(result.event_spec?.date || '—')} &middot;{' '}
-                {String(result.event_spec?.attendees || '—')} attendees
-              </span>
-            </div>
-            <div className="hero-strip__metrics">
-              <div className="hero-metric">
-                <span className="hero-metric__value hero-metric__value--ok">
-                  {budgetSummary
-                    ? `$${Math.round(parseFloat(String(budgetSummary.headroom || '0'))).toLocaleString('en-US')}`
-                    : '—'}
-                </span>
-                <span className="hero-metric__label">Headroom</span>
-              </div>
-              <div className="hero-metric">
-                <span className={`hero-metric__value ${
-                  budgetSummary?.over_budget
-                    ? 'hero-metric__value--critical'
-                    : hasRealismRisk
-                      ? 'hero-metric__value--warn'
-                      : 'hero-metric__value--ok'
-                }`}>
-                  {budgetSummary?.over_budget
-                    ? 'OVER BUDGET'
-                    : hasRealismRisk
-                      ? 'AT RISK'
-                      : 'ON TRACK'}
-                </span>
-                <span className="hero-metric__label">Budget</span>
-              </div>
-              <div className="hero-metric">
-                <span className="hero-metric__value">
-                  {scheduleResult?.ordered_tasks?.length || 0} tasks
-                </span>
-                <span className="hero-metric__label">
-                  {criticalCount > 0 ? `${criticalCount} critical` : 'Schedule'}
-                </span>
-              </div>
-              {pendingApprovalCount > 0 && (
-                <div className="hero-metric">
-                  <span className="hero-metric__value hero-metric__value--warn">
-                    {pendingApprovalCount}
-                  </span>
-                  <span className="hero-metric__label">Pending Approval</span>
-                </div>
-              )}
-            </div>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
+      <div className="war-room">
+        <aside className="war-room__nav" aria-label="Paper War Room sections">
+          <div className="war-room__brand">
+            <strong>Event<br />Producer</strong>
+            <small>Operational casefile</small>
           </div>
-        </div>
-      )}
-
-      {/* ── P7A: primary intake (messy brief) ── */}
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-6) var(--space-6) 0' }}>
-        <IntakeHero
-          brief={brief}
-          onBriefChange={setBrief}
-          onSubmit={handleRun}
-          loading={loading}
-          hasRun={hasRun}
-        />
-      </div>
-
-      {/* ── Constraints / manual overrides ── */}
-      <EventCommandHeader
-        eventSpec={result?.event_spec || null}
-        formData={{
-          brief,
-          budgetCap,
-          contingencyPct,
-          attendees,
-          eventType,
-          venueType,
-          date,
-        }}
-        formHandlers={{
-          setBrief,
-          setBudgetCap,
-          setContingencyPct,
-          setAttendees: (v) => setAttendees(v),
-          setEventType,
-          setVenueType,
-          setDate,
-        }}
-        fieldErrors={fieldErrors}
-        onRun={handleRun}
-        loading={loading}
-        running={hasRun}
-      />
-
-      <main>
-        {/* Error bar */}
-        {error && (
-          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-3) var(--space-6)' }}>
-            <div className="error-bar" role="alert">
-              <span>{
-                error.includes('Failed to fetch') || error.includes('unreachable')
-                  ? error
-                  : `Error: ${error}`
-              }</span>
+          <div className="side-section-title">Route Map</div>
+          <nav>
+            {WAR_ROOM_SECTIONS.map((section) => (
               <button
-                onClick={() => setError(null)}
-                style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: 'var(--text-md)', lineHeight: 1 }}
-                aria-label="Dismiss error"
+                key={section.id}
+                type="button"
+                className={activeSection === section.id ? 'war-nav-item war-nav-item--active' : 'war-nav-item'}
+                onClick={() => navigate(section.id)}
               >
-                ×
+                <span>{section.code}</span>
+                {section.label}
               </button>
-            </div>
+            ))}
+          </nav>
+          <div className="war-room__nav-footer">
+            <span className="war-eyebrow">STATE</span>
+            <strong>{eventState}</strong>
+            <small>Runtime: {runtimeLabel}</small>
+            <small>{hasRun ? `Last run ${new Date().toLocaleTimeString()}` : 'No run yet'}</small>
           </div>
-        )}
+        </aside>
 
-        {/* Pre-run empty state */}
-        {!result && !error && !loading && (
-          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-8) var(--space-6)' }}>
-            <div className="empty-state" style={{ textAlign: 'center', padding: 'var(--space-12)' }}>
-              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)' }}>
-                Describe your event in the brief above and click{' '}
-                <strong>Analyze with AI Production Crew</strong>.
-              </p>
-              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-tertiary)' }}>
-                The AI production crew interprets the brief, proposes a creative
-                direction, and runs deterministic budget + scheduling engines.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Loading state */}
-        {loading && (
-          <div style={{ maxWidth: 1200, margin: '0 auto', padding: 'var(--space-8) var(--space-6)' }}>
-            <div className="loading-state" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-              <div className="loading-spinner" />
-              <p style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)', marginTop: 'var(--space-4)' }}>
-                Running event production pipeline...
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* P7D: AI Production Crew promoted above fold */}
-        {result && (
-          <AIProductionCrew
-            trace={agentTrace}
-            modelModeSummary={result.model_mode_summary}
-            briefIntake={result.brief_intake ?? null}
-            budgetSummary={result.budget_summary}
-            scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
-          />
-        )}
-
-        {result && (
-          <section className="card producer-console" id="orchestrator-chat" style={{ maxWidth: 1200, margin: 'var(--space-4) auto', padding: 'var(--space-3)' }}>
-            <div className="card__header">
-              <h2>Ask the AI Producer</h2>
-              <span className="badge badge--fallback">event-aware proposals</span>
-            </div>
-            <div className="prompt-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)', marginBottom: 'var(--space-3)' }}>
-              {PRODUCER_PROMPTS.map((prompt) => (
-                <button key={prompt} className="btn btn--ghost btn--sm" type="button" onClick={() => sendProducerPrompt(prompt)} disabled={producerLoading}>
-                  {prompt}
+        <main className="war-room__main" id="main-content">
+          <header className="war-room__header">
+            <div>
+              <span className="war-eyebrow">{activeMeta.route}</span>
+              {editingEventName ? (
+                <input
+                  className="event-title-input"
+                  value={eventTitle}
+                  autoFocus
+                  onChange={(e) => setEventNameOverride(e.target.value)}
+                  onBlur={() => setEditingEventName(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setEditingEventName(false)
+                    if (e.key === 'Escape') {
+                      setEventNameOverride('')
+                      setEditingEventName(false)
+                    }
+                  }}
+                  aria-label="Edit event name"
+                />
+              ) : (
+                <button className="event-title-button" type="button" onClick={() => setEditingEventName(true)}>
+                  {headerTitle}
                 </button>
-              ))}
+              )}
+              <div className="local-title-note">Local title draft - does not mutate backend event identity.</div>
+              <p>{activeMeta.desc}</p>
             </div>
-            <form onSubmit={handleOrchestratorChat} style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'stretch', flexWrap: 'wrap' }}>
-              <textarea
-                value={chatInput}
-                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
-                placeholder="Ask for cuts, premium swaps, vendor additions, or assumption checks"
-                disabled={!result?.event_id || producerLoading}
-                rows={2}
-                style={{ flex: '1 1 420px' }}
-              />
-              <button type="submit" disabled={!result?.event_id || producerLoading || !chatInput.trim()} className="btn btn--primary">
-                {producerLoading ? 'Thinking...' : 'Ask'}
-              </button>
-            </form>
-            {chatReply && (
-              <div className="block block--info" style={{ marginTop: 'var(--space-3)' }}>
-                <strong>Producer reply:</strong> {chatReply}
-              </div>
-            )}
-            {orchestratorProposals.length > 0 && (
-              <div style={{ marginTop: 'var(--space-3)', display: 'grid', gap: 'var(--space-2)' }}>
-                {orchestratorProposals.map((p) => (
-                  <div key={p.id} className="card card--inset">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                      <strong>{p.title}</strong>
-                      <span className="badge badge--info">{String(p.payload?.tier || p.type)}</span>
-                    </div>
-                    <p style={{ margin: 'var(--space-1) 0', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{p.rationale}</p>
-                    {p.payload?.estimated_cost !== undefined && p.payload?.estimated_cost !== null && (
-                      <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)' }}>
-                        Budget impact: ${String(p.payload.estimated_cost)}
-                      </p>
-                    )}
-                    <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)' }}>
-                      <button onClick={() => applyProposal(p)} className="btn btn--primary btn--sm" type="button">Apply</button>
-                      <button onClick={() => dismissProposal(p)} className="btn btn--ghost btn--sm" type="button">Dismiss</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {recomputeNotice?.message && (
-              <div className={recomputeNotice.schedule_status === 'warning' ? 'block block--warn' : 'block block--info'} style={{ marginTop: 'var(--space-3)' }}>
-                {recomputeNotice.message}
-              </div>
-            )}
+            <div className="top-actions">
+              <button className="btn btn--ghost" type="button" onClick={() => navigate('audit')}>Open casefile</button>
+              <button className="btn btn--ghost" type="button" onClick={() => setBrief([
+                'Need a 100-pax AI founder networking night in Singapore next Thursday.',
+                'Budget is around 10k SGD. Want it to feel premium but not flashy.',
+                'Light F&B, a short fireside chat, and a few structured networking prompts.',
+                'No full conference setup. Audience is founders, investors, and AI builders.',
+              ].join(' '))}>Copy Demo Brief</button>
+              <button className="btn btn--primary" type="button" onClick={() => navigate('brief')}>Run Event</button>
+            </div>
+          </header>
+
+          <section className="war-metrics" aria-label="Top metrics">
+            <div>
+              <label>Budget Headroom</label>
+              <span className={budgetSummary?.over_budget ? 'metric-value--red' : 'metric-value--green'}>
+                {headroomNumber !== null ? `$${headroomNumber.toLocaleString()}` : '-'}
+              </span>
+              <small>{budgetSummary ? (budgetSummary.over_budget ? 'over cap' : 'computed') : 'awaiting run'}</small>
+            </div>
+            <div>
+              <label>Production Status</label>
+              <span className={eventState === 'ON TRACK' ? 'metric-value--green' : eventState === 'AT RISK' ? 'metric-value--gold' : 'metric-value--red'}>{eventState}</span>
+              <small>{result ? 'current casefile' : 'no event yet'}</small>
+            </div>
+            <div>
+              <label>Tasks</label>
+              <span>{scheduleResult?.ordered_tasks?.length || 0}</span>
+              <small>{criticalCount} critical</small>
+            </div>
+            <div>
+              <label>Approvals</label>
+              <span className={pendingApprovalCount > 0 ? 'metric-value--red' : 'metric-value--green'}>{pendingApprovalCount}</span>
+              <small>pending wall</small>
+            </div>
+            <div>
+              <label>Brief Basis</label>
+              <span>{String(result?.event_spec?.attendees || result?.brief_intake?.attendees || '-')}</span>
+              <small>{sourceLabel}</small>
+            </div>
+            <div>
+              <label>AI Source</label>
+              <span>{runtimeCode === 'RB' ? 'Rules' : runtimeCode === 'AI' ? 'Live model' : '-'}</span>
+              <small>{runtimeLabel}</small>
+            </div>
           </section>
-        )}
 
-        {/* Mission control layout after run */}
-        {result && (
-          <div className="mc-grid">
-            {/* LEFT COLUMN: Extracted → Creative → Scope → Budget → Schedule */}
-            <div className="stack">
-              <ExtractedRequirements intake={result.brief_intake ?? null} resolution={result.constraint_resolution} />
-              <CreativeConcept
-                concept={result.creative_concept ?? null}
-                onAddToScope={handleAddToScope}
-              />
-              <ScopeCard
-                items={result.scope_items || []}
-                eventId={result.event_id}
-                onMutation={applyMutationPayload}
-              />
-              <BudgetCard
-                budget={result.budget_summary || null}
-                warnings={realismWarnings}
-                basis={{
-                  attendees: result.constraint_resolution?.attendees?.resolved_value ?? result.event_spec?.attendees,
-                  location: result.constraint_resolution?.location?.resolved_value ? String(result.constraint_resolution.location.resolved_value) : result.brief_intake?.location ?? null,
-                  contingencyPct: result.constraint_resolution?.contingency_pct?.resolved_value ?? result.budget_summary?.contingency_pct,
-                  source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'mixed',
-                }}
-              />
-              <RunOfShowCard
-                schedule={result.schedule_result}
-                callSheet={result.call_sheet || []}
-              />
+          {error && (
+            <div className="error-bar" role="alert">
+              <span>{error.includes('Failed to fetch') || error.includes('unreachable') ? error : `Error: ${error}`}</span>
+              <button onClick={() => setError(null)} className="dismiss-btn" aria-label="Dismiss error">x</button>
             </div>
+          )}
 
-            {/* RIGHT COLUMN: Approval → Security → Vendors → Risks → Chat/Trace */}
-            <div className="stack">
-              <ApprovalInbox
-                approvals={approvals}
-                defaultExpanded={pendingApprovalCount > 0}
-              />
-              <SecurityBeat securityBeat={securityBeat || null} />
-              <VendorsCard vendors={vendors} />
-              <RiskCard risks={riskFlags} />
-              {/* Technical trace - now secondary, collapsed by default could be added later */}
-              <details className="card" style={{ marginTop: 'var(--space-3)' }}>
-                <summary className="card__header" style={{ cursor: 'pointer', listStyle: 'none' }}>
-                  <h2 style={{ margin: 0 }}>Technical Agent Trace</h2>
-                </summary>
-                <div style={{ padding: 'var(--space-3)' }}>
-                  <AgentCrewTrace steps={agentTrace} />
-                </div>
-              </details>
-              <ChatPane messages={chatLog} />
-            </div>
+          <div className="war-room__content">
+            {renderActiveSection()}
           </div>
-        )}
-      </main>
-
-      <footer className="footer">
-        <span>
-          Event Producer &mdash; AI Production Crew &mdash; Last run: {hasRun ? new Date().toLocaleTimeString() : 'Never'}
-        </span>
-      </footer>
+        </main>
+      </div>
     </>
   )
 }

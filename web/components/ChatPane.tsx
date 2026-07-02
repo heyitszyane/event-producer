@@ -6,19 +6,22 @@ export interface ChatMessage {
 
 interface ChatPaneProps {
   messages: ChatMessage[]
+  showHeader?: boolean
 }
 
-export default function ChatPane({ messages }: ChatPaneProps) {
+export default function ChatPane({ messages, showHeader = true }: ChatPaneProps) {
   return (
     <section className="chat-box" id="chat" aria-labelledby="chat-heading">
-      <div className="card__header" style={{ padding: 'var(--space-3)', paddingBottom: 0 }}>
-        <h2 id="chat-heading" style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--text-primary)' }}>
-          Production Log
-        </h2>
-        {messages.length > 0 && (
-          <span className="badge badge--info">{messages.length}</span>
-        )}
-      </div>
+      {showHeader && (
+        <div className="card__header" style={{ padding: 'var(--space-3)', paddingBottom: 0 }}>
+          <h2 id="chat-heading" style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--text-primary)' }}>
+            Production Log
+          </h2>
+          {messages.length > 0 && (
+            <span className="badge badge--info">{messages.length}</span>
+          )}
+        </div>
+      )}
 
       <div style={{ padding: 'var(--space-3)' }}>
         <div

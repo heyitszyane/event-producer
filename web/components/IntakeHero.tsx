@@ -30,7 +30,7 @@ export default function IntakeHero({
       aria-labelledby="intake-heading"
     >
       <div className="card__header">
-        <h2 id="intake-heading">Co-produce an event from a messy brief</h2>
+        <h2 id="intake-heading">Brief Intake</h2>
         <span className="badge badge--info">AI Production Crew</span>
       </div>
 

@@ -7,6 +7,7 @@
 substitutions:
   _REGION: us-central1
   _SERVICE_NAME: event-producer-api
+  _NEXT_PUBLIC_API_BASE_URL: ""
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -108,9 +109,16 @@ steps:
     args:
       - -c
       - |
+        if [ -z "${_NEXT_PUBLIC_API_BASE_URL}" ]; then
+          echo "_NEXT_PUBLIC_API_BASE_URL is required for deployed frontend builds"
+          exit 1
+        fi
+        export NEXT_PUBLIC_API_BASE_URL="${_NEXT_PUBLIC_API_BASE_URL}"
         corepack enable &&
         pnpm -C web install --frozen-lockfile &&
-        pnpm -C web run build
+        pnpm -C web run build &&
+        ! grep -R "http://127.0.0.1:8080" web/out &&
+        ! grep -R "http://localhost:8080" web/out
     waitFor: [qa-typecheck, qa-lint, qa-test]
     timeout: 600s
 

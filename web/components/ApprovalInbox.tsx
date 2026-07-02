@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { apiFetch } from '../lib/api'
+import { displayLabel } from '../lib/humanize'
 
 export interface Approval {
   id: string
@@ -12,42 +14,40 @@ export interface Approval {
 
 interface ApprovalInboxProps {
   approvals: Approval[]
+  eventId?: string
   defaultExpanded?: boolean
 }
 
-export default function ApprovalInbox({ approvals, defaultExpanded = false }: ApprovalInboxProps) {
+export default function ApprovalInbox({ approvals, eventId, defaultExpanded = false }: ApprovalInboxProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [acting, setActing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
   const [localApprovals, setLocalApprovals] = useState<Approval[]>(approvals)
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
 
-  // Sync when props change (new run)
-  if (approvals !== localApprovals && approvals.length > 0) {
+  useEffect(() => {
     setLocalApprovals(approvals)
-  }
+  }, [approvals])
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080'
   const pendingCount = localApprovals.filter((a) => a.status === 'pending').length
 
   const handleAction = async (id: string, action: 'approve' | 'reject') => {
     setActing(id)
     setError(null)
+    setStatusMessage(null)
     setConfirming(null)
     try {
-      const res = await fetch(`${API_BASE}/approvals/${id}`, {
+      const path = eventId ? `/event/${eventId}/approvals/${id}` : `/approvals/${id}`
+      const res = await apiFetch(path, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Demo-User': 'demo-user',
-        },
         body: JSON.stringify({ action }),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      // Update local state
+      const updated: Approval = await res.json()
       setLocalApprovals((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: action === 'approve' ? 'approved' : 'rejected' } : a))
+        prev.map((a) => (a.id === id ? updated : a))
       )
+      setStatusMessage(`${displayLabel(updated.action)} ${updated.status}.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -59,7 +59,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
     <section className="card card--security" id="approvals" aria-labelledby="approvals-heading">
       <div className="card__header">
         <h2 id="approvals-heading">
-          🔒 Approvals
+          <span aria-hidden="true">🔒</span> Approvals
         </h2>
         {pendingCount > 0 && (
           <span className="badge badge--warn">{pendingCount} pending</span>
@@ -68,7 +68,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
 
       {/* Structural action gate banner */}
       <div className="security-gate-banner">
-        <span className="security-gate-banner__icon">🛡</span>
+        <span className="security-gate-banner__icon" aria-hidden="true">🛡</span>
         <span className="security-gate-banner__text">
           Structural Action Gate — Vendor-facing actions require human approval
         </span>
@@ -101,7 +101,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
           </button>
 
           {error && (
-            <div className="error-bar">
+            <div className="error-bar" role="alert">
               <span>{error}</span>
               <button
                 onClick={() => setError(null)}
@@ -113,6 +113,10 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
             </div>
           )}
 
+          <div className="sr-only" aria-live="polite">
+            {statusMessage || error || ''}
+          </div>
+
           {localApprovals.length === 0 && (
             <div className="empty-state">No approvals.</div>
           )}
@@ -121,19 +125,19 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
             <div key={ap.id} className="approval-item">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
                 <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>
-                  {ap.action}
+                  {displayLabel(ap.action)}
                 </span>
                 <span className={`badge ${
                   ap.status === 'approved' ? 'badge--ok' :
                   ap.status === 'rejected' ? 'badge--critical' :
                   'badge--warn'
                 }`}>
-                  {ap.status}
+                  {displayLabel(ap.status)}
                 </span>
               </div>
 
               <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-tertiary)', marginTop: 'var(--space-1)' }}>
-                Requested by: {ap.requested_by} &middot; ID: {ap.id}
+                Requested by: {ap.requested_by} &middot; Approval ID: {ap.id}
                 {ap.approved_by && ap.status !== 'pending' && (
                   <span> &middot; by {ap.approved_by}</span>
                 )}
@@ -147,7 +151,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
 
               {ap.status === 'pending' && (
                 <div className="approval-gate-reason">
-                  ⛔ Vendor-facing action blocked until approved by human
+                  <span aria-hidden="true">⛔</span> Vendor-facing action blocked until approved by human
                 </div>
               )}
 
@@ -157,7 +161,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
                     onClick={() => setConfirming({ id: ap.id, action: 'approve' })}
                     disabled={acting === ap.id}
                     className="btn btn--approve btn--sm"
-                    aria-label={`Approve: ${ap.action}`}
+                    aria-label={`Approve: ${displayLabel(ap.action)}`}
                   >
                     Approve
                   </button>
@@ -165,7 +169,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
                     onClick={() => setConfirming({ id: ap.id, action: 'reject' })}
                     disabled={acting === ap.id}
                     className="btn btn--reject btn--sm"
-                    aria-label={`Reject: ${ap.action}`}
+                    aria-label={`Reject: ${displayLabel(ap.action)}`}
                   >
                     Reject
                   </button>
@@ -175,7 +179,7 @@ export default function ApprovalInbox({ approvals, defaultExpanded = false }: Ap
               {ap.status === 'pending' && confirming && confirming.id === ap.id && (
                 <div className="confirm-inline">
                   <span>
-                    Confirm {confirming.action}: <strong>{ap.action}</strong>?
+                    Confirm {confirming.action}: <strong>{displayLabel(ap.action)}</strong>?
                   </span>
                   <button
                     onClick={() => handleAction(ap.id, confirming.action)}

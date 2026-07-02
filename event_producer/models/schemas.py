@@ -26,6 +26,7 @@ _TIER_LITERAL = Literal["must", "should", "could", "wow"]
 # P7A — agent / model mode taxonomy used across the crew trace.
 AgentMode = Literal[
     "gemini_live",
+    "openai_compatible_live",
     "rule_based_fallback",
     "deterministic_engine",
     "scripted_fixture",
@@ -672,7 +673,7 @@ class AgentTraceStep(BaseModel):
     model_name: str | None = None
     """Prompt asset version used by the agent (e.g. "brief_intake.v1")."""
     prompt_version: str | None = None
-    """If the provider did NOT run live Gemini, why."""
+    """If the provider did NOT run a live model call, why."""
     fallback_reason: str | None = None
     """Agent-reported confidence in its extraction/signal ("high"/"medium"/"low" or None)."""
     confidence: str | None = None

@@ -141,7 +141,7 @@ class TestScriptedSecurityBeat:
         sb = default_run_response.get("security_beat", {})
         blocked = sb.get("blocked_actions", [])
         assert "change_payment_details" in blocked
-        assert "mark_invoice_paid" in blocked
+        assert "mark_paid" in blocked
         assert "send_vendor_message" in blocked
 
 
@@ -244,7 +244,7 @@ class TestApprovalStateTransitions:
         )
         assert approve_resp.status_code == 200
         assert approve_resp.json().get("status") == "approved"
-        assert approve_resp.json().get("approved_by") == "demo-user"
+        assert approve_resp.json().get("approved_by") == "demo"
 
     def test_reject_endpoint_changes_state_to_rejected(self, client: TestClient) -> None:
         """POST /approvals/{id} with action=reject changes status to rejected."""
@@ -266,7 +266,7 @@ class TestApprovalStateTransitions:
         )
         assert reject_resp.status_code == 200
         assert reject_resp.json().get("status") == "rejected"
-        assert reject_resp.json().get("approved_by") == "demo-user"
+        assert reject_resp.json().get("approved_by") == "demo"
 
 
 # ---------------------------------------------------------------------------

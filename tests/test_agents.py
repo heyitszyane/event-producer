@@ -296,7 +296,7 @@ class TestBudgetManagerAgent:
                 "estimated_cost": Decimal("10000.00"),
                 "currency": "USD",
                 "qty": Decimal("1"),
-                "selected": False,
+                "selected": True,
             },
         ]
         request = {
@@ -349,7 +349,7 @@ class TestBudgetManagerAgent:
                 "estimated_cost": Decimal("10000.00"),
                 "currency": "USD",
                 "qty": Decimal("1"),
-                "selected": False,
+                "selected": True,
             },
         ]
         request = {
@@ -389,7 +389,7 @@ class TestBudgetManagerAgent:
                 "estimated_cost": Decimal("10000.00"),
                 "currency": "USD",
                 "qty": Decimal("1"),
-                "selected": False,
+                "selected": True,
             },
             {
                 "name": "AV Setup",
@@ -399,7 +399,7 @@ class TestBudgetManagerAgent:
                 "estimated_cost": Decimal("5000.00"),
                 "currency": "USD",
                 "qty": Decimal("1"),
-                "selected": False,
+                "selected": True,
             },
             {
                 "name": "Photo Booth",
@@ -409,7 +409,7 @@ class TestBudgetManagerAgent:
                 "estimated_cost": Decimal("5000.00"),
                 "currency": "USD",
                 "qty": Decimal("1"),
-                "selected": False,
+                "selected": True,
             },
         ]
         request = {
@@ -500,6 +500,31 @@ class TestProductionManagerAgent:
         schedule = result["schedule_result"]
         # With 6 scope items (≥6), no operational tasks are added
         assert len(schedule["ordered_tasks"]) == 6
+
+    def test_production_manager_repeated_categories_have_unique_task_ids(
+        self,
+        production_reason: ProductionManagerReasonAgent,
+    ) -> None:
+        """Repeated category/default other items must not collide in scheduler IDs."""
+        request = {
+            "event_spec": {"name": "Repeated Category Event"},
+            "scope_items": [
+                {"name": "Venue Rental", "category": "venue"},
+                {"name": "Canape Station", "category": "catering"},
+                {"name": "Dessert Station", "category": "catering"},
+                {"name": "Sponsor Lounge Host", "category": "other"},
+                {"name": "Gift Bag Prep", "category": "other"},
+                {"name": "Registration Desk", "category": "registration"},
+            ],
+            "start_time": "2026-08-15T08:00:00+00:00",
+        }
+        result = production_reason.run(request)
+
+        assert "schedule_result" in result
+        task_ids = [task["id"] for task in result["schedule_result"]["ordered_tasks"]]
+        assert len(task_ids) == len(set(task_ids))
+        assert any(task_id.startswith("scope-2-catering") for task_id in task_ids)
+        assert any(task_id.startswith("scope-4-other") for task_id in task_ids)
 
     def test_production_manager_reason_conflict_detection(
         self,

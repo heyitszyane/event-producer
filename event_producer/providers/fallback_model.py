@@ -1,9 +1,10 @@
 """Deterministic, dependency-free fallback model provider.
 
-Used whenever live Gemini is unavailable, unkeyed, or disabled. It NEVER claims
-to be Gemini: it reports ``model_mode="rule_based_fallback"`` and is honest
-about that on the agent trace. Output is derived deterministically from the
-user prompt so public clones demonstrate the product without API keys.
+Used whenever the selected live provider is unavailable, unkeyed, or disabled.
+It NEVER claims to be a live model: it reports
+``model_mode="rule_based_fallback"`` and is honest about that on the agent
+trace. Output is derived deterministically from the user prompt so public clones
+demonstrate the product without API keys.
 
 This provider intentionally does no network calls and imports nothing heavy,
 which keeps fallback/test mode hermetic. It does NOT attempt to fabricate a
