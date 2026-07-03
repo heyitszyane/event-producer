@@ -1185,6 +1185,8 @@ class EventProducerApp:
         self._casefile_store.append_timeline(event_id, "agent_run_completed", {"status": "generated"})
         result["casefile"] = casefile.model_dump(mode="json")
         result["resolved_event_state"] = casefile.resolved.model_dump(mode="json")
+        result["requirements"] = casefile.requirements.model_dump(mode="json") if casefile.requirements else None
+        result["next_step"] = casefile.next_step.model_dump(mode="json") if casefile.next_step else None
         result["planning_assumptions"] = planning_assumptions
         return result
 

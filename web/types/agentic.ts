@@ -53,6 +53,41 @@ export interface ResolvedEventState {
   confirmed: boolean
 }
 
+export type RequirementFieldStatus = 'ok' | 'missing' | 'conflict'
+
+export interface RequirementField {
+  key: string
+  label: string
+  value?: string | number | null
+  source_label: string
+  status: RequirementFieldStatus
+}
+
+export interface RequirementsPayload {
+  confirmed: boolean
+  confirmed_at?: string | null
+  confirmed_by?: string | null
+  fields: RequirementField[]
+  missing: CasefileNotice[]
+  conflicts: CasefileNotice[]
+}
+
+export interface NextStepAction {
+  id: string
+  label: string
+  target: string
+  kind: 'primary' | 'secondary'
+  reason?: string
+  disabled?: boolean
+}
+
+export interface NextBestStep {
+  state: string
+  primary: NextStepAction
+  secondary: NextStepAction[]
+  rationale?: string
+}
+
 export interface CasefileArtifact {
   name: string
   path: string
@@ -67,6 +102,10 @@ export interface CasefileState {
   brief: string
   resolved: ResolvedEventState
   status: 'draft' | 'generated' | 'requirements_confirmed'
+  requirements_confirmed_at?: string | null
+  requirements_confirmed_by?: string | null
+  requirements?: RequirementsPayload | null
+  next_step?: NextBestStep | null
   artifacts: Record<string, CasefileArtifact>
   planning_assumptions?: Record<string, unknown>
 }

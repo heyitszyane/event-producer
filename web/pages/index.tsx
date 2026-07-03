@@ -14,6 +14,8 @@ import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
 import ScopeStrategy from '../components/ScopeStrategy'
+import RequirementsConfirmation from '../components/RequirementsConfirmation'
+import NextBestStep from '../components/NextBestStep'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import {
   createCasefile,
@@ -40,15 +42,9 @@ import type {
   OrchestratorChatResponse,
   RecomputeNotice,
   ResolvedEventState,
+  RequirementsPayload,
+  NextBestStep as NextBestStepData,
 } from '../types/agentic'
-
-// Backend-supported event types (must match _SCOPE_CATALOGUE keys)
-const EVENT_TYPES = [
-  { value: 'corporate', label: 'Corporate' },
-  { value: 'networking', label: 'Networking' },
-  { value: 'product_launch', label: 'Product Launch' },
-  { value: 'conference', label: 'Conference' },
-] as const
 
 export interface RunEventResponse {
   event_id?: string
@@ -56,6 +52,8 @@ export interface RunEventResponse {
   model_mode_summary?: ModelModeSummary
   casefile?: CasefileState
   resolved_event_state?: ResolvedEventState
+  requirements?: RequirementsPayload | null
+  next_step?: NextBestStepData | null
   planning_assumptions?: Record<string, unknown>
   brief_intake?: BriefIntake | null
   creative_concept?: CreativeConceptData | null
@@ -232,6 +230,11 @@ function formatEventDate(value?: string | null): string | null {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toISOString().slice(0, 10)
+}
+
+function formatDateRange(start?: string | null, end?: string | null): string {
+  if (start && end && start !== end) return `${start} to ${end}`
+  return start || end || 'Not set'
 }
 
 const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
@@ -478,11 +481,28 @@ export default function Dashboard() {
         event_id: loaded.event_id,
         casefile: loaded,
         resolved_event_state: loaded.resolved,
+        requirements: loaded.requirements,
+        next_step: loaded.next_step,
       }) : null)
       setEventNameOverride(loaded.resolved.basics.working_title)
     } catch (err) {
       setError(formatApiError(err))
     }
+  }
+
+  function applyCasefileState(casefile: CasefileState) {
+    setActiveCasefile(casefile)
+    setBasics(casefile.basics)
+    setResult((prev) => prev ? ({
+      ...prev,
+      event_id: casefile.event_id,
+      casefile,
+      resolved_event_state: casefile.resolved,
+      requirements: casefile.requirements,
+      next_step: casefile.next_step,
+    }) : null)
+    setEventNameOverride(casefile.resolved.basics.working_title)
+    void refreshCasefiles()
   }
 
   function newCasefile() {
@@ -610,6 +630,7 @@ export default function Dashboard() {
       if (data.casefile) {
         setActiveCasefile(data.casefile)
         setBasics(data.casefile.basics)
+        setEventNameOverride(data.casefile.resolved.basics.working_title)
       }
       setHasRun(true)
       setLastRunAt(new Date())
@@ -631,6 +652,9 @@ export default function Dashboard() {
   const securityBeat = result?.security_beat
   const resolvedState = result?.resolved_event_state || activeCasefile?.resolved || null
   const resolvedBasics = resolvedState?.basics || basics
+  const requirements = activeCasefile?.requirements || result?.requirements || null
+  const nextStep = activeCasefile?.next_step || result?.next_step || null
+  const casefileArtifacts = Object.values(activeCasefile?.artifacts || result?.casefile?.artifacts || {})
   const turnoutLabel = resolvedBasics.expected_turnout ? `${resolvedBasics.expected_turnout} pax` : 'Expected turnout not set'
   const attendeeSource = resolvedState?.sources?.expected_turnout || result?.constraint_resolution?.attendees?.source
 
@@ -880,6 +904,12 @@ export default function Dashboard() {
     source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'casefile',
   } : undefined
 
+  function navigateToTarget(target: string) {
+    if (WAR_ROOM_SECTIONS.some((section) => section.id === target)) {
+      navigate(target as SectionId)
+    }
+  }
+
   function renderActiveSection() {
     if (loading) {
       return (
@@ -907,70 +937,69 @@ export default function Dashboard() {
             <div className="war-stack">
               <section className="war-panel overview-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Casefile / Current Event</span>
+                  <div>
+                    <span className="war-eyebrow">Current event</span>
+                    <h2>{eventTitle}</h2>
+                  </div>
+                  <span className={requirements?.confirmed ? 'badge badge--ok' : 'badge badge--info'}>
+                    {requirements?.confirmed ? 'Requirements confirmed' : 'Requirements open'}
+                  </span>
                 </div>
-                <p className="brief-basis body-copy">
-                  {result?.brief_intake?.normalized_brief || brief || 'No brief has been run yet.'}
-                </p>
-                <div className="war-navmap">
-                  <button type="button" onClick={() => navigate('brief')}><b>01 Intake</b><span>Saved basics drive the casefile; brief conflicts are shown.</span></button>
-                  <button type="button" onClick={() => navigate('ai-crew')}><b>02 Agents</b><span>Production crew extracts, critiques, proposes, and gates actions.</span></button>
-                  <button type="button" onClick={() => navigate('scope')}><b>03 Config</b><span>Scope, budget, and run sheet update from structured mutations.</span></button>
-                  <button type="button" onClick={() => navigate('approvals')}><b>04 Approval</b><span>Vendor-facing actions are held behind the human wall.</span></button>
-                  <button type="button" onClick={() => navigate('audit')}><b>05 Audit</b><span>Trace, logs, provenance, and evidence.</span></button>
+                <div className="overview-fact-grid">
+                  <div><span>Location</span><strong>{[resolvedBasics.city, resolvedBasics.country].filter(Boolean).join(', ') || 'Not set'}</strong></div>
+                  <div><span>Budget cap</span><strong>{resolvedBasics.budget_cap ? `${resolvedBasics.currency} ${Number(resolvedBasics.budget_cap).toLocaleString()}` : 'Not set'}</strong></div>
+                  <div><span>Date</span><strong>{formatDateRange(resolvedBasics.start_date, resolvedBasics.end_date)}</strong></div>
+                  <div><span>Expected turnout</span><strong>{turnoutLabel}</strong></div>
+                  <div><span>Event type</span><strong>{resolvedBasics.event_type ? humanizeValue(resolvedBasics.event_type) : 'Not set'}</strong></div>
+                  <div><span>Brief</span><strong>{brief.trim() ? 'Saved' : 'Not saved'}</strong></div>
                 </div>
-              </section>
-              <AIProductionCrew
-                trace={agentTrace}
-                modelModeSummary={result?.model_mode_summary}
-                briefIntake={result?.brief_intake ?? null}
-                budgetSummary={result?.budget_summary}
-                scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
-              />
-            </div>
-            <div className="war-stack">
-              <section className="war-panel approval-card overview-approval">
-                <div className="war-panel__header">
-                  <span className="war-panel-title">Approval Wall</span>
-                  <span className="badge badge--critical">{pendingApprovalCount} pending</span>
-                </div>
-                {pendingApprovalCount > 0 ? (
-                  <>
-                    <h3>{approvals.find((approval) => approval.status === 'pending')?.action || 'Pending gated action'}</h3>
-                    <p className="small">External/vendor-facing action requires human approval. No outbound action has executed.</p>
-                    <div className="diff-block">
-                      Requested by {approvals.find((approval) => approval.status === 'pending')?.requested_by || 'Vendor Coordinator'}.
-                      State mutation remains blocked until approval.
-                    </div>
-                    <div className="cluster">
-                      <button className="btn btn--primary btn--sm" type="button" onClick={() => navigate('approvals')}>Open Approval Wall</button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="callout callout--success">No pending approvals. Vendor actions remain gated when they appear.</div>
+                {requirements?.conflicts && requirements.conflicts.length > 0 && (
+                  <div className="block block--warn">
+                    {requirements.conflicts[0].message}
+                  </div>
+                )}
+                {requirements?.missing && requirements.missing.length > 0 && (
+                  <div className="block block--warn">
+                    {requirements.missing[0].message}
+                  </div>
                 )}
               </section>
+              <NextBestStep nextStep={nextStep} onNavigate={navigateToTarget} />
+            </div>
+            <div className="war-stack">
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Budget Realism</span>
-                  <span className="badge badge--fallback">computed</span>
-                </div>
-                <div className={hasRealismRisk ? 'callout callout--warning' : 'callout callout--success'}>
-                  <b>{hasRealismRisk ? 'Full requested scope pressure.' : 'Selected scope basis.'}</b><br />
-                  <span className="small">{realismWarnings[0] || 'Run an event to see selected scope, headroom, and requested-scope pressure.'}</span>
+                  <span className="war-panel-title">Budget and schedule health</span>
+                  <span className={budgetSummary?.over_budget ? 'badge badge--critical' : budgetSummary ? 'badge badge--ok' : 'badge badge--muted'}>
+                    {budgetSummary?.over_budget ? 'Over budget' : budgetSummary ? 'On track' : 'Awaiting run'}
+                  </span>
                 </div>
                 <table className="data-table overview-basis-table">
                   <tbody>
-                    <tr><th>Basis</th><th>Value</th></tr>
-                    <tr><td>Expected turnout</td><td>{turnoutLabel} <span className="badge badge--ok">casefile</span></td></tr>
-                    <tr><td>Budget cap</td><td>{resolvedBasics.budget_cap ? `${resolvedBasics.currency} ${Number(resolvedBasics.budget_cap).toLocaleString()}` : '-'} <span className="badge badge--ok">casefile</span></td></tr>
-                    <tr><td>State source</td><td>{humanizeValue(String(budgetBasis?.source || 'casefile'))} <span className="badge badge--fallback">saved</span></td></tr>
+                    <tr><th>Measure</th><th>Status</th></tr>
+                    <tr><td>Headroom</td><td>{headroomNumber !== null ? `${resolvedBasics.currency} ${headroomNumber.toLocaleString()}` : '-'}</td></tr>
+                    <tr><td>Tasks</td><td>{scheduleResult?.ordered_tasks?.length || 0} total, {criticalCount} critical</td></tr>
+                    <tr><td>Approvals</td><td>{pendingApprovalCount} pending</td></tr>
                   </tbody>
                 </table>
-                {resolvedState?.notices && resolvedState.notices.length > 0 && (
-                  <div className="block block--warn">
-                    {resolvedState.notices[0].message}
-                  </div>
+                {realismWarnings[0] && <div className="block block--warn">{realismWarnings[0]}</div>}
+              </section>
+              <section className="war-panel">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Recent artifacts</span>
+                  <span className="badge badge--info">{casefileArtifacts.length} saved</span>
+                </div>
+                {casefileArtifacts.length > 0 ? (
+                  <ul className="artifact-list">
+                    {casefileArtifacts.slice(0, 5).map((artifact) => (
+                      <li key={artifact.name}>
+                        <strong>{humanizeValue(artifact.name)}</strong>
+                        <span>{new Date(artifact.updated_at).toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="body-copy">Run the production crew to save concept, scope, budget, schedule, and vendor draft artifacts.</p>
                 )}
               </section>
             </div>
@@ -989,15 +1018,12 @@ export default function Dashboard() {
               loading={loading}
               hasCasefile={Boolean(activeCasefile)}
             />
-            {resolvedState?.notices && resolvedState.notices.length > 0 && (
-              <section className="war-panel">
-                <div className="war-panel__header"><h2>Casefile Notices</h2></div>
-                <ul className="bullets">
-                  {resolvedState.notices.map((notice) => <li key={`${notice.field}-${notice.message}`}>{notice.message}</li>)}
-                </ul>
-              </section>
-            )}
-            <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
+            <RequirementsConfirmation
+              casefile={activeCasefile}
+              fallbackBasics={basics}
+              onCasefileChange={applyCasefileState}
+              onError={setError}
+            />
           </div>
         )
       case 'ai-crew':
@@ -1058,6 +1084,7 @@ export default function Dashboard() {
               </div>
               <ChatPane messages={chatLog} showHeader={false} />
             </section>
+            <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
             <AgentCrewTrace steps={agentTrace} />
             <SecurityBeat securityBeat={securityBeat || null} />
           </div>
@@ -1251,7 +1278,7 @@ export default function Dashboard() {
               </button>
             ))}
           </nav>
-          <div className="war-room__runtime-footer" aria-label="Runtime proof">
+          <div className="war-room__runtime-footer" aria-label="System status">
             <span>{runtimeProofText}</span>
           </div>
         </aside>

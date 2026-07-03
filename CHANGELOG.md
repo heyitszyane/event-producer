@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7K — Requirements confirmation and next-step guidance
+
+- Added requirements confirmation for saved casefiles, including structured
+  missing/conflict notices, confirmation metadata, and edit/save/confirm flow.
+- Added Next Best Step guidance derived from saved casefile state and exposed it
+  through the casefile API and `/run` response.
+- Simplified Overview around current event identity, confirmation state,
+  critical facts, budget/schedule health, artifacts, and the next action.
+- Added tests for confirmation persistence, next-step transitions, edit-driven
+  reconfirmation, conflict retention, and no silent mutation of casefile facts.
+
 ### P7J — State truth and local file-backed casefiles
 
 - Added local JSON casefile persistence under `.local_state/event_producer/events/`

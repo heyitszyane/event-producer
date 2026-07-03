@@ -36,6 +36,8 @@ AgentMode = Literal[
 
 CasefileSource = Literal["user_field", "saved_casefile", "brief_extracted", "missing", "demo_seed"]
 CasefileNoticeType = Literal["missing", "conflict", "info"]
+RequirementFieldStatus = Literal["ok", "missing", "conflict"]
+NextStepActionKind = Literal["primary", "secondary"]
 
 _AGENT_STATUS = Literal[
     "complete",
@@ -982,6 +984,55 @@ class ResolvedEventState(BaseModel):
     confirmed: bool = False
 
 
+class RequirementField(BaseModel):
+    """User-facing requirement row derived from canonical casefile state."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    key: str
+    label: str
+    value: str | int | Decimal | None = None
+    source_label: str
+    status: RequirementFieldStatus = "ok"
+
+
+class RequirementsPayload(BaseModel):
+    """Structured confirmation payload for the frontend requirements panel."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    confirmed: bool = False
+    confirmed_at: str | None = None
+    confirmed_by: str | None = None
+    fields: list[RequirementField] = Field(default_factory=list)
+    missing: list[CasefileNotice] = Field(default_factory=list)
+    conflicts: list[CasefileNotice] = Field(default_factory=list)
+
+
+class NextStepAction(BaseModel):
+    """Single next-step action the UI can route to a known section."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    id: str
+    label: str
+    target: str
+    kind: NextStepActionKind
+    reason: str = ""
+    disabled: bool = False
+
+
+class NextBestStep(BaseModel):
+    """Backend-derived workflow guidance for the current casefile state."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    state: str
+    primary: NextStepAction
+    secondary: list[NextStepAction] = Field(default_factory=list)
+    rationale: str = ""
+
+
 class CasefileArtifact(BaseModel):
     """Metadata for a JSON artifact stored under a casefile directory."""
 
@@ -1004,6 +1055,10 @@ class CasefileState(BaseModel):
     brief: str = ""
     resolved: ResolvedEventState
     status: Literal["draft", "generated", "requirements_confirmed"] = "draft"
+    requirements_confirmed_at: str | None = None
+    requirements_confirmed_by: str | None = None
+    requirements: RequirementsPayload | None = None
+    next_step: NextBestStep | None = None
     artifacts: dict[str, CasefileArtifact] = Field(default_factory=dict)
     planning_assumptions: dict[str, Any] = Field(default_factory=dict)
 
