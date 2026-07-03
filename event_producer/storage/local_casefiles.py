@@ -17,6 +17,10 @@ from event_producer.models.schemas import (
     CasefileState,
     CasefileSummary,
     EventBasics,
+    NextBestStep,
+    NextStepAction,
+    RequirementField,
+    RequirementsPayload,
     ResolvedEventState,
 )
 
@@ -175,6 +179,254 @@ def resolve_event_state(
     )
 
 
+_REQUIREMENT_FIELD_LABELS = {
+    "working_title": "Event title / working title",
+    "country": "Country",
+    "city": "City",
+    "currency": "Currency",
+    "budget_cap": "Budget cap",
+    "date_range": "Date range",
+    "expected_turnout": "Expected turnout",
+    "event_type": "Event type",
+    "event_brief": "Event brief",
+}
+
+
+def _source_label(source: str, *, has_conflict: bool = False) -> str:
+    if has_conflict:
+        return "Conflict resolved"
+    if source == "brief_extracted":
+        return "From event brief"
+    if source == "missing":
+        return "Missing"
+    return "Set by you"
+
+
+def _date_range_label(basics: EventBasics) -> str | None:
+    if basics.start_date and basics.end_date and basics.start_date != basics.end_date:
+        return f"{basics.start_date} to {basics.end_date}"
+    return basics.start_date or basics.end_date or None
+
+
+def build_requirements_payload(state: CasefileState) -> RequirementsPayload:
+    """Return user-facing requirement rows, missing notices, and conflicts."""
+    resolved = state.resolved
+    basics = resolved.basics
+    notices_by_field: dict[str, list[CasefileNotice]] = {}
+    for notice in resolved.notices:
+        notices_by_field.setdefault(notice.field, []).append(notice)
+
+    def field_status(key: str) -> str:
+        field_notices = notices_by_field.get(key, [])
+        if any(notice.type == "missing" for notice in field_notices):
+            return "missing"
+        if any(notice.type == "conflict" for notice in field_notices):
+            return "conflict"
+        return "ok"
+
+    def source_for(key: str) -> str:
+        if key == "date_range":
+            sources = {resolved.sources.get("start_date"), resolved.sources.get("end_date")}
+            if "missing" in sources:
+                return "missing"
+            if "brief_extracted" in sources:
+                return "brief_extracted"
+            return "saved_casefile"
+        return resolved.sources.get(key, "missing")
+
+    rows: list[RequirementField] = []
+    for key, value in (
+        ("working_title", basics.working_title or None),
+        ("country", basics.country or None),
+        ("city", basics.city or None),
+        ("currency", basics.currency or None),
+        ("budget_cap", basics.budget_cap),
+        ("date_range", _date_range_label(basics)),
+        ("expected_turnout", basics.expected_turnout),
+        ("event_type", basics.event_type or None),
+    ):
+        status = field_status(key)
+        if key == "date_range" and (
+            field_status("start_date") == "missing" or field_status("end_date") == "missing"
+        ):
+            status = "missing"
+        rows.append(RequirementField(
+            key=key,
+            label=_REQUIREMENT_FIELD_LABELS[key],
+            value=value,
+            source_label=_source_label(source_for(key), has_conflict=status == "conflict"),
+            status=status,  # type: ignore[arg-type]
+        ))
+
+    brief_value = "Saved" if state.brief.strip() else "Not saved"
+    rows.append(RequirementField(
+        key="event_brief",
+        label=_REQUIREMENT_FIELD_LABELS["event_brief"],
+        value=brief_value,
+        source_label="Set by you" if state.brief.strip() else "Missing",
+        status="ok" if state.brief.strip() else "missing",
+    ))
+
+    return RequirementsPayload(
+        confirmed=state.status == "requirements_confirmed",
+        confirmed_at=state.requirements_confirmed_at,
+        confirmed_by=state.requirements_confirmed_by,
+        fields=rows,
+        missing=[notice for notice in resolved.notices if notice.type == "missing"],
+        conflicts=[notice for notice in resolved.notices if notice.type == "conflict"],
+    )
+
+
+def build_next_best_step(state: CasefileState) -> NextBestStep:
+    """Derive the next user action from canonical casefile state."""
+    requirements = build_requirements_payload(state)
+    missing_fields = [field for field in requirements.fields if field.status == "missing"]
+    if missing_fields:
+        first_missing = missing_fields[0]
+        return NextBestStep(
+            state="missing_requirements",
+            primary=NextStepAction(
+                id="complete_event_basics",
+                label="Complete event basics",
+                target="brief",
+                kind="primary",
+                reason=f"{first_missing.label} is not set.",
+            ),
+            secondary=[
+                NextStepAction(
+                    id=f"add_{field.key}",
+                    label=f"Add {field.label.lower()}",
+                    target="brief",
+                    kind="secondary",
+                    reason=field.source_label,
+                )
+                for field in missing_fields[:2]
+            ],
+            rationale="Budget and run sheet quality depend on complete event basics.",
+        )
+
+    if requirements.conflicts and state.status != "requirements_confirmed":
+        return NextBestStep(
+            state="review_notices",
+            primary=NextStepAction(
+                id="review_requirement_notices",
+                label="Review requirement notices",
+                target="brief",
+                kind="primary",
+                reason="The event brief and saved basics disagree.",
+            ),
+            secondary=[
+                NextStepAction(
+                    id="edit_event_basics",
+                    label="Edit event basics",
+                    target="brief",
+                    kind="secondary",
+                    reason="Update saved fields if the brief should win.",
+                ),
+                NextStepAction(
+                    id="confirm_requirements",
+                    label="Confirm requirements",
+                    target="brief",
+                    kind="secondary",
+                    reason="Keep the saved fields and retain the notice.",
+                ),
+            ],
+            rationale="Review the visible notices before confirming the casefile facts.",
+        )
+
+    if state.status != "requirements_confirmed":
+        return NextBestStep(
+            state="generated_unconfirmed" if state.status == "generated" else "draft_unconfirmed",
+            primary=NextStepAction(
+                id="confirm_requirements",
+                label="Confirm requirements",
+                target="brief",
+                kind="primary",
+                reason="The casefile has enough basics to proceed.",
+            ),
+            secondary=[
+                NextStepAction(
+                    id="edit_event_basics",
+                    label="Edit event basics",
+                    target="brief",
+                    kind="secondary",
+                    reason="Adjust facts before confirming.",
+                )
+            ],
+            rationale="Confirm the casefile facts before asking specialist agents to refine outputs.",
+        )
+
+    if "creative-concept" not in state.artifacts:
+        return NextBestStep(
+            state="confirmed_needs_generation",
+            primary=NextStepAction(
+                id="generate_concept",
+                label="Generate concept",
+                target="brief",
+                kind="primary",
+                reason="No creative concept is saved for this casefile yet.",
+            ),
+            rationale="Run the production crew now that requirements are confirmed.",
+        )
+
+    if "scope-strategy" not in state.artifacts:
+        return NextBestStep(
+            state="confirmed_needs_scope_strategy",
+            primary=NextStepAction(
+                id="generate_scope_strategy",
+                label="Generate scope strategy",
+                target="ai-crew",
+                kind="primary",
+                reason="Scope strategy has not been saved yet.",
+            ),
+            rationale="Use the specialist board to refine scope after the first concept.",
+        )
+
+    if "vendor-copy" not in state.artifacts:
+        return NextBestStep(
+            state="confirmed_needs_vendor_copy",
+            primary=NextStepAction(
+                id="draft_vendor_copy",
+                label="Draft vendor copy",
+                target="vendors",
+                kind="primary",
+                reason="Vendor copy is not saved for this casefile yet.",
+                disabled=True,
+            ),
+            secondary=[
+                NextStepAction(
+                    id="review_budget_fit",
+                    label="Review budget fit",
+                    target="budget",
+                    kind="secondary",
+                    reason="Check budget health before vendor outreach.",
+                )
+            ],
+            rationale="Vendor drafting is intentionally deferred to the next phase.",
+        )
+
+    return NextBestStep(
+        state="ready_for_review",
+        primary=NextStepAction(
+            id="review_vendor_draft",
+            label="Review vendor draft",
+            target="vendors",
+            kind="primary",
+            reason="Requirements and core artifacts are saved.",
+        ),
+        secondary=[
+            NextStepAction(
+                id="run_risk_review",
+                label="Run risk review",
+                target="risks",
+                kind="secondary",
+                reason="Check unresolved operational risks.",
+            )
+        ],
+        rationale="The casefile is ready for human review and gated vendor workflow.",
+    )
+
+
 class LocalCasefileStore:
     """Small synchronous JSON store under ``.local_state/event_producer/events``."""
 
@@ -224,7 +476,7 @@ class LocalCasefileStore:
         path = self._casefile_path(event_id)
         if not path.exists():
             raise FileNotFoundError(event_id)
-        return CasefileState(**json.loads(path.read_text(encoding="utf-8")))
+        return self._enrich_state(CasefileState(**json.loads(path.read_text(encoding="utf-8"))))
 
     def update_basics(self, event_id: str, basics: EventBasics) -> CasefileState:
         state = self.get_casefile(event_id)
@@ -234,6 +486,10 @@ class LocalCasefileStore:
             state.brief,
             user_fields={field for field, value in basics.model_dump().items() if value not in ("", None)},
         )
+        if state.status == "requirements_confirmed":
+            state.status = "generated" if state.artifacts else "draft"
+        state.requirements_confirmed_at = None
+        state.requirements_confirmed_by = None
         state.updated_at = utc_now()
         self._write_state(state)
         self.append_timeline(event_id, "event_basics_updated", {"fields": list(basics.model_dump().keys())})
@@ -244,6 +500,10 @@ class LocalCasefileStore:
         state = self.get_casefile(event_id)
         state.brief = brief
         state.resolved = resolve_event_state(state.basics, brief)
+        if state.status == "requirements_confirmed":
+            state.status = "generated" if state.artifacts else "draft"
+        state.requirements_confirmed_at = None
+        state.requirements_confirmed_by = None
         state.updated_at = utc_now()
         self._write_state(state)
         self.append_timeline(event_id, "brief_saved", {"length": len(brief)})
@@ -252,10 +512,23 @@ class LocalCasefileStore:
 
     def mark_generated(self, event_id: str, planning_assumptions: dict[str, Any]) -> CasefileState:
         state = self.get_casefile(event_id)
-        state.status = "generated"
+        if state.status != "requirements_confirmed":
+            state.status = "generated"
         state.planning_assumptions = planning_assumptions
         state.updated_at = utc_now()
         self._write_state(state)
+        self._write_index()
+        return self.get_casefile(event_id)
+
+    def confirm_requirements(self, event_id: str, actor: str = "demo-user") -> CasefileState:
+        state = self.get_casefile(event_id)
+        now = utc_now()
+        state.status = "requirements_confirmed"
+        state.requirements_confirmed_at = now
+        state.requirements_confirmed_by = actor
+        state.updated_at = now
+        self._write_state(state)
+        self.append_timeline(event_id, "requirements_confirmed", {"actor": actor})
         self._write_index()
         return self.get_casefile(event_id)
 
@@ -332,7 +605,15 @@ class LocalCasefileStore:
         return event_ids
 
     def _write_state(self, state: CasefileState) -> None:
-        self._write_json(self._casefile_path(state.event_id), state.model_dump(mode="json"))
+        self._write_json(
+            self._casefile_path(state.event_id),
+            self._enrich_state(state).model_dump(mode="json"),
+        )
+
+    def _enrich_state(self, state: CasefileState) -> CasefileState:
+        state.requirements = build_requirements_payload(state)
+        state.next_step = build_next_best_step(state)
+        return state
 
     def _casefile_dir(self, event_id: str) -> Path:
         return self.root / event_id

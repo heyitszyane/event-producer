@@ -299,6 +299,22 @@ def create_app() -> FastAPI:
         _casefile_or_404(event_id)
         return producer.casefile_store.update_brief(event_id, req.brief).model_dump(mode="json")
 
+    @app.post("/casefiles/{event_id}/requirements/confirm")
+    async def confirm_casefile_requirements(event_id: str, request: Request) -> dict[str, Any]:
+        """Mark the current resolved casefile requirements as confirmed."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        actor = request.headers.get("x-demo-user") or "demo-user"
+        return producer.casefile_store.confirm_requirements(event_id, actor=actor).model_dump(mode="json")
+
+    @app.get("/casefiles/{event_id}/next-step")
+    async def get_casefile_next_step(event_id: str) -> dict[str, Any]:
+        """Return backend-derived next best step guidance for a casefile."""
+        casefile = _casefile_or_404(event_id)
+        if casefile.next_step is None:
+            raise HTTPException(status_code=500, detail="Next step unavailable")
+        return casefile.next_step.model_dump(mode="json")
+
     @app.post("/run")
     async def run_event(req: RunEventRequest) -> Any:
         """Run the full event production pipeline and return the result."""
@@ -345,6 +361,8 @@ def create_app() -> FastAPI:
                 producer.casefile_store.append_timeline(casefile.event_id, "agent_run_completed", {"status": "generated"})
                 result["casefile"] = casefile.model_dump(mode="json")
                 result["resolved_event_state"] = casefile.resolved.model_dump(mode="json")
+                result["requirements"] = casefile.requirements.model_dump(mode="json") if casefile.requirements else None
+                result["next_step"] = casefile.next_step.model_dump(mode="json") if casefile.next_step else None
         except LiveModelProviderError as exc:
             return JSONResponse(
                 status_code=502,

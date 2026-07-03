@@ -1,5 +1,5 @@
 import { apiFetch } from './api'
-import type { CasefileState, CasefileSummary, EventBasics } from '../types/agentic'
+import type { CasefileState, CasefileSummary, EventBasics, NextBestStep } from '../types/agentic'
 
 export async function createCasefile(payload: {
   basics: EventBasics
@@ -44,6 +44,18 @@ export async function updateCasefileBrief(
   return res.json()
 }
 
+export async function confirmCasefileRequirements(eventId: string): Promise<CasefileState> {
+  const res = await apiFetch(`/casefiles/${eventId}/requirements/confirm`, {
+    method: 'POST',
+  })
+  return res.json()
+}
+
+export async function getCasefileNextStep(eventId: string): Promise<NextBestStep> {
+  const res = await apiFetch(`/casefiles/${eventId}/next-step`)
+  return res.json()
+}
+
 export async function runCasefileFirstPass(eventId: string) {
   const res = await apiFetch('/run', {
     method: 'POST',
@@ -51,4 +63,3 @@ export async function runCasefileFirstPass(eventId: string) {
   })
   return res.json()
 }
-
