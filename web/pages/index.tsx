@@ -18,7 +18,6 @@ import ScopeStrategy from '../components/ScopeStrategy'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import { humanizeValue } from '../lib/humanize'
 import type {
-  AgentMode,
   BriefIntake,
   ConstraintResolution,
   CreativeConcept as CreativeConceptData,
@@ -31,7 +30,6 @@ import type {
   OrchestratorChatResponse,
   RecomputeNotice,
 } from '../types/agentic'
-import { MODE_CLASS, MODE_LABEL } from '../types/agentic'
 
 // Backend-supported event types (must match _SCOPE_CATALOGUE keys)
 const EVENT_TYPES = [
@@ -165,16 +163,59 @@ const WAR_ROOM_SECTIONS: Array<{ id: SectionId; label: string; code: string }> =
   { id: 'settings', label: 'Settings', code: '10' },
 ]
 
-function generateEventName(brief: string, fallback?: string): string {
-  if (fallback && fallback.trim()) return fallback.trim()
-  const trimmed = brief.trim()
-  if (!trimmed) return 'Untitled Event'
-  const firstSentence = trimmed.split(/[.!?]/)[0]?.trim() || trimmed
-  return firstSentence
+function normalizeEventTitleCandidate(value?: string | null): string | null {
+  const cleaned = (value || '')
+    .replace(/\s+/g, ' ')
     .replace(/^need\s+(a|an|the)\s+/i, '')
     .replace(/^planning\s+(a|an|the)\s+/i, '')
-    .slice(0, 44)
-    .trim() || 'Untitled Event'
+    .trim()
+
+  if (!cleaned) return null
+
+  const firstSentence = cleaned.split(/[.!?]/)[0]?.trim() || cleaned
+  const capped = firstSentence.length > 68 ? `${firstSentence.slice(0, 65).trim()}...` : firstSentence
+  return capped || null
+}
+
+function generateDisplayEventTitle(args: {
+  manual?: string
+  creativeOptions?: string[]
+  eventSpecName?: string
+  brief?: string
+}): string {
+  return (
+    normalizeEventTitleCandidate(args.manual) ||
+    normalizeEventTitleCandidate(args.creativeOptions?.[0]) ||
+    normalizeEventTitleCandidate(args.eventSpecName) ||
+    normalizeEventTitleCandidate(args.brief) ||
+    'Untitled Event'
+  )
+}
+
+function compactNumber(value: number): string {
+  if (value >= 1000 && value % 1000 === 0) return `${value / 1000}k`
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k`
+  return value.toLocaleString()
+}
+
+function formatBudgetMeta(value?: string | number | null, brief?: string): string | null {
+  if (value === undefined || value === null || value === '') return null
+  const numeric = Number(String(value).replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(numeric) || numeric <= 0) return String(value)
+  return `${/sgd/i.test(brief || '') ? 'SGD ' : '$'}${compactNumber(numeric)}`
+}
+
+function displayMetaValue(value?: string | number | null): string | null {
+  if (value === undefined || value === null || value === '') return null
+  const text = String(value).trim()
+  return text || null
+}
+
+function formatEventDate(value?: string | null): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toISOString().slice(0, 10)
 }
 
 const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
@@ -342,12 +383,14 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [hasRun, setHasRun] = useState(false)
+  const [lastRunAt, setLastRunAt] = useState<Date | null>(null)
   // P7B — orchestrator chat state
   const [chatInput, setChatInput] = useState('')
   const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
   const [chatReply, setChatReply] = useState<string | null>(null)
   const [chatModelMode, setChatModelMode] = useState<string | null>(null)
   const [chatFallbackReason, setChatFallbackReason] = useState<string | null>(null)
+  const [selectedProducerPrompt, setSelectedProducerPrompt] = useState('')
   const [producerLoading, setProducerLoading] = useState(false)
   const [producerError, setProducerError] = useState<string | null>(null)
   const [recomputeNotice, setRecomputeNotice] = useState<RecomputeNotice | null>(null)
@@ -552,6 +595,7 @@ export default function Dashboard() {
       const data: RunEventResponse = await res.json()
       setResult(data)
       setHasRun(true)
+      setLastRunAt(new Date())
       setRecomputeNotice(null)
     } catch (err) {
       setError(formatApiError(err))
@@ -576,14 +620,6 @@ export default function Dashboard() {
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
   const activeMeta = ROUTE_META[activeSection]
   const headroomNumber = budgetSummary?.headroom ? Number(budgetSummary.headroom) : null
-  const runtimeCode = result?.model_mode_summary?.brief_intake
-    ? String(result.model_mode_summary.brief_intake).includes('rule')
-      ? 'RB'
-      : 'AI'
-    : '-'
-  const runtimeLabel = result?.model_mode_summary?.brief_intake
-    ? humanizeValue(result.model_mode_summary.brief_intake)
-    : 'Awaiting run'
   const sourceLabel = attendeeSource === 'brief_extracted' ? 'attendees from brief' : attendeeSource ? `source: ${attendeeSource}` : 'awaiting run'
 
   // P7B — orchestrator chat handler
@@ -694,26 +730,36 @@ export default function Dashboard() {
   const realismWarnings = result?.brief_intake?.market_realism_warnings ?? []
   const hasRealismRisk = realismWarnings.length > 0
   const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : hasRealismRisk ? 'AT RISK' : result ? 'ON TRACK' : 'AWAITING BRIEF'
-  const eventTitle = eventNameOverride || generateEventName(brief, result?.event_spec?.name)
+  const eventTitle = generateDisplayEventTitle({
+    manual: eventNameOverride,
+    creativeOptions: result?.creative_concept?.event_title_options,
+    eventSpecName: result?.event_spec?.name,
+    brief,
+  })
   const headerTitle = eventTitle
+  const eventMetaSegments = [
+    displayMetaValue(result?.constraint_resolution?.location?.resolved_value) || result?.brief_intake?.location,
+    displayMetaValue(result?.constraint_resolution?.attendees?.resolved_value ?? result?.event_spec?.attendees ?? result?.brief_intake?.attendees)
+      ? `${displayMetaValue(result?.constraint_resolution?.attendees?.resolved_value ?? result?.event_spec?.attendees ?? result?.brief_intake?.attendees)} pax`
+      : null,
+    formatBudgetMeta(result?.constraint_resolution?.budget_cap?.resolved_value ?? result?.budget_summary?.budget_cap, brief),
+    result?.event_spec?.event_type ? humanizeValue(result.event_spec.event_type) : result?.brief_intake?.event_type ? humanizeValue(result.brief_intake.event_type) : null,
+    formatEventDate(result?.event_spec?.date || result?.brief_intake?.date || null),
+  ].filter((segment): segment is string => Boolean(segment))
   const producerModeLabel = chatModelMode ? humanizeValue(chatModelMode) : 'Awaiting question'
   const producerModeClass = chatModelMode?.includes('live') ? 'badge--live' : chatModelMode ? 'badge--fallback' : 'badge--muted'
-  const firstModelTrace = agentTrace.find((step) => step.model_name)
-  const runtimeProvider = modelSettings?.provider ? humanizeValue(modelSettings.provider) : firstModelTrace?.model_mode ? humanizeValue(firstModelTrace.model_mode) : 'Awaiting run'
-  const runtimeModel = firstModelTrace?.model_name || modelSettings?.model_name || '-'
   const degradedSteps = agentTrace.filter((step) => step.fallback_reason)
-  const runtimeSummaryRows: Array<{ label: string; value: string; mode?: string }> = [
-    { label: 'Provider', value: runtimeProvider },
-    { label: 'Model', value: runtimeModel },
-    { label: 'Brief Intake', value: humanizeValue(result?.model_mode_summary?.brief_intake || 'awaiting run'), mode: result?.model_mode_summary?.brief_intake },
-    { label: 'Creative', value: humanizeValue(result?.model_mode_summary?.creative_concept || 'awaiting run'), mode: result?.model_mode_summary?.creative_concept },
-    { label: 'Scope Strategy', value: humanizeValue(result?.model_mode_summary?.scope_strategy || 'awaiting run'), mode: result?.model_mode_summary?.scope_strategy },
-    { label: 'AI Producer', value: humanizeValue(result?.model_mode_summary?.orchestrator || chatModelMode || 'awaiting question'), mode: result?.model_mode_summary?.orchestrator || chatModelMode || undefined },
-    { label: 'Vendor Draft', value: humanizeValue(result?.model_mode_summary?.vendor_draft || 'awaiting run'), mode: result?.model_mode_summary?.vendor_draft },
-    { label: 'Budget', value: 'Deterministic engine', mode: 'deterministic_engine' },
-    { label: 'Schedule', value: 'Deterministic engine', mode: 'deterministic_engine' },
-    { label: 'Approval Wall', value: 'Human-gated', mode: 'human_approval_gate' },
-  ]
+  const liveAgentCount = Object.values(result?.model_mode_summary || {}).filter((mode) => String(mode).includes('live')).length
+  const hasLiveRuntime = liveAgentCount > 0
+  const compactRuntimeLabel = result
+    ? hasLiveRuntime
+      ? `Live - ${liveAgentCount} agent${liveAgentCount === 1 ? '' : 's'}`
+      : 'Fallback mode'
+    : 'Awaiting run'
+  const runtimeProofText = result
+    ? `${hasLiveRuntime ? 'Live model active' : 'Fallback mode'} - ${liveAgentCount} live agent${liveAgentCount === 1 ? '' : 's'} - Budget/Schedule deterministic - Approval wall active`
+    : 'Awaiting run - Budget/Schedule deterministic - Approval wall ready'
+  const lastRunLabel = lastRunAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const producerConsole = result ? (
     <section className="war-panel producer-console" id="orchestrator-chat">
       <div className="war-panel__header">
@@ -726,12 +772,28 @@ export default function Dashboard() {
           <span className="badge badge--info">{orchestratorProposals.length} proposal{orchestratorProposals.length === 1 ? '' : 's'}</span>
         </div>
       </div>
-      <div className="prompt-chips">
-        {PRODUCER_PROMPTS.map((prompt) => (
-          <button key={prompt} className="btn btn--ghost btn--sm" type="button" onClick={() => sendProducerPrompt(prompt)} disabled={producerLoading}>
-            {prompt}
-          </button>
-        ))}
+      <div className="producer-prompt-tools">
+        <label className="producer-prompt-select">
+          <span>Sample prompt</span>
+          <select
+            value={selectedProducerPrompt}
+            onChange={(e) => setSelectedProducerPrompt(e.target.value)}
+            disabled={producerLoading}
+          >
+            <option value="">Choose a sample prompt...</option>
+            {PRODUCER_PROMPTS.map((prompt) => (
+              <option key={prompt} value={prompt}>{prompt}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={() => sendProducerPrompt(selectedProducerPrompt)}
+          disabled={!selectedProducerPrompt || producerLoading}
+        >
+          Run sample
+        </button>
       </div>
       <form onSubmit={handleOrchestratorChat} className="ai-producer-form">
         <textarea
@@ -827,9 +889,6 @@ export default function Dashboard() {
               <section className="war-panel overview-panel">
                 <div className="war-panel__header">
                   <span className="war-panel-title">Casefile / Current Event</span>
-                  <span className={`status-stamp ${eventState === 'ON TRACK' ? 'status-stamp--ok' : eventState === 'AT RISK' ? 'status-stamp--warn' : 'status-stamp--critical'}`}>
-                    {eventState}
-                  </span>
                 </div>
                 <p className="brief-basis body-copy">
                   {result?.brief_intake?.normalized_brief || brief || 'No brief has been run yet.'}
@@ -1119,6 +1178,11 @@ export default function Dashboard() {
             <strong>Event<br />Producer</strong>
             <small>Operational casefile</small>
           </div>
+          <div className="nav-status-card" aria-label="Current casefile status">
+            <strong>{eventState}</strong>
+            <span>{compactRuntimeLabel}</span>
+            <small>{hasRun && lastRunLabel ? `Last run ${lastRunLabel}` : 'No run yet'}</small>
+          </div>
           <div className="side-section-title">Route Map</div>
           <nav>
             {WAR_ROOM_SECTIONS.map((section) => (
@@ -1133,12 +1197,6 @@ export default function Dashboard() {
               </button>
             ))}
           </nav>
-          <div className="war-room__nav-footer">
-            <span className="war-eyebrow">STATE</span>
-            <strong>{eventState}</strong>
-            <small>Runtime: {runtimeLabel}</small>
-            <small>{hasRun ? `Last run ${new Date().toLocaleTimeString()}` : 'No run yet'}</small>
-          </div>
         </aside>
 
         <main className="war-room__main" id="main-content">
@@ -1148,7 +1206,7 @@ export default function Dashboard() {
               {editingEventName ? (
                 <input
                   className="event-title-input"
-                  value={eventTitle}
+                  value={eventNameOverride}
                   autoFocus
                   onChange={(e) => setEventNameOverride(e.target.value)}
                   onBlur={() => setEditingEventName(false)}
@@ -1162,11 +1220,20 @@ export default function Dashboard() {
                   aria-label="Edit event name"
                 />
               ) : (
-                <button className="event-title-button" type="button" onClick={() => setEditingEventName(true)}>
+                <button
+                  className="event-title-button"
+                  type="button"
+                  onClick={() => {
+                    setEventNameOverride((prev) => prev || eventTitle)
+                    setEditingEventName(true)
+                  }}
+                >
                   {headerTitle}
                 </button>
               )}
-              <div className="local-title-note">Local title draft - does not mutate backend event identity.</div>
+              {eventMetaSegments.length > 0 && (
+                <div className="event-title-meta">{eventMetaSegments.join(' - ')}</div>
+              )}
               <p>{activeMeta.desc}</p>
             </div>
             <div className="top-actions">
@@ -1209,11 +1276,6 @@ export default function Dashboard() {
               <span>{String(result?.event_spec?.attendees || result?.brief_intake?.attendees || '-')}</span>
               <small>{sourceLabel}</small>
             </div>
-            <div>
-              <label>AI Source</label>
-              <span>{runtimeCode === 'RB' ? 'Rules' : runtimeCode === 'AI' ? 'Live model' : '-'}</span>
-              <small>{runtimeLabel}</small>
-            </div>
           </section>
 
           {error && (
@@ -1223,19 +1285,8 @@ export default function Dashboard() {
             </div>
           )}
 
-          <section className="runtime-summary" aria-label="Runtime summary">
-            {runtimeSummaryRows.map((row) => {
-              const mode = row.mode as AgentMode | undefined
-              return (
-                <div key={row.label}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                  {mode && MODE_LABEL[mode] && (
-                    <em className={`badge ${MODE_CLASS[mode] ?? 'badge--muted'}`}>{MODE_LABEL[mode]}</em>
-                  )}
-                </div>
-              )
-            })}
+          <section className="runtime-proof-strip" aria-label="Runtime proof">
+            <span>{runtimeProofText}</span>
           </section>
           {degradedSteps.length > 0 && (
             <div className="callout callout--warning runtime-degraded" role="status">

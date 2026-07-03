@@ -1,6 +1,5 @@
-import type { AgentMode, AgentTraceStep, ModelModeSummary } from '../types/agentic'
-import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
-import { BriefIntake } from '../types/agentic'
+import type { AgentMode, AgentTraceStep, BriefIntake, ModelModeSummary } from '../types/agentic'
+import { MODE_CLASS } from '../types/agentic'
 import { humanizeSummary } from '../lib/humanize'
 
 interface AIProductionCrewProps {
@@ -12,40 +11,22 @@ interface AIProductionCrewProps {
   onPromptChipClick?: (prompt: string) => void
 }
 
-const STATUS_CONFIG: Record<
-  AgentTraceStep['status'],
-  { label: string; bg: string; fg: string; border: string }
-> = {
-  complete: {
-    label: 'Complete',
-    bg: 'var(--status-ok-bg)',
-    fg: 'var(--status-ok)',
-    border: 'var(--status-ok)',
-  },
-  warning: {
-    label: 'Warning',
-    bg: 'var(--status-warn-bg)',
-    fg: 'var(--status-warn)',
-    border: 'var(--status-warn)',
-  },
-  blocked: {
-    label: 'Blocked',
-    bg: 'var(--status-critical-bg)',
-    fg: 'var(--status-critical)',
-    border: 'var(--status-critical)',
-  },
-  pending_approval: {
-    label: 'Pending Approval',
-    bg: 'var(--status-warn-bg)',
-    fg: 'var(--status-warn)',
-    border: 'var(--status-warn)',
-  },
-  error: {
-    label: 'Error',
-    bg: 'var(--status-critical-bg)',
-    fg: 'var(--status-critical)',
-    border: 'var(--status-critical)',
-  },
+const STATUS_LABEL: Record<AgentTraceStep['status'], string> = {
+  complete: 'Complete',
+  warning: 'Warning',
+  blocked: 'Blocked',
+  pending_approval: 'Pending approval',
+  error: 'Error',
+}
+
+function compactModeLabel(mode?: AgentMode): string {
+  if (!mode) return 'Pending'
+  if (mode === 'gemini_live' || mode === 'openai_compatible_live') return 'Live'
+  if (mode === 'rule_based_fallback') return 'Fallback'
+  if (mode === 'deterministic_engine') return 'Engine'
+  if (mode === 'human_approval_gate') return 'Gated'
+  if (mode === 'scripted_fixture') return 'Fixture'
+  return 'Off'
 }
 
 function taskSummaries(step: AgentTraceStep): string[] {
@@ -56,15 +37,12 @@ function taskSummaries(step: AgentTraceStep): string[] {
   if (step.model_mode === 'deterministic_engine') {
     return summaries.slice(0, 1)
   }
-  return summaries.slice(0, 3)
+  return summaries.slice(0, 2)
 }
 
 export default function AIProductionCrew({
   trace,
-  modelModeSummary,
   briefIntake,
-  budgetSummary,
-  scheduleCount = 0,
 }: AIProductionCrewProps) {
   if (!trace || trace.length === 0) {
     return (
@@ -83,83 +61,51 @@ export default function AIProductionCrew({
     <section className="card" id="ai-crew" aria-labelledby="ai-crew-heading">
       <div className="card__header">
         <h2 id="ai-crew-heading">AI Production Crew</h2>
-        {modelModeSummary && (
-          <div className="card__header-badges" style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.brief_intake as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.brief_intake as AgentMode]} Brief Intake
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.creative_concept as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.creative_concept as AgentMode]} Creative
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.scope_strategy as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.scope_strategy as AgentMode]} Strategy
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.orchestrator as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.orchestrator as AgentMode]} Orchestrator
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.budget_manager as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.budget_manager as AgentMode]} Budget
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.production_manager as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.production_manager as AgentMode]} Schedule
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.vendor_coordinator as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.vendor_coordinator as AgentMode]} Gate
-            </span>
-            <span className={`badge ${MODE_CLASS[modelModeSummary.vendor_draft as AgentMode] ?? 'badge--muted'}`}>
-              Runtime: {MODE_LABEL[modelModeSummary.vendor_draft as AgentMode]} Vendor Draft
-            </span>
-          </div>
-        )}
       </div>
-      <p className="runtime-helper">
-        Runtime shows whether this output came from a live model provider, rule-based fallback, a deterministic engine, a human approval gate, or a scripted fixture.
-      </p>
+      <details className="runtime-helper">
+        <summary>Runtime legend</summary>
+        <p>Live means a model provider answered; fallback is rule-based; engine is deterministic code; gated waits for human approval.</p>
+      </details>
 
-      <div className="agent-crew-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--space-3)' }}>
+      <div className="agent-crew-grid">
         {trace.map((step) => {
-          const statusCfg = STATUS_CONFIG[step.status] || STATUS_CONFIG.complete
+          const modeClass = step.model_mode ? MODE_CLASS[step.model_mode] ?? 'badge--muted' : 'badge--muted'
           return (
             <div
               key={step.id}
-              className="agent-crew-card"
-              style={{
-                border: `1px solid ${statusCfg.border}`,
-                borderRadius: 'var(--radius-md)',
-                padding: 'var(--space-3)',
-                background: 'var(--surface-secondary)',
-              }}
+              className={`agent-crew-card agent-crew-card--${step.status.replace('_', '-')}`}
+              aria-label={`${step.role} - ${STATUS_LABEL[step.status] || 'Complete'}`}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-2)' }}>
-                <strong style={{ fontSize: 'var(--text-sm)' }}>{step.role}</strong>
-                {step.model_mode && (
-                  <span className={`badge ${MODE_CLASS[step.model_mode] ?? 'badge--muted'}`} style={{ fontSize: 'var(--text-xs)' }}>
-                    Runtime: {MODE_LABEL[step.model_mode]}
-                  </span>
-                )}
+              <div className="agent-crew-card__mode-row">
+                <span className={`badge ${modeClass}`}>
+                  {compactModeLabel(step.model_mode)}
+                </span>
               </div>
+              <strong className="agent-crew-card__role">{step.role}</strong>
               <ul className="agent-task-summaries">
                 {(taskSummaries(step).length ? taskSummaries(step) : ['No recent task recorded yet.']).map((summary) => (
                   <li key={summary}>{summary}</li>
                 ))}
               </ul>
-              {step.model_name && (
-                <p className="small muted" style={{ margin: '0 0 var(--space-2)' }}>
-                  Model: {step.model_name}
-                </p>
-              )}
               {step.fallback_reason && (
-                <div className="block block--warn" style={{ marginBottom: 'var(--space-2)' }}>
+                <div className="block block--warn agent-crew-card__fallback">
                   Fallback: {step.fallback_reason}
                 </div>
               )}
               {step.status === 'warning' && briefIntake?.market_realism_warnings?.length ? (
-                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--status-warn)', margin: 0 }}>
+                <p className="agent-crew-card__warning">
                   <strong>Warning:</strong> {briefIntake.market_realism_warnings[0]}
                 </p>
               ) : null}
+              {(step.model_name || step.prompt_version) && (
+                <details className="agent-crew-card__technical">
+                  <summary>Technical detail</summary>
+                  {step.model_name && <p>Model: {step.model_name}</p>}
+                  {step.prompt_version && <p>Prompt: {step.prompt_version}</p>}
+                </details>
+              )}
               {step.approval_required && (
-                <span className="badge badge--warn" style={{ marginTop: 'var(--space-2)' }}>
+                <span className="badge badge--warn agent-crew-card__approval">
                   Approval Required
                 </span>
               )}
