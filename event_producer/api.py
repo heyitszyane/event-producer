@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -32,6 +32,9 @@ from event_producer.main import EventProducerApp
 from event_producer.models.schemas import (
     Approval,
     BudgetSummary,
+    CasefileState,
+    CasefileSummary,
+    EventBasics,
     Proposal,
     RunEventRequest as RunEventSchema,
     ManualConstraintFlags,
@@ -64,7 +67,9 @@ class RunEventRequest(BaseModel):
        ``creative_concept`` assumptions.
     """
 
-    brief: str
+    brief: str | None = None
+    casefile_id: str | None = None
+    basics: EventBasics | None = None
     budget_cap: str | None = None
     contingency_pct: str | None = None
     attendees: int | None = None
@@ -76,7 +81,7 @@ class RunEventRequest(BaseModel):
     def to_legacy(self) -> RunEventSchema:
         """Return a schema instance (kept for parity with the typed model)."""
         return RunEventSchema(
-            brief=self.brief,
+            brief=self.brief or "",
             budget_cap=self.budget_cap,
             contingency_pct=self.contingency_pct,
             attendees=self.attendees,
@@ -85,6 +90,19 @@ class RunEventRequest(BaseModel):
             date=self.date,
             manual_constraints=self.manual_constraints,
         )
+
+
+class CasefileCreateRequest(BaseModel):
+    """Request body for creating a saved local casefile."""
+
+    basics: EventBasics = Field(default_factory=EventBasics)
+    brief: str = ""
+
+
+class CasefileBriefUpdateRequest(BaseModel):
+    """Request body for saving a casefile brief."""
+
+    brief: str = ""
 
 
 class ChatRequest(BaseModel):
@@ -238,21 +256,95 @@ def create_app() -> FastAPI:
 
     # ---- Routes ----------------------------------------------------------
 
+    def _casefile_or_404(event_id: str) -> CasefileState:
+        producer: EventProducerApp = app.state.event_producer
+        try:
+            return producer.casefile_store.get_casefile(event_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Casefile not found")
+
+    @app.post("/casefiles")
+    async def create_casefile(req: CasefileCreateRequest) -> dict[str, Any]:
+        """Create a local saved event casefile before agent generation."""
+        producer: EventProducerApp = app.state.event_producer
+        casefile = producer.casefile_store.create_casefile(req.basics, req.brief)
+        return casefile.model_dump(mode="json")
+
+    @app.get("/casefiles")
+    async def list_casefiles() -> list[dict[str, Any]]:
+        """List saved local casefiles by most recent update."""
+        producer: EventProducerApp = app.state.event_producer
+        summaries: list[CasefileSummary] = producer.casefile_store.list_casefiles()
+        return [summary.model_dump(mode="json") for summary in summaries]
+
+    @app.get("/casefiles/{event_id}")
+    async def get_casefile(event_id: str) -> dict[str, Any]:
+        """Load a full local casefile."""
+        return _casefile_or_404(event_id).model_dump(mode="json")
+
+    @app.patch("/casefiles/{event_id}/basics")
+    async def update_casefile_basics(event_id: str, basics: EventBasics) -> dict[str, Any]:
+        """Update canonical event basics and re-resolve state."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        return producer.casefile_store.update_basics(event_id, basics).model_dump(mode="json")
+
+    @app.put("/casefiles/{event_id}/brief")
+    async def update_casefile_brief(
+        event_id: str,
+        req: CasefileBriefUpdateRequest,
+    ) -> dict[str, Any]:
+        """Update casefile brief text and re-resolve conflicts/missing fields."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        return producer.casefile_store.update_brief(event_id, req.brief).model_dump(mode="json")
+
     @app.post("/run")
     async def run_event(req: RunEventRequest) -> Any:
         """Run the full event production pipeline and return the result."""
         producer: EventProducerApp = app.state.event_producer
         try:
-            result = producer.run_event(
-                brief=req.brief,
-                budget_cap=req.budget_cap,
-                contingency_pct=req.contingency_pct,
-                attendees=req.attendees,
-                event_type=req.event_type,
-                venue_type=req.venue_type,
-                date=req.date,
-                manual_constraints=req.manual_constraints,
-            )
+            if req.casefile_id:
+                _casefile_or_404(req.casefile_id)
+                if req.basics is not None:
+                    producer.casefile_store.update_basics(req.casefile_id, req.basics)
+                if req.brief is not None:
+                    producer.casefile_store.update_brief(req.casefile_id, req.brief)
+                result = producer.run_casefile(req.casefile_id)
+            elif req.basics is not None:
+                casefile = producer.casefile_store.create_casefile(
+                    req.basics,
+                    req.brief or "",
+                )
+                result = producer.run_casefile(casefile.event_id)
+            else:
+                if req.brief is None:
+                    raise HTTPException(status_code=422, detail="brief is required when no casefile is supplied")
+                basics = EventBasics(
+                    budget_cap=Decimal(req.budget_cap) if req.budget_cap is not None else None,
+                    start_date=req.date or "",
+                    end_date=req.date or "",
+                    expected_turnout=req.attendees,
+                    event_type=req.event_type or "",
+                )
+                casefile = producer.casefile_store.create_casefile(basics, req.brief)
+                producer.casefile_store.append_timeline(casefile.event_id, "agent_run_started", {})
+                result = producer.run_event(
+                    brief=req.brief,
+                    budget_cap=req.budget_cap,
+                    contingency_pct=req.contingency_pct,
+                    attendees=req.attendees,
+                    event_type=req.event_type,
+                    venue_type=req.venue_type,
+                    date=req.date,
+                    manual_constraints=req.manual_constraints,
+                    event_id=casefile.event_id,
+                )
+                producer._persist_casefile_artifacts(casefile.event_id, result)
+                casefile = producer.casefile_store.mark_generated(casefile.event_id, {})
+                producer.casefile_store.append_timeline(casefile.event_id, "agent_run_completed", {"status": "generated"})
+                result["casefile"] = casefile.model_dump(mode="json")
+                result["resolved_event_state"] = casefile.resolved.model_dump(mode="json")
         except LiveModelProviderError as exc:
             return JSONResponse(
                 status_code=502,

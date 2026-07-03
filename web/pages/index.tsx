@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
 import Head from 'next/head'
-import EventCommandHeader from '../components/EventCommandHeader'
+import EventCommandHeader, { type FieldErrors } from '../components/EventCommandHeader'
 import AgentCrewTrace from '../components/AgentCrewTrace'
 import ApprovalInbox from '../components/ApprovalInbox'
 import ScopeCard, { type ScopeItem } from '../components/ScopeCard'
@@ -10,17 +10,27 @@ import VendorsCard, { type Vendor } from '../components/VendorsCard'
 import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
 import SecurityBeat from '../components/SecurityBeat'
-import IntakeHero from '../components/IntakeHero'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
 import ScopeStrategy from '../components/ScopeStrategy'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
+import {
+  createCasefile,
+  getCasefile,
+  listCasefiles,
+  runCasefileFirstPass,
+  updateCasefileBasics,
+  updateCasefileBrief,
+} from '../lib/casefiles'
 import { humanizeValue } from '../lib/humanize'
 import type {
   BriefIntake,
+  CasefileState,
+  CasefileSummary,
   ConstraintResolution,
   CreativeConcept as CreativeConceptData,
+  EventBasics,
   ScopeStrategy as ScopeStrategyData,
   VendorDraft,
   ModelModeSummary,
@@ -29,6 +39,7 @@ import type {
   ProposedAction,
   OrchestratorChatResponse,
   RecomputeNotice,
+  ResolvedEventState,
 } from '../types/agentic'
 
 // Backend-supported event types (must match _SCOPE_CATALOGUE keys)
@@ -43,6 +54,9 @@ export interface RunEventResponse {
   event_id?: string
   status?: string
   model_mode_summary?: ModelModeSummary
+  casefile?: CasefileState
+  resolved_event_state?: ResolvedEventState
+  planning_assumptions?: Record<string, unknown>
   brief_intake?: BriefIntake | null
   creative_concept?: CreativeConceptData | null
   scope_strategy?: ScopeStrategyData | null
@@ -116,14 +130,16 @@ interface Approval {
   notes?: string
 }
 
-interface FormData {
-  brief: string
-  budgetCap: string
-  contingencyPct: string
-  attendees: number | ''
-  eventType: string
-  venueType: string
-  date: string
+const EMPTY_BASICS: EventBasics = {
+  working_title: '',
+  country: '',
+  city: '',
+  currency: 'USD',
+  budget_cap: null,
+  start_date: '',
+  end_date: '',
+  expected_turnout: null,
+  event_type: '',
 }
 
 const PRODUCER_PROMPTS = [
@@ -225,9 +241,9 @@ const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string
     desc: 'A command summary for the current event casefile: state, budget, agents, approval wall, and route links.',
   },
   brief: {
-    route: '01 / Brief Intake + Manual Constraints',
-    title: 'Brief Intake + Manual Constraints',
-    desc: 'Messy brief is the primary source. Manual overrides only appear when the user sets them.',
+    route: '01 / Brief Intake',
+    title: 'Brief Intake',
+    desc: 'Event Basics are saved first. Brief text can add context and surface conflicts.',
   },
   'ai-crew': {
     route: '02 / AI Production Crew Working Board',
@@ -309,75 +325,47 @@ function providerDefaults(provider: ProviderName): { modelName: string; apiBaseU
   return { modelName: 'qwen2.5-coder:latest', apiBaseUrl: 'http://127.0.0.1:1234/v1/chat/completions' }
 }
 
-interface FieldErrors {
-  brief?: string
-  budgetCap?: string
-  contingencyPct?: string
-  attendees?: string
-  eventType?: string
-  venueType?: string
-  date?: string
-}
-
-// P7A validation: the brief is the one required field (it's the primary
-// product input). Constraints (budget, pax, type, venue, date, contingency)
-// are optional manual overrides; if provided they must be well-formed, but if
-// left blank the backend's AI intake resolves them (and records any gaps in
-// brief_intake.missing_questions).
-function validateForm(data: FormData): { valid: boolean; errors: FieldErrors } {
+function validateCasefileForm(basics: EventBasics, brief: string): { valid: boolean; errors: FieldErrors } {
   const errors: FieldErrors = {}
 
-  if (!data.brief.trim()) {
+  if (!brief.trim()) {
     errors.brief = 'Brief is required'
   }
 
-  if (data.budgetCap.trim()) {
-    const bc = parseFloat(data.budgetCap)
+  if (basics.budget_cap !== null && basics.budget_cap !== undefined && String(basics.budget_cap).trim()) {
+    const bc = parseFloat(String(basics.budget_cap))
     if (isNaN(bc) || bc <= 0) {
       errors.budgetCap = 'Must be a positive number'
     }
   }
 
-  if (data.contingencyPct.trim()) {
-    const cp = parseFloat(data.contingencyPct)
-    if (isNaN(cp) || cp < 0 || cp > 50) {
-      errors.contingencyPct = 'Must be between 0 and 50'
+  if (basics.expected_turnout !== null && basics.expected_turnout !== undefined && basics.expected_turnout <= 0) {
+    errors.expectedTurnout = 'Must be greater than 0'
+  }
+
+  if (basics.start_date) {
+    const parsed = new Date(basics.start_date)
+    if (isNaN(parsed.getTime())) {
+      errors.startDate = 'Invalid date format'
     }
   }
 
-  // attendees defaults to 50 when blank; validate only when non-defaulting.
-  if (data.attendees && data.attendees <= 0) {
-    errors.attendees = 'Must be greater than 0'
-  }
-
-  if (data.date) {
-    const parsed = new Date(data.date)
+  if (basics.end_date) {
+    const parsed = new Date(basics.end_date)
     if (isNaN(parsed.getTime())) {
-      errors.date = 'Invalid date format'
+      errors.endDate = 'Invalid date format'
     }
   }
 
   return { valid: Object.keys(errors).length === 0, errors }
 }
 
-async function postRunRequest(body: Record<string, unknown>): Promise<Response> {
-  return apiFetch('/run', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-
-// P7D: attendees and contingency defaults are NOT pre-filled to avoid silently
-// overriding brief extraction. The brief is primary. Constraints only win if user
-// explicitly provides them.
 export default function Dashboard() {
   const [brief, setBrief] = useState('')
-  const [budgetCap, setBudgetCap] = useState('')
-  const [contingencyPct, setContingencyPct] = useState('') // Empty by default - brief primary
-  const [attendees, setAttendees] = useState<number | ''>('') // Empty by default - brief primary
-  const [eventType, setEventType] = useState('')
-  const [venueType, setVenueType] = useState('')
-  const [date, setDate] = useState('')
+  const [basics, setBasics] = useState<EventBasics>(EMPTY_BASICS)
+  const [activeCasefile, setActiveCasefile] = useState<CasefileState | null>(null)
+  const [casefiles, setCasefiles] = useState<CasefileSummary[]>([])
+  const [casefilesLoading, setCasefilesLoading] = useState(false)
   const [result, setResult] = useState<RunEventResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -452,6 +440,62 @@ export default function Dashboard() {
     }
     loadInitialModelSettings()
   }, [])
+
+  useEffect(() => {
+    async function loadSavedCasefiles() {
+      setCasefilesLoading(true)
+      try {
+        setCasefiles(await listCasefiles())
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setCasefilesLoading(false)
+      }
+    }
+    loadSavedCasefiles()
+  }, [])
+
+  async function refreshCasefiles() {
+    setCasefilesLoading(true)
+    try {
+      setCasefiles(await listCasefiles())
+    } catch (err) {
+      setError(formatApiError(err))
+    } finally {
+      setCasefilesLoading(false)
+    }
+  }
+
+  async function selectCasefile(eventId: string) {
+    setError(null)
+    try {
+      const loaded = await getCasefile(eventId)
+      setActiveCasefile(loaded)
+      setBasics(loaded.basics)
+      setBrief(loaded.brief)
+      setResult((prev) => prev ? ({
+        ...prev,
+        event_id: loaded.event_id,
+        casefile: loaded,
+        resolved_event_state: loaded.resolved,
+      }) : null)
+      setEventNameOverride(loaded.resolved.basics.working_title)
+    } catch (err) {
+      setError(formatApiError(err))
+    }
+  }
+
+  function newCasefile() {
+    setActiveCasefile(null)
+    setBasics({ ...EMPTY_BASICS })
+    setBrief('')
+    setResult(null)
+    setHasRun(false)
+    setLastRunAt(null)
+    setEventNameOverride('')
+    setRecomputeNotice(null)
+    navigate('brief')
+  }
 
   function applyModelSettings(data: ModelSettings) {
     setModelSettings(data)
@@ -535,17 +579,13 @@ export default function Dashboard() {
   async function handleRun(e: FormEvent) {
     e.preventDefault()
 
-    const formData: FormData = {
-      brief,
-      budgetCap,
-      contingencyPct,
-      attendees,
-      eventType,
-      venueType,
-      date,
+    const normalizedBasics: EventBasics = {
+      ...basics,
+      budget_cap: basics.budget_cap === '' ? null : basics.budget_cap,
+      expected_turnout: basics.expected_turnout === undefined ? null : basics.expected_turnout,
+      end_date: basics.end_date || basics.start_date,
     }
-
-    const { valid, errors } = validateForm(formData)
+    const { valid, errors } = validateCasefileForm(normalizedBasics, brief)
     if (!valid) {
       setFieldErrors(errors)
       return
@@ -556,47 +596,25 @@ export default function Dashboard() {
     setError(null)
 
     try {
-      // P7A: brief-primary. Constraints are optional manual overrides; when
-      // blank we omit them (null) and let the AI intake resolve them.
-      const body: Record<string, unknown> = { brief }
-      const manualConstraints: Record<string, boolean> = {
-        budget_cap: false,
-        contingency_pct: false,
-        attendees: false,
-        event_type: false,
-        venue_type: false,
-        date: false,
+      let saved = activeCasefile
+      if (saved) {
+        saved = await updateCasefileBasics(saved.event_id, normalizedBasics)
+        saved = await updateCasefileBrief(saved.event_id, brief)
+      } else {
+        saved = await createCasefile({ basics: normalizedBasics, brief })
       }
-      if (budgetCap.trim()) body.budget_cap = budgetCap.trim()
-      if (budgetCap.trim()) manualConstraints.budget_cap = true
-      if (contingencyPct.trim()) {
-        body.contingency_pct = contingencyPct.trim()
-        manualConstraints.contingency_pct = true
-      }
-      if (attendees && attendees > 0) {
-        body.attendees = attendees
-        manualConstraints.attendees = true
-      }
-      if (eventType) {
-        body.event_type = eventType
-        manualConstraints.event_type = true
-      }
-      if (venueType) {
-        body.venue_type = venueType
-        manualConstraints.venue_type = true
-      }
-      if (date) {
-        body.date = date
-        manualConstraints.date = true
-      }
-      body.manual_constraints = manualConstraints
-
-      const res = await postRunRequest(body)
-      const data: RunEventResponse = await res.json()
+      setActiveCasefile(saved)
+      setBasics(saved.basics)
+      const data: RunEventResponse = await runCasefileFirstPass(saved.event_id)
       setResult(data)
+      if (data.casefile) {
+        setActiveCasefile(data.casefile)
+        setBasics(data.casefile.basics)
+      }
       setHasRun(true)
       setLastRunAt(new Date())
       setRecomputeNotice(null)
+      await refreshCasefiles()
     } catch (err) {
       setError(formatApiError(err))
     } finally {
@@ -611,7 +629,10 @@ export default function Dashboard() {
   const chatLog = result?.chat_log || []
   const riskFlags = result?.risk_flags || result?.run_of_show?.risk_flags || []
   const securityBeat = result?.security_beat
-  const attendeeSource = result?.constraint_resolution?.attendees?.source
+  const resolvedState = result?.resolved_event_state || activeCasefile?.resolved || null
+  const resolvedBasics = resolvedState?.basics || basics
+  const turnoutLabel = resolvedBasics.expected_turnout ? `${resolvedBasics.expected_turnout} pax` : 'Expected turnout not set'
+  const attendeeSource = resolvedState?.sources?.expected_turnout || result?.constraint_resolution?.attendees?.source
 
   // Hero strip budget health
   const budgetSummary = result?.budget_summary
@@ -620,7 +641,7 @@ export default function Dashboard() {
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
   const activeMeta = ROUTE_META[activeSection]
   const headroomNumber = budgetSummary?.headroom ? Number(budgetSummary.headroom) : null
-  const sourceLabel = attendeeSource === 'brief_extracted' ? 'attendees from brief' : attendeeSource ? `source: ${attendeeSource}` : 'awaiting run'
+  const sourceLabel = attendeeSource === 'brief_extracted' ? 'turnout from brief' : attendeeSource ? `source: ${humanizeValue(String(attendeeSource))}` : 'awaiting casefile'
 
   // P7B — orchestrator chat handler
   async function sendProducerPrompt(message: string) {
@@ -733,18 +754,16 @@ export default function Dashboard() {
   const eventTitle = generateDisplayEventTitle({
     manual: eventNameOverride,
     creativeOptions: result?.creative_concept?.event_title_options,
-    eventSpecName: result?.event_spec?.name,
+    eventSpecName: resolvedBasics.working_title || result?.event_spec?.name,
     brief,
   })
   const headerTitle = eventTitle
   const eventMetaSegments = [
-    displayMetaValue(result?.constraint_resolution?.location?.resolved_value) || result?.brief_intake?.location,
-    displayMetaValue(result?.constraint_resolution?.attendees?.resolved_value ?? result?.event_spec?.attendees ?? result?.brief_intake?.attendees)
-      ? `${displayMetaValue(result?.constraint_resolution?.attendees?.resolved_value ?? result?.event_spec?.attendees ?? result?.brief_intake?.attendees)} pax`
-      : null,
-    formatBudgetMeta(result?.constraint_resolution?.budget_cap?.resolved_value ?? result?.budget_summary?.budget_cap, brief),
-    result?.event_spec?.event_type ? humanizeValue(result.event_spec.event_type) : result?.brief_intake?.event_type ? humanizeValue(result.brief_intake.event_type) : null,
-    formatEventDate(result?.event_spec?.date || result?.brief_intake?.date || null),
+    [resolvedBasics.city, resolvedBasics.country].filter(Boolean).join(', ') || null,
+    turnoutLabel,
+    formatBudgetMeta(resolvedBasics.budget_cap ?? result?.budget_summary?.budget_cap, resolvedBasics.currency),
+    resolvedBasics.event_type ? humanizeValue(resolvedBasics.event_type) : null,
+    formatEventDate(resolvedBasics.start_date || null),
   ].filter((segment): segment is string => Boolean(segment))
   const producerModeLabel = chatModelMode ? humanizeValue(chatModelMode) : 'Awaiting question'
   const producerModeClass = chatModelMode?.includes('live') ? 'badge--live' : chatModelMode ? 'badge--fallback' : 'badge--muted'
@@ -855,10 +874,10 @@ export default function Dashboard() {
   ) : null
 
   const budgetBasis = result ? {
-    attendees: result.constraint_resolution?.attendees?.resolved_value ?? result.event_spec?.attendees,
-    location: result.constraint_resolution?.location?.resolved_value ? String(result.constraint_resolution.location.resolved_value) : result.brief_intake?.location ?? null,
+    attendees: resolvedBasics.expected_turnout ?? null,
+    location: [resolvedBasics.city, resolvedBasics.country].filter(Boolean).join(', ') || null,
     contingencyPct: result.constraint_resolution?.contingency_pct?.resolved_value ?? result.budget_summary?.contingency_pct,
-    source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'mixed',
+    source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'casefile',
   } : undefined
 
   function renderActiveSection() {
@@ -894,7 +913,7 @@ export default function Dashboard() {
                   {result?.brief_intake?.normalized_brief || brief || 'No brief has been run yet.'}
                 </p>
                 <div className="war-navmap">
-                  <button type="button" onClick={() => navigate('brief')}><b>01 Intake</b><span>Brief is primary. Manual constraints only apply when set.</span></button>
+                  <button type="button" onClick={() => navigate('brief')}><b>01 Intake</b><span>Saved basics drive the casefile; brief conflicts are shown.</span></button>
                   <button type="button" onClick={() => navigate('ai-crew')}><b>02 Agents</b><span>Production crew extracts, critiques, proposes, and gates actions.</span></button>
                   <button type="button" onClick={() => navigate('scope')}><b>03 Config</b><span>Scope, budget, and run sheet update from structured mutations.</span></button>
                   <button type="button" onClick={() => navigate('approvals')}><b>04 Approval</b><span>Vendor-facing actions are held behind the human wall.</span></button>
@@ -943,11 +962,16 @@ export default function Dashboard() {
                 <table className="data-table overview-basis-table">
                   <tbody>
                     <tr><th>Basis</th><th>Value</th></tr>
-                    <tr><td>Attendees</td><td>{String(result?.event_spec?.attendees || result?.brief_intake?.attendees || '-')} <span className="badge badge--ok">brief</span></td></tr>
-                    <tr><td>Budget cap</td><td>{budgetSummary?.budget_cap ? `$${Number(budgetSummary.budget_cap).toLocaleString()}` : '-'} <span className="badge badge--ok">brief</span></td></tr>
-                    <tr><td>Manual overrides</td><td>{budgetBasis?.source === 'brief' ? 'None set' : 'Mixed'} <span className="badge badge--fallback">safe</span></td></tr>
+                    <tr><td>Expected turnout</td><td>{turnoutLabel} <span className="badge badge--ok">casefile</span></td></tr>
+                    <tr><td>Budget cap</td><td>{resolvedBasics.budget_cap ? `${resolvedBasics.currency} ${Number(resolvedBasics.budget_cap).toLocaleString()}` : '-'} <span className="badge badge--ok">casefile</span></td></tr>
+                    <tr><td>State source</td><td>{humanizeValue(String(budgetBasis?.source || 'casefile'))} <span className="badge badge--fallback">saved</span></td></tr>
                   </tbody>
                 </table>
+                {resolvedState?.notices && resolvedState.notices.length > 0 && (
+                  <div className="block block--warn">
+                    {resolvedState.notices[0].message}
+                  </div>
+                )}
               </section>
             </div>
           </div>
@@ -955,16 +979,24 @@ export default function Dashboard() {
       case 'brief':
         return (
           <div className="war-stack">
-            <IntakeHero brief={brief} onBriefChange={setBrief} onSubmit={handleRun} loading={loading} hasRun={hasRun} />
             <EventCommandHeader
-              eventSpec={result?.event_spec || null}
-              formData={{ brief, budgetCap, contingencyPct, attendees, eventType, venueType, date }}
-              formHandlers={{ setBrief, setBudgetCap, setContingencyPct, setAttendees: (v) => setAttendees(v), setEventType, setVenueType, setDate }}
+              basics={basics}
+              brief={brief}
+              onBasicsChange={setBasics}
+              onBriefChange={setBrief}
               fieldErrors={fieldErrors}
               onRun={handleRun}
               loading={loading}
-              running={hasRun}
+              hasCasefile={Boolean(activeCasefile)}
             />
+            {resolvedState?.notices && resolvedState.notices.length > 0 && (
+              <section className="war-panel">
+                <div className="war-panel__header"><h2>Casefile Notices</h2></div>
+                <ul className="bullets">
+                  {resolvedState.notices.map((notice) => <li key={`${notice.field}-${notice.message}`}>{notice.message}</li>)}
+                </ul>
+              </section>
+            )}
             <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
           </div>
         )
@@ -1183,6 +1215,28 @@ export default function Dashboard() {
             <span>{compactRuntimeLabel}</span>
             <small>{hasRun && lastRunLabel ? `Last run ${lastRunLabel}` : 'No run yet'}</small>
           </div>
+          <div className="casefile-switcher" aria-label="Saved casefiles">
+            <div className="casefile-switcher__header">
+              <span className="side-section-title">Casefiles</span>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={newCasefile}>New</button>
+            </div>
+            {casefilesLoading && <small>Loading casefiles...</small>}
+            {!casefilesLoading && casefiles.length === 0 && <small>No saved casefiles yet</small>}
+            <div className="casefile-switcher__list">
+              {casefiles.map((casefile) => (
+                <button
+                  key={casefile.event_id}
+                  type="button"
+                  className={activeCasefile?.event_id === casefile.event_id ? 'casefile-switcher__item casefile-switcher__item--active' : 'casefile-switcher__item'}
+                  onClick={() => selectCasefile(casefile.event_id)}
+                >
+                  <strong>{casefile.working_title || 'Untitled Event'}</strong>
+                  <span>{[casefile.city, casefile.start_date].filter(Boolean).join(' · ') || casefile.status}</span>
+                  <small>{casefile.expected_turnout ? `${casefile.expected_turnout} pax` : 'Expected turnout not set'}</small>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="side-section-title">Route Map</div>
           <nav>
             {WAR_ROOM_SECTIONS.map((section) => (
@@ -1240,14 +1294,28 @@ export default function Dashboard() {
               <p>{activeMeta.desc}</p>
             </div>
             <div className="top-actions">
-              <button className="btn btn--ghost" type="button" onClick={() => navigate('audit')}>Open casefile</button>
-              <button className="btn btn--ghost" type="button" onClick={() => setBrief([
-                'Need a 100-pax AI founder networking night in Singapore next Thursday.',
-                'Budget is around 10k SGD. Want it to feel premium but not flashy.',
-                'Light F&B, a short fireside chat, and a few structured networking prompts.',
-                'No full conference setup. Audience is founders, investors, and AI builders.',
-              ].join(' '))}>Copy Demo Brief</button>
-              <button className="btn btn--primary" type="button" onClick={() => navigate('brief')}>Run Event</button>
+              <button className="btn btn--ghost" type="button" onClick={newCasefile}>New Casefile</button>
+              <button className="btn btn--ghost" type="button" onClick={() => {
+                setBasics({
+                  working_title: 'AI Founder Networking Night',
+                  country: 'Singapore',
+                  city: 'Singapore',
+                  currency: 'SGD',
+                  budget_cap: '10000',
+                  start_date: '2026-07-10',
+                  end_date: '2026-07-10',
+                  expected_turnout: 100,
+                  event_type: 'networking',
+                })
+                setBrief([
+                  'Need a 50 pax AI founder networking night in Singapore.',
+                  'Budget is around 10k SGD. Want it to feel premium but not flashy.',
+                  'Light F&B, a short fireside chat, and a few structured networking prompts.',
+                  'No full conference setup. Audience is founders, investors, and AI builders.',
+                ].join(' '))
+                navigate('brief')
+              }}>Seed Conflict Demo</button>
+              <button className="btn btn--primary" type="button" onClick={() => navigate('brief')}>Open Brief Intake</button>
             </div>
           </header>
 
@@ -1275,8 +1343,8 @@ export default function Dashboard() {
               <small>pending wall</small>
             </div>
             <div>
-              <label>Brief Basis</label>
-              <span>{String(result?.event_spec?.attendees || result?.brief_intake?.attendees || '-')}</span>
+              <label>Expected Turnout</label>
+              <span>{resolvedBasics.expected_turnout ?? '-'}</span>
               <small>{sourceLabel}</small>
             </div>
           </section>

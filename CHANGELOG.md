@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7J — State truth and local file-backed casefiles
+
+- Added local JSON casefile persistence under `.local_state/event_producer/events/`
+  with an index, per-event `casefile.json`, timeline JSONL, and named artifacts.
+- Added casefile schemas, resolved state notices, source precedence, and API
+  endpoints for creating, listing, loading, and updating saved casefiles.
+- Updated `/run` so casefile runs save/load canonical basics first, preserve
+  legacy request compatibility, return `casefile` and `resolved_event_state`,
+  and persist generated artifacts back into the casefile.
+- Updated the frontend around saved Event Basics, a casefile selector, dedicated
+  country/city/currency/date/turnout fields, and conflict/missing notices.
+- Added regression tests proving 100-pax structured casefile state survives a
+  conflicting 50-pax brief, missing turnout remains missing, timeline events
+  append, and local state is gitignored.
+
 ### P7H.5 — Structured-output hardening for live agentic demo
 
 - Added JSON Schema response format for OpenRouter/OpenAI-compatible live
