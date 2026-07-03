@@ -1393,10 +1393,9 @@ a:hover {
 }
 
 .agent-step__header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-1);
 }
@@ -1406,6 +1405,12 @@ a:hover {
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.agent-step__status {
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .agent-step__role-name {
@@ -1682,12 +1687,6 @@ a:hover {
   display: inline-flex;
   gap: var(--space-1);
 }
-.agent-step__mode {
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  font-size: var(--text-xs);
-}
-
 /* Intake hero */
 .intake-hero {
   margin-bottom: 0;
@@ -1987,6 +1986,16 @@ a:hover {
 
 .war-room__nav-footer small {
   color: #c9bda8;
+}
+
+.war-room__runtime-footer {
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px solid rgba(245,241,231,.35);
+  color: #b8ad99;
+  font: 9px/1.35 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 
 .war-room__main {
@@ -2363,20 +2372,6 @@ a:hover {
   margin-top: 4px;
   color: var(--ink-2);
   font: 10px/1.2 var(--font-mono);
-}
-
-.runtime-proof-strip {
-  display: flex;
-  align-items: center;
-  min-height: 34px;
-  border: 1.5px solid var(--rule);
-  margin: 0 0 14px;
-  padding: 7px 9px;
-  background: rgba(245,241,231,.92);
-  color: var(--ink-2);
-  font: 10px/1.35 var(--font-mono);
-  letter-spacing: .08em;
-  text-transform: uppercase;
 }
 
 .runtime-degraded {

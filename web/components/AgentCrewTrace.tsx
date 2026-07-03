@@ -1,5 +1,4 @@
 import type { AgentMode } from '../types/agentic'
-import { MODE_LABEL, MODE_CLASS } from '../types/agentic'
 
 export interface AgentTraceStep {
   id: string
@@ -115,7 +114,7 @@ export default function AgentCrewTrace({ steps }: AgentCrewTraceProps) {
                     )}
                   </div>
                   <span
-                    className="badge"
+                    className="badge agent-step__status"
                     style={{
                       backgroundColor: statusCfg.bg,
                       color: statusCfg.fg,
@@ -124,15 +123,6 @@ export default function AgentCrewTrace({ steps }: AgentCrewTraceProps) {
                   >
                     {statusCfg.label}
                   </span>
-                  {/* P7A: model-mode badge — honest about live vs fallback. */}
-                  {step.model_mode && (
-                    <span
-                      className={`badge agent-step__mode ${MODE_CLASS[step.model_mode] ?? 'badge--muted'}`}
-                      title={step.fallback_reason || MODE_LABEL[step.model_mode]}
-                    >
-                      {MODE_LABEL[step.model_mode]}
-                    </span>
-                  )}
                 </div>
 
                 {/* Label */}

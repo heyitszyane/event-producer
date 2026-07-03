@@ -1197,6 +1197,9 @@ export default function Dashboard() {
               </button>
             ))}
           </nav>
+          <div className="war-room__runtime-footer" aria-label="Runtime proof">
+            <span>{runtimeProofText}</span>
+          </div>
         </aside>
 
         <main className="war-room__main" id="main-content">
@@ -1285,9 +1288,6 @@ export default function Dashboard() {
             </div>
           )}
 
-          <section className="runtime-proof-strip" aria-label="Runtime proof">
-            <span>{runtimeProofText}</span>
-          </section>
           {degradedSteps.length > 0 && (
             <div className="callout callout--warning runtime-degraded" role="status">
               Degraded mode: {degradedSteps[0].role} used fallback because {degradedSteps[0].fallback_reason}.

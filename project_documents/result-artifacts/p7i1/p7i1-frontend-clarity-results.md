@@ -63,3 +63,22 @@ Verified:
 - Narrow viewport sanity check at 390px had no horizontal overflow.
 
 No backend files were changed, so backend pytest/ruff/mypy were not required by the brief.
+
+## Follow-Up Refinement
+
+Additional polish requested after preview:
+
+- Removed the runtime proof strip from the main content area on every route.
+- Moved the runtime proof text into a low-priority footer at the bottom of the side navigation.
+- Simplified Audit Log `Agent Crew Trace` rows by removing visible live/fallback mode badges.
+- Kept a single status badge per trace row and aligned it to the right.
+
+Follow-up QA passed:
+
+- `CI=1 pnpm -C web exec tsc --noEmit --pretty false`
+- `CI=1 pnpm -C web run lint`
+- `CI=1 NEXT_PUBLIC_API_BASE_URL=http://example.invalid pnpm -C web run build`
+- `bash -n scripts/dev.sh`
+- `git diff --check`
+
+Existing warnings remained unchanged: the Next font warning in `web/pages/_app.tsx`, Google Fonts optimization warning during build, and static export/API route warning.
