@@ -388,10 +388,9 @@ def build_next_best_step(state: CasefileState) -> NextBestStep:
             primary=NextStepAction(
                 id="draft_vendor_copy",
                 label="Draft vendor copy",
-                target="vendors",
+                target="ai-crew",
                 kind="primary",
                 reason="Vendor copy is not saved for this casefile yet.",
-                disabled=True,
             ),
             secondary=[
                 NextStepAction(
@@ -402,7 +401,7 @@ def build_next_best_step(state: CasefileState) -> NextBestStep:
                     reason="Check budget health before vendor outreach.",
                 )
             ],
-            rationale="Vendor drafting is intentionally deferred to the next phase.",
+            rationale="Use the direct Vendor Copy Agent to create a draft artifact before any gated outreach.",
         )
 
     return NextBestStep(

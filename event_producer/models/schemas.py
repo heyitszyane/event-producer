@@ -1079,6 +1079,39 @@ class CasefileSummary(BaseModel):
     status: Literal["draft", "generated", "requirements_confirmed"] = "draft"
 
 
+SpecialistAgentId = Literal[
+    "creative_concept",
+    "scope_strategy",
+    "vendor_copy",
+    "risk_review",
+]
+
+
+class SpecialistAgentRequest(BaseModel):
+    """Direct saved-casefile specialist action request."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    instruction: str = ""
+    regenerate: bool = False
+    artifact_id: str | None = None
+
+
+class SpecialistAgentResponse(BaseModel):
+    """Saved artifact response for a direct specialist action."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    event_id: str
+    agent_id: SpecialistAgentId
+    artifact: CasefileArtifact
+    output: dict[str, Any]
+    model_mode: AgentMode
+    fallback_reason: str | None = None
+    notices: list[CasefileNotice] = Field(default_factory=list)
+    next_step: NextBestStep | None = None
+
+
 # ---------------------------------------------------------------------------
 # P7B — scope mutation + orchestrator action schemas
 # ---------------------------------------------------------------------------

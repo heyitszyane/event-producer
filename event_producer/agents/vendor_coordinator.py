@@ -119,6 +119,8 @@ class VendorCoordinatorReasonAgent:
                 event_spec = self._event_store.get_event(event_id)
             except Exception:
                 pass
+        if event_spec is None and request.get("event_spec"):
+            event_spec = request.get("event_spec")
 
         if vendor_id:
             try:
@@ -178,7 +180,11 @@ class VendorCoordinatorReasonAgent:
         schedule_context = request.get("schedule_context") or {}
         vendor_category = request.get("vendor_category") or (vendor.category if vendor else "")
         return {
-            "event_spec": event_spec.model_dump() if event_spec else None,
+            "event_spec": (
+                event_spec.model_dump()
+                if hasattr(event_spec, "model_dump")
+                else event_spec
+            ) if event_spec else None,
             "selected_scope": selected_scope[:12],
             "schedule_context": schedule_context,
             "vendor": vendor.model_dump() if vendor else None,

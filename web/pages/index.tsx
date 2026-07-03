@@ -14,6 +14,7 @@ import ExtractedRequirements from '../components/ExtractedRequirements'
 import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
 import ScopeStrategy from '../components/ScopeStrategy'
+import SpecialistAgentWorkspace from '../components/SpecialistAgentWorkspace'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
@@ -922,7 +923,7 @@ export default function Dashboard() {
       )
     }
 
-    if (!result && activeSection !== 'brief' && activeSection !== 'overview' && activeSection !== 'settings') {
+    if (!result && activeSection !== 'brief' && activeSection !== 'overview' && activeSection !== 'ai-crew' && activeSection !== 'settings') {
       return (
         <section className="war-panel empty-state">
           <p>Start with Brief Intake, then run the AI production crew to populate the war room.</p>
@@ -1029,6 +1030,11 @@ export default function Dashboard() {
       case 'ai-crew':
         return (
           <div className="war-stack">
+            <SpecialistAgentWorkspace
+              casefile={activeCasefile}
+              onCasefileChange={applyCasefileState}
+              onError={setError}
+            />
             <AIProductionCrew
               trace={agentTrace}
               modelModeSummary={result?.model_mode_summary}

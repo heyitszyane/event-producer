@@ -1,5 +1,13 @@
 import { apiFetch } from './api'
-import type { CasefileState, CasefileSummary, EventBasics, NextBestStep } from '../types/agentic'
+import type {
+  CasefileState,
+  CasefileSummary,
+  EventBasics,
+  NextBestStep,
+  SpecialistAgentId,
+  SpecialistAgentRequest,
+  SpecialistAgentResponse,
+} from '../types/agentic'
 
 export async function createCasefile(payload: {
   basics: EventBasics
@@ -60,6 +68,18 @@ export async function runCasefileFirstPass(eventId: string) {
   const res = await apiFetch('/run', {
     method: 'POST',
     body: JSON.stringify({ casefile_id: eventId }),
+  })
+  return res.json()
+}
+
+export async function runSpecialistAgent(
+  eventId: string,
+  agentId: SpecialistAgentId,
+  payload: SpecialistAgentRequest,
+): Promise<SpecialistAgentResponse> {
+  const res = await apiFetch(`/casefiles/${eventId}/agents/${agentId}/run`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
   return res.json()
 }

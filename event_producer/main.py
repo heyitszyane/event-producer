@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional, cast
 
 from event_producer.agents.brief_intake import (
     BriefIntakeFormatterAgent,
@@ -46,6 +46,7 @@ from event_producer.agents.vendor_coordinator import (
 from event_producer.config.defaults import DEFAULT_EVENT_CONSTRAINTS
 from event_producer.models.schemas import (
     AgentTraceStep,
+    AgentMode,
     Approval,
     BriefIntakeResult,
     BriefIntakeSourceMap,
@@ -60,6 +61,8 @@ from event_producer.models.schemas import (
     ScheduleResult,
     ScopeStrategyResult,
     ScopeItem,
+    SpecialistAgentId,
+    SpecialistAgentResponse,
     Vendor,
     VendorMessage,
 )
@@ -1206,6 +1209,344 @@ class EventProducerApp:
         for name, payload in artifact_map.items():
             if payload:
                 self._casefile_store.write_artifact(event_id, name, payload)
+
+    def run_specialist_agent(
+        self,
+        event_id: str,
+        agent_id: SpecialistAgentId,
+        *,
+        instruction: str = "",
+        regenerate: bool = False,
+        artifact_id: str | None = None,
+    ) -> SpecialistAgentResponse:
+        """Run one user-directed specialist against saved casefile context."""
+        casefile = self._casefile_store.get_casefile(event_id)
+        artifact_name = self._artifact_name_for_specialist(agent_id)
+        previous_artifact = self._read_optional_artifact(
+            event_id,
+            artifact_id or artifact_name,
+        )
+        critical_before = self._critical_casefile_snapshot(casefile)
+        context = self._specialist_context(
+            event_id=event_id,
+            instruction=instruction,
+            regenerate=regenerate,
+            previous_artifact=previous_artifact,
+        )
+
+        if agent_id == "creative_concept":
+            output, model_mode, fallback_reason = self._run_direct_creative(context)
+        elif agent_id == "scope_strategy":
+            output, model_mode, fallback_reason = self._run_direct_scope_strategy(context)
+        elif agent_id == "vendor_copy":
+            output, model_mode, fallback_reason = self._run_direct_vendor_copy(context)
+        elif agent_id == "risk_review":
+            output, model_mode, fallback_reason = self._run_direct_risk_review(context)
+        else:
+            raise ValueError(f"Unknown specialist agent: {agent_id}")
+
+        artifact_payload = {
+            "agent_id": agent_id,
+            "instruction": instruction,
+            "regenerate": regenerate,
+            "previous_artifact_used": previous_artifact is not None,
+            "context_summary": context["context_summary"],
+            "output": output,
+            "model_mode": model_mode,
+            "fallback_reason": fallback_reason,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "advisory_only": True,
+        }
+        artifact = self._casefile_store.write_artifact(event_id, artifact_name, artifact_payload)
+        self._casefile_store.append_timeline(
+            event_id,
+            "agent_artifact_generated",
+            {
+                "agent_id": agent_id,
+                "artifact_name": artifact_name,
+                "model_mode": model_mode,
+            },
+        )
+
+        updated = self._casefile_store.get_casefile(event_id)
+        if self._critical_casefile_snapshot(updated) != critical_before:
+            raise RuntimeError("Direct specialist action attempted to mutate critical casefile basics")
+
+        return SpecialistAgentResponse(
+            event_id=event_id,
+            agent_id=agent_id,
+            artifact=artifact,
+            output=artifact_payload,
+            model_mode=cast(AgentMode, model_mode),
+            fallback_reason=fallback_reason,
+            notices=updated.resolved.notices,
+            next_step=updated.next_step,
+        )
+
+    @staticmethod
+    def _artifact_name_for_specialist(agent_id: SpecialistAgentId) -> str:
+        return {
+            "creative_concept": "creative-concept",
+            "scope_strategy": "scope-strategy",
+            "vendor_copy": "vendor-copy",
+            "risk_review": "risk-review",
+        }[agent_id]
+
+    def _read_optional_artifact(self, event_id: str, name: str) -> Any | None:
+        try:
+            return self._casefile_store.read_artifact(event_id, name)
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def _critical_casefile_snapshot(casefile) -> dict[str, Any]:
+        basics = casefile.basics.model_dump(mode="json")
+        resolved = casefile.resolved.basics.model_dump(mode="json")
+        critical_fields = {
+            "expected_turnout",
+            "budget_cap",
+            "country",
+            "city",
+            "currency",
+            "start_date",
+            "end_date",
+            "working_title",
+        }
+        return {
+            "basics": {field: basics.get(field) for field in critical_fields},
+            "resolved": {field: resolved.get(field) for field in critical_fields},
+        }
+
+    def _specialist_context(
+        self,
+        *,
+        event_id: str,
+        instruction: str,
+        regenerate: bool,
+        previous_artifact: Any | None,
+    ) -> dict[str, Any]:
+        casefile = self._casefile_store.get_casefile(event_id)
+        basics = casefile.resolved.basics
+        event_spec = self._event_store.get_event(event_id)
+        budget = self._event_store.get_budget(event_id)
+        schedule = self._event_store.get_schedule(event_id)
+        scope_items = self._event_store.get_scope(event_id)
+        vendors = self._event_store.get_vendors(event_id)
+        vendor_messages = self._event_store.get_messages(event_id)
+        approvals = self._event_store.get_approvals(event_id)
+
+        budget_summary = (
+            budget.model_dump(mode="json")
+            if budget is not None
+            else self._read_optional_artifact(event_id, "budget-summary")
+        )
+        run_sheet = self._read_optional_artifact(event_id, "run-sheet")
+        schedule_context = (
+            schedule.model_dump(mode="json")
+            if schedule is not None
+            else (run_sheet or {}).get("schedule_result") if isinstance(run_sheet, dict) else None
+        )
+        creative_artifact = self._read_optional_artifact(event_id, "creative-concept")
+        creative_output = (
+            creative_artifact.get("output")
+            if isinstance(creative_artifact, dict) and "output" in creative_artifact
+            else creative_artifact
+        )
+
+        return {
+            "event_id": event_id,
+            "casefile": casefile,
+            "basics": basics,
+            "event_brief": casefile.brief,
+            "requirements": casefile.requirements.model_dump(mode="json") if casefile.requirements else None,
+            "scope_items": [item.model_dump(mode="json") for item in scope_items],
+            "budget_summary": budget_summary,
+            "schedule_result": schedule_context,
+            "run_sheet": run_sheet,
+            "creative_concept": creative_output,
+            "previous_artifact": previous_artifact,
+            "instruction": instruction,
+            "regenerate": regenerate,
+            "event_spec": (
+                event_spec.model_dump(mode="json")
+                if event_spec is not None
+                else self._event_spec_from_casefile(casefile)
+            ),
+            "vendors": [vendor.model_dump(mode="json") for vendor in vendors],
+            "vendor_messages": [msg.model_dump(mode="json") for msg in vendor_messages],
+            "approvals": [approval.model_dump(mode="json") for approval in approvals],
+            "notices": [notice.model_dump(mode="json") for notice in casefile.resolved.notices],
+            "context_summary": {
+                "resolved_basics_loaded": True,
+                "brief_loaded": bool(casefile.brief.strip()),
+                "requirements_confirmed": bool(casefile.requirements and casefile.requirements.confirmed),
+                "scope_item_count": len(scope_items),
+                "has_budget_summary": budget_summary is not None,
+                "has_schedule": schedule_context is not None,
+                "previous_artifact_loaded": previous_artifact is not None,
+            },
+        }
+
+    @staticmethod
+    def _event_spec_from_casefile(casefile) -> dict[str, Any]:
+        basics = casefile.resolved.basics
+        return {
+            "name": basics.working_title or "Saved event casefile",
+            "description": casefile.brief,
+            "event_type": basics.event_type or "event",
+            "attendees": basics.expected_turnout,
+            "venue_type": "",
+            "date": basics.start_date or basics.end_date or "",
+            "location": ", ".join(part for part in (basics.city, basics.country) if part),
+            "currency": basics.currency,
+            "budget_cap": str(basics.budget_cap) if basics.budget_cap is not None else None,
+        }
+
+    def _intake_from_casefile_context(self, context: dict[str, Any]) -> BriefIntakeResult:
+        basics = context["basics"]
+        return BriefIntakeResult(
+            normalized_brief=context["event_brief"] or context["instruction"] or "",
+            event_type=basics.event_type or "event",
+            event_type_raw=basics.event_type or None,
+            attendees=basics.expected_turnout,
+            budget_cap=str(basics.budget_cap) if basics.budget_cap is not None else None,
+            contingency_pct=None,
+            venue_type=None,
+            date=basics.start_date or basics.end_date or None,
+            location=", ".join(part for part in (basics.city, basics.country) if part) or None,
+            goals=[context["instruction"]] if context["instruction"].strip() else [],
+            audience_profile=None,
+            tone=None,
+            must_haves=[],
+            nice_to_haves=[],
+            constraints=[],
+            assumptions=[],
+            missing_questions=[
+                notice["message"]
+                for notice in context["notices"]
+                if notice.get("type") == "missing"
+            ],
+            contradictions=[
+                notice["message"]
+                for notice in context["notices"]
+                if notice.get("type") == "conflict"
+            ],
+            confidence="medium",
+            model_mode="rule_based_fallback",
+            source_map=BriefIntakeSourceMap(
+                attendees="manual_override" if basics.expected_turnout is not None else "missing",
+                budget_cap="manual_override" if basics.budget_cap is not None else "missing",
+                date="manual_override" if basics.start_date else "missing",
+                event_type="manual_override" if basics.event_type else "missing",
+                location="manual_override" if basics.city or basics.country else "missing",
+            ),
+        )
+
+    def _run_direct_creative(self, context: dict[str, Any]) -> tuple[dict[str, Any], AgentMode, str | None]:
+        intake = self._intake_from_casefile_context(context)
+        raw = self._creative_reason.run(brief=context["event_brief"], intake=intake)
+        result = self._creative_formatter.run(
+            provider_text=raw.get("provider_text"),
+            intake=intake,
+            model_mode=cast(AgentMode, raw.get("model_mode", "rule_based_fallback")),
+            fallback_reason=raw.get("fallback_reason"),
+            event_type=intake.event_type,
+            goals=intake.goals,
+            attendees=intake.attendees,
+            budget_cap=intake.budget_cap,
+        )
+        output = result.model_dump(mode="json")
+        output["instruction_response"] = context["instruction"]
+        output["critical_mutation_policy"] = "advisory_only_saved_as_artifact"
+        return output, result.model_mode, raw.get("fallback_reason")
+
+    def _run_direct_scope_strategy(self, context: dict[str, Any]) -> tuple[dict[str, Any], AgentMode, str | None]:
+        basics = context["basics"]
+        request = {
+            "resolved_constraints": {
+                "attendees": basics.expected_turnout,
+                "budget_cap": str(basics.budget_cap) if basics.budget_cap is not None else None,
+                "currency": basics.currency,
+                "event_type": basics.event_type,
+                "location": ", ".join(part for part in (basics.city, basics.country) if part),
+                "date": basics.start_date or basics.end_date,
+            },
+            "event_brief": context["event_brief"],
+            "requirements": context["requirements"],
+            "scope_items": context["scope_items"],
+            "budget_summary": context["budget_summary"],
+            "schedule_result": context["schedule_result"],
+            "creative_concept": context["creative_concept"],
+            "previous_artifact": context["previous_artifact"],
+            "user_instruction": context["instruction"],
+        }
+        raw = self._scope_strategy_reason.run(request)
+        result = self._scope_strategy_formatter.run(
+            provider_text=raw.get("provider_text"),
+            request=request,
+            model_mode=cast(AgentMode, raw.get("model_mode", "rule_based_fallback")),
+            fallback_reason=raw.get("fallback_reason"),
+        )
+        output = result.model_dump(mode="json")
+        output["critical_mutation_policy"] = "recommendations_only_no_scope_or_basics_mutation"
+        return output, result.model_mode, result.fallback_reason
+
+    def _run_direct_vendor_copy(self, context: dict[str, Any]) -> tuple[dict[str, Any], AgentMode, str | None]:
+        request = {
+            "action": "draft_rfp",
+            "event_id": context["event_id"],
+            "event_spec": context["event_spec"],
+            "scope_items": context["scope_items"],
+            "schedule_context": context["schedule_result"] or context["run_sheet"] or {},
+            "vendor_category": "venue",
+            "instruction": context["instruction"],
+        }
+        raw = self._vendor_reason.run(request)
+        output = raw.get("vendor_draft") or {"body": raw.get("draft", "")}
+        output["draft_only"] = True
+        output["send_status"] = "not_sent"
+        output["approval_required_before_send"] = True
+        output["critical_mutation_policy"] = "artifact_only_no_vendor_send_or_basics_mutation"
+        return (
+            output,
+            cast(AgentMode, output.get("model_mode", raw.get("model_mode", "rule_based_fallback"))),
+            output.get("fallback_reason"),
+        )
+
+    def _run_direct_risk_review(self, context: dict[str, Any]) -> tuple[dict[str, Any], AgentMode, str | None]:
+        state = {
+            "event_spec": context["event_spec"],
+            "budget_summary": context["budget_summary"] or {},
+            "schedule_result": context["schedule_result"],
+            "conflict_report": None,
+            "vendors": context["vendors"],
+            "vendor_messages": context["vendor_messages"],
+        }
+        flags = self._risk_flagger.run(state)
+        missing_or_conflict = [
+            notice for notice in context["notices"]
+            if notice.get("type") in {"missing", "conflict"}
+        ]
+        recommended_next_actions = []
+        if missing_or_conflict:
+            recommended_next_actions.append("Resolve missing or conflicting casefile requirements before vendor outreach.")
+        if not context["budget_summary"]:
+            recommended_next_actions.append("Run the production crew or budget engine before committing vendor asks.")
+        if not context["schedule_result"]:
+            recommended_next_actions.append("Create or review the run sheet before locking vendor lead times.")
+        if not flags and not recommended_next_actions:
+            recommended_next_actions.append("Review saved artifacts and keep vendor sends behind approval.")
+
+        output = {
+            "risk_flags": flags,
+            "casefile_gaps": missing_or_conflict,
+            "recommended_next_actions": recommended_next_actions,
+            "instruction_response": context["instruction"],
+            "critical_mutation_policy": "review_only_no_state_mutation",
+            "model_mode": "deterministic_engine",
+            "fallback_reason": None,
+        }
+        return output, "deterministic_engine", None
 
 
 # ---------------------------------------------------------------------------

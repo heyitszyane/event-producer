@@ -41,6 +41,8 @@ from event_producer.models.schemas import (
     ScopeItem,
     ScopeItemCreate,
     ScopeItemUpdate,
+    SpecialistAgentId,
+    SpecialistAgentRequest,
 )
 from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
@@ -314,6 +316,24 @@ def create_app() -> FastAPI:
         if casefile.next_step is None:
             raise HTTPException(status_code=500, detail="Next step unavailable")
         return casefile.next_step.model_dump(mode="json")
+
+    @app.post("/casefiles/{event_id}/agents/{agent_id}/run")
+    async def run_casefile_specialist_agent(
+        event_id: str,
+        agent_id: SpecialistAgentId,
+        req: SpecialistAgentRequest,
+    ) -> dict[str, Any]:
+        """Run one direct specialist against server-loaded saved casefile context."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        response = producer.run_specialist_agent(
+            event_id,
+            agent_id,
+            instruction=req.instruction,
+            regenerate=req.regenerate,
+            artifact_id=req.artifact_id,
+        )
+        return response.model_dump(mode="json")
 
     @app.post("/run")
     async def run_event(req: RunEventRequest) -> Any:

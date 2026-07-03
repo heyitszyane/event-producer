@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7L — Direct specialist-agent workspace/actions
+
+- Added saved-casefile direct actions for Creative Concept, Scope Strategy,
+  Vendor Copy, and Risk Review agents.
+- Saved each specialist output as a casefile artifact and appended timeline
+  events.
+- Made AI Production Crew cards actionable entry points rather than proof
+  badges.
+- Added tests proving direct agent calls use saved casefile context and do not
+  mutate critical event basics automatically.
+
 ### P7K — Requirements confirmation and next-step guidance
 
 - Added requirements confirmation for saved casefiles, including structured

@@ -122,6 +122,29 @@ export interface CasefileSummary {
   status: 'draft' | 'generated' | 'requirements_confirmed'
 }
 
+export type SpecialistAgentId =
+  | 'creative_concept'
+  | 'scope_strategy'
+  | 'vendor_copy'
+  | 'risk_review'
+
+export interface SpecialistAgentRequest {
+  instruction?: string
+  regenerate?: boolean
+  artifact_id?: string | null
+}
+
+export interface SpecialistAgentResponse {
+  event_id: string
+  agent_id: SpecialistAgentId
+  artifact: CasefileArtifact
+  output: Record<string, unknown>
+  model_mode: AgentMode
+  fallback_reason?: string | null
+  notices?: CasefileNotice[]
+  next_step?: NextBestStep | null
+}
+
 export interface BriefIntakeSourceMap {
   attendees?: RequirementSource
   budget_cap?: RequirementSource

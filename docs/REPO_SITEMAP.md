@@ -48,7 +48,7 @@ Package marker. Exports top-level symbols if needed.
 Application entry point. Wires agents, engines, and providers into a runnable app. Contains `InMemoryEventStore` (full CRUD implementation of the `EventStore` ABC) and `EventProducerApp` (composition root).
 
 #### `event_producer/api.py`
-FastAPI REST API wrapper. Exposes `/run`, `/runtime/model`, `/runtime/model/test`, `/settings/model`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/event/{id}/scope-items/{idx}/toggle`, `/event/{id}/scope-items/{idx}/retier`, `/event/{id}/approvals`, `/event/{id}/approvals/{approval_id}`, legacy sample `/approvals`, legacy sample `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Scope/proposal mutation responses include recompute notices with before/after headroom, schedule status, and stale-agent-output honesty. Provider diagnostic responses are non-secret and surface strict-live failures with provider/model/agent context.
+FastAPI REST API wrapper. Exposes `/run`, `/casefiles`, `/casefiles/{id}`, `/casefiles/{id}/requirements/confirm`, `/casefiles/{id}/next-step`, `/casefiles/{id}/agents/{agent_id}/run`, `/runtime/model`, `/runtime/model/test`, `/settings/model`, `/event/{id}`, `/event/{id}/chat`, `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`, `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}` (scope mutation), `/event/{id}/scope-items/{idx}/toggle`, `/event/{id}/scope-items/{idx}/retier`, `/event/{id}/approvals`, `/event/{id}/approvals/{approval_id}`, legacy sample `/approvals`, legacy sample `/approvals/{id}`, `/chat`, `/healthz`. HITL approval flow with action-gate integration. CORS driven by `ALLOWED_ORIGINS` env var. Direct specialist-agent actions load saved casefile context server-side, save advisory artifacts, and append timeline entries without mutating critical event basics. Scope/proposal mutation responses include recompute notices with before/after headroom, schedule status, and stale-agent-output honesty. Provider diagnostic responses are non-secret and surface strict-live failures with provider/model/agent context.
 
 #### `event_producer/config/`
 Small shared configuration constants.
@@ -90,7 +90,7 @@ Deterministic, pure-Python cores with no external dependencies. These are the "m
 | `scheduler.py` | Run-of-show CPM scheduler; produces time-coded production schedules. Dependency resolution, lead-time validation, anchor constraints, cycle detection, conflict reporting. |
 
 #### `event_producer/models/`
-Pydantic schemas shared across the codebase. Single file `schemas.py`. All monetary fields use `Decimal` (strict mode rejects float). Mutable defaults use `Field(default_factory=...)`. P7D-FIX adds `ManualConstraintFlags`, `BriefIntakeSourceMap`, and `RequirementSource` so API clients can distinguish brief extraction, manual overrides, fallback defaults, and missing values.
+Pydantic schemas shared across the codebase. Single file `schemas.py`. All monetary fields use `Decimal` (strict mode rejects float). Mutable defaults use `Field(default_factory=...)`. P7D-FIX adds `ManualConstraintFlags`, `BriefIntakeSourceMap`, and `RequirementSource` so API clients can distinguish brief extraction, manual overrides, fallback defaults, and missing values. P7L adds typed direct specialist-agent request/response contracts.
 
 #### `event_producer/security/`
 Action-gate enforcement, prompt-injection flagging, and audit logging. These modules form the trust boundary for all agent actions.
@@ -139,10 +139,10 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/pages/` | Next.js page components (file-system routing) |
 | `web/pages/index.tsx` | Main Paper War Room page with persistent side nav, route-like section state, runtime summary strip, Settings provider test, strict-live error display, and AI Producer proposal controls |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, ScopeStrategy, SecurityBeat, VendorsCard). The UI exposes live/fallback agent modes, deterministic engine outputs, vendor draft preview, and Approval Wall status inside Overview, Brief Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log sections. |
+| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, ScopeStrategy, SecurityBeat, SpecialistAgentWorkspace, VendorsCard). The UI exposes direct specialist-agent actions, live/fallback agent modes, deterministic engine outputs, vendor draft preview, and Approval Wall status inside Overview, Brief Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log sections. |
 | `web/lib/api.ts` | Browser API helper for API base resolution, demo header injection, structured backend error parsing, and strict-live provider failure details |
 | `web/lib/humanize.ts` | User-facing display-label helpers for enum/action/category/provenance strings |
-| `web/types/agentic.ts` | Shared frontend types for model modes, provenance, proposals, Scope Strategy, Vendor Draft, provider diagnostics, and recompute notices |
+| `web/types/agentic.ts` | Shared frontend types for model modes, provenance, proposals, direct specialist-agent actions, Scope Strategy, Vendor Draft, provider diagnostics, and recompute notices |
 | `web/styles/globals.css` | Design token system + component classes (single source of truth for styling) |
 | `web/public/` | Static assets |
 | `web/out/` | Static export output (gitignored) |
@@ -172,6 +172,7 @@ All test code lives here.
 | `test_live_scope_strategy.py` | P7H Scope Strategy safety and live/fallback contract tests |
 | `test_orchestrator_live.py` | P7H live-capable Orchestrator proposal and strict-provider behavior tests |
 | `test_vendor_draft_live.py` | P7H Vendor Draft live/fallback and approval-wall safety tests |
+| `test_p7l_specialist_agents.py` | P7L direct specialist-agent artifact, timeline, fallback, invalid-agent, and no-silent-basics-mutation tests |
 | `eval_cases/` | Red-team eval set written in Gherkin (`*.feature` files) |
 
 ---
