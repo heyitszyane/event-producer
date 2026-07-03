@@ -1,8 +1,8 @@
 import { type FormEvent } from 'react'
 
 const EXAMPLE_BRIEF = [
-  'Need a 50-pax AI founder networking night in Singapore next Thursday.',
-  'Budget is around 20k SGD. Want it to feel premium but not flashy,',
+  'Need a 100-pax AI founder networking night in Singapore on 2026-07-10.',
+  'Budget is around 10k SGD. Want it to feel premium but not flashy,',
   'light F&B, a short fireside chat, and a few structured networking prompts.',
   'No full conference setup. Audience is founders, investors, and AI builders.',
   'Need this to be credible, efficient, and not overproduced.',
@@ -31,7 +31,7 @@ export default function IntakeHero({
     >
       <div className="card__header">
         <h2 id="intake-heading">Brief Intake</h2>
-        <span className="badge badge--info">AI Production Crew</span>
+        <span className="badge badge--info">Casefile</span>
       </div>
 
       <form onSubmit={onSubmit} className="intake-hero__form">
@@ -39,7 +39,7 @@ export default function IntakeHero({
           className="input intake-hero__textarea"
           value={brief}
           onChange={(e) => onBriefChange(e.target.value)}
-          placeholder="Describe your event — rough is fine. The crew will interpret the ambiguity."
+          placeholder="Add event notes, goals, constraints, and context."
           rows={5}
           aria-label="Event brief"
         />
@@ -59,10 +59,10 @@ export default function IntakeHero({
             className={`btn btn--primary ${loading ? 'loading-pulse' : ''}`}
           >
             {loading
-              ? 'Analyzing…'
+              ? 'Saving...'
               : hasRun
-              ? 'Re-analyze with AI Production Crew'
-              : 'Analyze with AI Production Crew'}
+              ? 'Save casefile and generate first pass'
+              : 'Save casefile and generate first pass'}
           </button>
         </div>
       </form>

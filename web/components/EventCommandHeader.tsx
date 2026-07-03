@@ -1,28 +1,14 @@
 import { type FormEvent } from 'react'
-
-export interface EventSpec {
-  name?: string
-  description?: string
-  event_type?: string
-  attendees?: number | string
-  venue_type?: string
-  duration_hours?: string | number
-  date?: string
-  missing_fields?: string[]
-  [key: string]: unknown
-}
+import type { EventBasics } from '../types/agentic'
 
 export interface FieldErrors {
   brief?: string
   budgetCap?: string
-  contingencyPct?: string
-  attendees?: string
-  eventType?: string
-  venueType?: string
-  date?: string
+  expectedTurnout?: string
+  startDate?: string
+  endDate?: string
 }
 
-// Backend-supported event types (must match _SCOPE_CATALOGUE keys)
 const EVENT_TYPES = [
   { value: 'corporate', label: 'Corporate' },
   { value: 'networking', label: 'Networking' },
@@ -30,56 +16,32 @@ const EVENT_TYPES = [
   { value: 'conference', label: 'Conference' },
 ]
 
+const CURRENCIES = ['USD', 'SGD', 'THB', 'MYR', 'IDR', 'GBP', 'EUR', 'AUD']
+const COUNTRIES = ['Singapore', 'United States', 'Thailand', 'Malaysia', 'Indonesia', 'United Kingdom', 'Australia']
+
 export interface EventCommandHeaderProps {
-  eventSpec: EventSpec | null
-  formData: {
-    brief: string
-    budgetCap: string
-    contingencyPct: string
-    attendees: number | ''
-    eventType: string
-    venueType: string
-    date: string
-  }
-  formHandlers: {
-    setBrief: (v: string) => void
-    setBudgetCap: (v: string) => void
-    setContingencyPct: (v: string) => void
-    setAttendees: (v: number | '') => void
-    setEventType: (v: string) => void
-    setVenueType: (v: string) => void
-    setDate: (v: string) => void
-  }
+  basics: EventBasics
+  brief: string
+  onBasicsChange: (next: EventBasics) => void
+  onBriefChange: (value: string) => void
   fieldErrors?: FieldErrors
   onRun: (e: FormEvent) => void
   loading: boolean
-  running: boolean
+  hasCasefile: boolean
 }
 
 export default function EventCommandHeader({
-  eventSpec,
-  formData,
-  formHandlers,
+  basics,
+  brief,
+  onBasicsChange,
+  onBriefChange,
   fieldErrors = {},
   onRun,
   loading,
-  running,
+  hasCasefile,
 }: EventCommandHeaderProps) {
-  const eventType = eventSpec?.event_type || '—'
-  const eventDate = eventSpec?.date || '—'
-  const headcount = eventSpec?.attendees ? String(eventSpec.attendees) : '—'
-  const venue = eventSpec?.venue_type || '—'
-  const manualActive = {
-    budgetCap: Boolean(formData.budgetCap.trim()),
-    contingencyPct: Boolean(formData.contingencyPct.trim()),
-    attendees: formData.attendees !== '',
-    eventType: Boolean(formData.eventType),
-    venueType: Boolean(formData.venueType),
-    date: Boolean(formData.date),
-  }
-
-  function OverrideBadge({ active }: { active: boolean }) {
-    return active ? <span className="badge badge--warn">manual override</span> : null
+  function update<K extends keyof EventBasics>(field: K, value: EventBasics[K]) {
+    onBasicsChange({ ...basics, [field]: value })
   }
 
   return (
@@ -87,135 +49,139 @@ export default function EventCommandHeader({
       <div className="event-constraints__summary">
         <div className="event-constraints__title">
           <div>
-            <span className="war-eyebrow">MANUAL CONSTRAINTS</span>
+            <span className="war-eyebrow">Event Basics</span>
             <p className="event-constraints__sub">
-              Optional manual constraints. Filled/enabled values override AI extraction.
+              Saved casefile fields are the source of truth for the production crew.
             </p>
-            {running && (
-              <p className="event-constraints__meta">
-                {eventType} &middot; {eventDate} &middot; {headcount} attendees &middot; {venue}
-              </p>
-            )}
           </div>
         </div>
       </div>
 
       <div className="event-constraints__body">
-        <form
-          onSubmit={onRun}
-          className="event-constraints__form"
-        >
+        <form onSubmit={onRun} className="event-constraints__form">
           <div className="event-constraints__grid">
-            {/* Budget Cap */}
             <label className="event-field">
-              <span>Budget Cap <OverrideBadge active={manualActive.budgetCap} /></span>
+              <span>Working title</span>
               <input
                 type="text"
-                value={formData.budgetCap}
-                onChange={(e) => formHandlers.setBudgetCap(e.target.value)}
+                value={basics.working_title}
+                onChange={(e) => update('working_title', e.target.value)}
+                placeholder="AI Industry Networking Night"
+                className="input"
+              />
+            </label>
+
+            <label className="event-field">
+              <span>Country</span>
+              <select
+                value={basics.country}
+                onChange={(e) => update('country', e.target.value)}
+                className="select"
+              >
+                <option value="">Not set</option>
+                {COUNTRIES.map((country) => <option key={country} value={country}>{country}</option>)}
+              </select>
+            </label>
+
+            <label className="event-field">
+              <span>City</span>
+              <input
+                type="text"
+                value={basics.city}
+                onChange={(e) => update('city', e.target.value)}
+                placeholder="Singapore"
+                className="input"
+              />
+            </label>
+
+            <label className="event-field">
+              <span>Currency</span>
+              <select
+                value={basics.currency}
+                onChange={(e) => update('currency', e.target.value)}
+                className="select"
+              >
+                {CURRENCIES.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+              </select>
+            </label>
+
+            <label className="event-field">
+              <span>Budget cap</span>
+              <input
+                type="text"
+                value={basics.budget_cap ?? ''}
+                onChange={(e) => update('budget_cap', e.target.value)}
                 placeholder="10000"
                 className={`input ${fieldErrors.budgetCap ? 'input--error' : ''}`}
                 aria-invalid={!!fieldErrors.budgetCap}
-                aria-describedby={fieldErrors.budgetCap ? 'error-budgetCap' : undefined}
               />
-              {fieldErrors.budgetCap && (
-                <span id="error-budgetCap" className="field-error" role="alert">{fieldErrors.budgetCap}</span>
-              )}
+              {fieldErrors.budgetCap && <span className="field-error" role="alert">{fieldErrors.budgetCap}</span>}
             </label>
 
-            {/* Contingency % - empty by default, brief extraction primary */}
             <label className="event-field">
-              <span>Contingency % <OverrideBadge active={manualActive.contingencyPct} /></span>
-              <input
-                type="number"
-                value={formData.contingencyPct}
-                onChange={(e) => formHandlers.setContingencyPct(e.target.value)}
-                placeholder="e.g. 10"
-                className={`input ${fieldErrors.contingencyPct ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.contingencyPct}
-                aria-describedby={fieldErrors.contingencyPct ? 'error-contingencyPct' : undefined}
-              />
-              {fieldErrors.contingencyPct && (
-                <span id="error-contingencyPct" className="field-error" role="alert">{fieldErrors.contingencyPct}</span>
-              )}
-            </label>
-
-            {/* Attendees - empty by default, brief extraction primary */}
-            <label className="event-field">
-              <span>Attendees <OverrideBadge active={manualActive.attendees} /></span>
-              <input
-                type="number"
-                value={formData.attendees}
-                onChange={(e) => {
-                  const v = e.target.value
-                  formHandlers.setAttendees(v ? Number(v) : '')
-                }}
-                placeholder="e.g. 100"
-                className={`input ${fieldErrors.attendees ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.attendees}
-                aria-describedby={fieldErrors.attendees ? 'error-attendees' : undefined}
-              />
-              {fieldErrors.attendees && (
-                <span id="error-attendees" className="field-error" role="alert">{fieldErrors.attendees}</span>
-              )}
-            </label>
-
-            {/* Event Type */}
-            <label className="event-field">
-              <span>Event Type <OverrideBadge active={manualActive.eventType} /></span>
-              <select
-                value={formData.eventType}
-                onChange={(e) => formHandlers.setEventType(e.target.value)}
-                className={`select ${fieldErrors.eventType ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.eventType}
-                aria-describedby={fieldErrors.eventType ? 'error-eventType' : undefined}
-              >
-                <option value="">From brief</option>
-                {EVENT_TYPES.map((et) => (
-                  <option key={et.value} value={et.value}>{et.label}</option>
-                ))}
-              </select>
-              {fieldErrors.eventType && (
-                <span id="error-eventType" className="field-error" role="alert">{fieldErrors.eventType}</span>
-              )}
-            </label>
-
-            {/* Venue Type */}
-            <label className="event-field">
-              <span>Venue Type <OverrideBadge active={manualActive.venueType} /></span>
-              <select
-                value={formData.venueType}
-                onChange={(e) => formHandlers.setVenueType(e.target.value)}
-                className={`select ${fieldErrors.venueType ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.venueType}
-                aria-describedby={fieldErrors.venueType ? 'error-venueType' : undefined}
-              >
-                <option value="">From brief</option>
-                <option value="indoor">Indoor</option>
-                <option value="outdoor">Outdoor</option>
-                <option value="hybrid">Hybrid</option>
-              </select>
-              {fieldErrors.venueType && (
-                <span id="error-venueType" className="field-error" role="alert">{fieldErrors.venueType}</span>
-              )}
-            </label>
-
-            {/* Date */}
-            <label className="event-field">
-              <span>Date <OverrideBadge active={manualActive.date} /></span>
+              <span>Start date</span>
               <input
                 type="date"
-                value={formData.date}
-                onChange={(e) => formHandlers.setDate(e.target.value)}
-                className={`input ${fieldErrors.date ? 'input--error' : ''}`}
-                aria-invalid={!!fieldErrors.date}
-                aria-describedby={fieldErrors.date ? 'error-date' : undefined}
+                value={basics.start_date}
+                onChange={(e) => update('start_date', e.target.value)}
+                className={`input ${fieldErrors.startDate ? 'input--error' : ''}`}
+                aria-invalid={!!fieldErrors.startDate}
               />
-              {fieldErrors.date && (
-                <span id="error-date" className="field-error" role="alert">{fieldErrors.date}</span>
-              )}
+              {fieldErrors.startDate && <span className="field-error" role="alert">{fieldErrors.startDate}</span>}
+            </label>
+
+            <label className="event-field">
+              <span>End date</span>
+              <input
+                type="date"
+                value={basics.end_date}
+                onChange={(e) => update('end_date', e.target.value)}
+                className={`input ${fieldErrors.endDate ? 'input--error' : ''}`}
+                aria-invalid={!!fieldErrors.endDate}
+              />
+              {fieldErrors.endDate && <span className="field-error" role="alert">{fieldErrors.endDate}</span>}
+            </label>
+
+            <label className="event-field">
+              <span>Expected turnout</span>
+              <input
+                type="number"
+                value={basics.expected_turnout ?? ''}
+                onChange={(e) => update('expected_turnout', e.target.value ? Number(e.target.value) : null)}
+                placeholder="100"
+                className={`input ${fieldErrors.expectedTurnout ? 'input--error' : ''}`}
+                aria-invalid={!!fieldErrors.expectedTurnout}
+              />
+              {fieldErrors.expectedTurnout && <span className="field-error" role="alert">{fieldErrors.expectedTurnout}</span>}
+            </label>
+
+            <label className="event-field">
+              <span>Event type</span>
+              <select
+                value={basics.event_type}
+                onChange={(e) => update('event_type', e.target.value)}
+                className="select"
+              >
+                <option value="">Not set</option>
+                {EVENT_TYPES.map((eventType) => (
+                  <option key={eventType.value} value={eventType.value}>{eventType.label}</option>
+                ))}
+              </select>
             </label>
           </div>
+
+          <label className="event-field event-field--wide">
+            <span>Event brief</span>
+            <textarea
+              className={`input intake-hero__textarea ${fieldErrors.brief ? 'input--error' : ''}`}
+              value={brief}
+              onChange={(e) => onBriefChange(e.target.value)}
+              placeholder="Add event notes, goals, constraints, and context."
+              rows={5}
+              aria-label="Event brief"
+            />
+            {fieldErrors.brief && <span className="field-error" role="alert">{fieldErrors.brief}</span>}
+          </label>
 
           <div className="event-constraints__actions">
             <button
@@ -223,7 +189,11 @@ export default function EventCommandHeader({
               disabled={loading}
               className={`btn btn--primary ${loading ? 'loading-pulse' : ''}`}
             >
-              {loading ? 'Running...' : running ? 'Re-run Event' : 'Run Event'}
+              {loading
+                ? 'Generating...'
+                : hasCasefile
+                ? 'Save casefile and generate first pass'
+                : 'Create casefile and generate first pass'}
             </button>
           </div>
         </form>

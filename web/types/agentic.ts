@@ -17,6 +17,72 @@ export type RequirementSource =
   | 'fallback_default'
   | 'missing'
 
+export type CasefileSource =
+  | 'user_field'
+  | 'saved_casefile'
+  | 'brief_extracted'
+  | 'missing'
+  | 'demo_seed'
+
+export type CasefileNoticeType = 'missing' | 'conflict' | 'info'
+
+export interface EventBasics {
+  working_title: string
+  country: string
+  city: string
+  currency: string
+  budget_cap?: string | number | null
+  start_date: string
+  end_date: string
+  expected_turnout?: number | null
+  event_type: string
+}
+
+export interface CasefileNotice {
+  type: CasefileNoticeType
+  field: string
+  message: string
+  brief_value?: string | number | null
+  casefile_value?: string | number | null
+}
+
+export interface ResolvedEventState {
+  basics: EventBasics
+  sources: Record<string, CasefileSource>
+  notices: CasefileNotice[]
+  confirmed: boolean
+}
+
+export interface CasefileArtifact {
+  name: string
+  path: string
+  updated_at: string
+}
+
+export interface CasefileState {
+  event_id: string
+  created_at: string
+  updated_at: string
+  basics: EventBasics
+  brief: string
+  resolved: ResolvedEventState
+  status: 'draft' | 'generated' | 'requirements_confirmed'
+  artifacts: Record<string, CasefileArtifact>
+  planning_assumptions?: Record<string, unknown>
+}
+
+export interface CasefileSummary {
+  event_id: string
+  working_title: string
+  country: string
+  city: string
+  start_date: string
+  end_date: string
+  expected_turnout?: number | null
+  updated_at: string
+  status: 'draft' | 'generated' | 'requirements_confirmed'
+}
+
 export interface BriefIntakeSourceMap {
   attendees?: RequirementSource
   budget_cap?: RequirementSource

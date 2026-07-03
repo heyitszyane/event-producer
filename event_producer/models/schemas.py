@@ -34,6 +34,9 @@ AgentMode = Literal[
     "not_enabled",
 ]
 
+CasefileSource = Literal["user_field", "saved_casefile", "brief_extracted", "missing", "demo_seed"]
+CasefileNoticeType = Literal["missing", "conflict", "info"]
+
 _AGENT_STATUS = Literal[
     "complete",
     "warning",
@@ -907,6 +910,118 @@ class RunEventRequest(BaseModel):
     venue_type: str | None = None
     date: str | None = None
     manual_constraints: ManualConstraintFlags | None = None
+
+
+# ---------------------------------------------------------------------------
+# P7J — local casefile state truth
+# ---------------------------------------------------------------------------
+
+
+class EventBasics(BaseModel):
+    """User-editable canonical basics for a saved event casefile."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    working_title: str = ""
+    country: str = ""
+    city: str = ""
+    currency: str = "USD"
+    budget_cap: Decimal | None = None
+    start_date: str = ""
+    end_date: str = ""
+    expected_turnout: int | None = None
+    event_type: str = ""
+
+    @field_validator("currency")
+    @classmethod
+    def validate_casefile_currency(cls, v: str, info) -> str:
+        value = (v or "USD").upper()
+        if len(value) != 3:
+            raise ValueError(f"{info.field_name} must be a 3-letter uppercase ISO 4217 code")
+        if value not in ISO_4217_ALLOWLIST:
+            raise ValueError(f"{info.field_name} '{value}' is not in the supported currency allowlist")
+        return value
+
+    @field_validator("budget_cap")
+    @classmethod
+    def validate_casefile_budget_cap(cls, v: Decimal | None, info) -> Decimal | None:
+        if v is not None:
+            _reject_float(info.field_name, v)
+            if v <= 0:
+                raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("expected_turnout")
+    @classmethod
+    def validate_expected_turnout(cls, v: int | None, info) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+
+class CasefileNotice(BaseModel):
+    """Missing/conflict/info notice surfaced with resolved casefile state."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    type: CasefileNoticeType
+    field: str
+    message: str
+    brief_value: str | int | Decimal | None = None
+    casefile_value: str | int | Decimal | None = None
+
+
+class ResolvedEventState(BaseModel):
+    """Canonical resolved casefile state used by top-level UI surfaces."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    basics: EventBasics
+    sources: dict[str, CasefileSource]
+    notices: list[CasefileNotice] = Field(default_factory=list)
+    confirmed: bool = False
+
+
+class CasefileArtifact(BaseModel):
+    """Metadata for a JSON artifact stored under a casefile directory."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    name: str
+    path: str
+    updated_at: str
+
+
+class CasefileState(BaseModel):
+    """File-backed event casefile persisted before agent generation."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    event_id: str
+    created_at: str
+    updated_at: str
+    basics: EventBasics
+    brief: str = ""
+    resolved: ResolvedEventState
+    status: Literal["draft", "generated", "requirements_confirmed"] = "draft"
+    artifacts: dict[str, CasefileArtifact] = Field(default_factory=dict)
+    planning_assumptions: dict[str, Any] = Field(default_factory=dict)
+
+
+class CasefileSummary(BaseModel):
+    """List-view projection for saved local casefiles."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    event_id: str
+    working_title: str
+    country: str
+    city: str
+    start_date: str
+    end_date: str
+    expected_turnout: int | None = None
+    updated_at: str
+    status: Literal["draft", "generated", "requirements_confirmed"] = "draft"
 
 
 # ---------------------------------------------------------------------------

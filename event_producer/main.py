@@ -70,6 +70,7 @@ from event_producer.providers.model_router import build_agent_model
 from event_producer.providers.rate_card import FxRateProvider, StaticFxRateProvider
 from event_producer.providers.vendor_sourcer import VendorSourcer
 from event_producer.security.audit_log import AuditLog
+from event_producer.storage.local_casefiles import LocalCasefileStore
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +281,13 @@ class EventProducerApp:
 
     def __init__(
         self,
+        event_store: EventStore | None = None,
+        casefile_store: LocalCasefileStore | None = None,
         env: ModelEnv | None = None,
     ) -> None:
         # --- Providers ---
-        self._event_store = InMemoryEventStore()
+        self._event_store = event_store if event_store is not None else InMemoryEventStore()
+        self._casefile_store = casefile_store if casefile_store is not None else LocalCasefileStore()
         self._vendor_sourcer = InMemoryVendorSourcer()
         self._fx_provider: FxRateProvider = StaticFxRateProvider()
         self._audit_log = AuditLog()
@@ -332,8 +336,12 @@ class EventProducerApp:
         )
 
     @property
-    def event_store(self) -> InMemoryEventStore:
+    def event_store(self) -> EventStore:
         return self._event_store
+
+    @property
+    def casefile_store(self) -> LocalCasefileStore:
+        return self._casefile_store
 
     @property
     def vendor_sourcer(self) -> InMemoryVendorSourcer:
@@ -357,6 +365,7 @@ class EventProducerApp:
         venue_type: str | None = None,
         date: str | None = None,
         manual_constraints: ManualConstraintFlags | dict | None = None,
+        event_id: str | None = None,
     ) -> dict:
         """Run the full event production pipeline.
 
@@ -390,7 +399,7 @@ class EventProducerApp:
             approvals, security_beat) plus the P7A keys: model_mode_summary,
             brief_intake, creative_concept.
         """
-        event_id = str(uuid.uuid4())
+        event_id = event_id or str(uuid.uuid4())
         agent_trace: list[AgentTraceStep] = []
         chat_log: list[ChatLogMessage] = []
         approvals: list[Approval] = []
@@ -1125,6 +1134,76 @@ class EventProducerApp:
             "scope_strategy": scope_strategy.model_dump(),
             "constraint_resolution": constraint_resolution,
         }
+
+    def run_casefile(self, event_id: str) -> dict:
+        """Run generation from a saved casefile and persist generated artifacts."""
+        casefile = self._casefile_store.get_casefile(event_id)
+        basics = casefile.resolved.basics
+        planning_assumptions: dict[str, str | int] = {}
+
+        attendees = basics.expected_turnout
+        if attendees is None:
+            attendees = int(DEFAULT_EVENT_CONSTRAINTS["attendees"])
+            planning_assumptions["expected_turnout_for_costing"] = attendees
+            planning_assumptions["reason"] = "missing_expected_turnout"
+
+        budget_cap = (
+            str(basics.budget_cap)
+            if basics.budget_cap is not None
+            else str(DEFAULT_EVENT_CONSTRAINTS["budget_cap"])
+        )
+        if basics.budget_cap is None:
+            planning_assumptions["budget_cap_for_costing"] = budget_cap
+
+        date = basics.start_date or (
+            datetime.now(timezone.utc)
+            + timedelta(days=int(DEFAULT_EVENT_CONSTRAINTS["fallback_date_offset_days"]))
+        ).strftime("%Y-%m-%d")
+        if not basics.start_date:
+            planning_assumptions["start_date_for_scheduling"] = date
+
+        flags = ManualConstraintFlags(
+            attendees=basics.expected_turnout is not None,
+            budget_cap=basics.budget_cap is not None,
+            event_type=bool(basics.event_type),
+            date=bool(basics.start_date),
+            venue_type=False,
+            contingency_pct=False,
+        )
+        self._casefile_store.append_timeline(event_id, "agent_run_started", {})
+        result = self.run_event(
+            brief=casefile.brief,
+            budget_cap=budget_cap,
+            attendees=attendees,
+            event_type=basics.event_type or None,
+            date=date,
+            manual_constraints=flags,
+            event_id=event_id,
+        )
+        self._persist_casefile_artifacts(event_id, result)
+        casefile = self._casefile_store.mark_generated(event_id, planning_assumptions)
+        self._casefile_store.append_timeline(event_id, "agent_run_completed", {"status": "generated"})
+        result["casefile"] = casefile.model_dump(mode="json")
+        result["resolved_event_state"] = casefile.resolved.model_dump(mode="json")
+        result["planning_assumptions"] = planning_assumptions
+        return result
+
+    def _persist_casefile_artifacts(self, event_id: str, result: dict) -> None:
+        artifact_map = {
+            "brief-intake": result.get("brief_intake"),
+            "creative-concept": result.get("creative_concept"),
+            "scope-strategy": result.get("scope_strategy"),
+            "budget-summary": result.get("budget_summary"),
+            "run-sheet": {
+                "schedule_result": result.get("schedule_result"),
+                "call_sheet": result.get("call_sheet", []),
+                "run_of_show": result.get("run_of_show"),
+            },
+            "vendor-copy": result.get("vendor_draft"),
+        }
+        for name, payload in artifact_map.items():
+            if payload:
+                self._casefile_store.write_artifact(event_id, name, payload)
 
 
 # ---------------------------------------------------------------------------

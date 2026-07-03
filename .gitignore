@@ -26,6 +26,7 @@ dist/
 # === Gitignored working directories ===
 project_documents/
 temp/
+.local_state/
 
 # === OS ===
 .DS_Store
