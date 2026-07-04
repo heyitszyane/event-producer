@@ -924,7 +924,7 @@ export default function Dashboard() {
       )
     }
 
-    if (!result && activeSection !== 'brief' && activeSection !== 'overview' && activeSection !== 'ai-crew' && activeSection !== 'settings') {
+    if (!result && activeSection !== 'brief' && activeSection !== 'overview' && activeSection !== 'ai-crew' && activeSection !== 'vendors' && activeSection !== 'settings') {
       return (
         <section className="war-panel empty-state">
           <p>Start with Brief Intake, then run the AI production crew to populate the war room.</p>
