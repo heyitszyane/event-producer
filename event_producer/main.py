@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 
 from event_producer.agents.brief_intake import (
     BriefIntakeFormatterAgent,
@@ -51,6 +51,7 @@ from event_producer.models.schemas import (
     BriefIntakeResult,
     BriefIntakeSourceMap,
     BudgetSummary,
+    CasefileArtifact,
     ChatLogMessage,
     CreativeConceptResult,
     EventSpec,
@@ -64,6 +65,7 @@ from event_producer.models.schemas import (
     SpecialistAgentId,
     SpecialistAgentResponse,
     Vendor,
+    VendorCopyDraft,
     VendorMessage,
 )
 from event_producer.providers.event_store import EventStore
@@ -942,7 +944,7 @@ class EventProducerApp:
                 approved_by="",
                 status="pending",
                 timestamp=datetime.now(timezone.utc).isoformat(),
-                notes=f"{approval_diff} Draft requires human approval before send.",
+                notes=f"{approval_diff} Draft requires human review before external use.",
             )
             self._event_store.save_approval(event_id, approval)
             approvals.append(approval)
@@ -956,7 +958,7 @@ class EventProducerApp:
             label="Drafted vendor-facing copy behind the approval wall",
             status="pending_approval",
             input_summary="Venue / AV / F&B needs from scope",
-            output_summary=f"Prepared outbound vendor draft to {vendor_name} blocked behind human approval",
+            output_summary=f"Prepared vendor-facing draft for {vendor_name} blocked behind human review",
             artifacts=["vendors", "approvals"],
             deterministic_core=None,
             approval_required=True,
@@ -968,7 +970,7 @@ class EventProducerApp:
         chat_log.append(ChatLogMessage(
             role="agent",
             agent="Vendor Coordinator",
-            content=f"Drafted RFP for {vendor_name}. Awaiting human approval before sending.",
+            content=f"Drafted RFP for {vendor_name}. Review before external use.",
         ))
 
         # ------------------------------------------------------------------
@@ -1245,6 +1247,19 @@ class EventProducerApp:
         else:
             raise ValueError(f"Unknown specialist agent: {agent_id}")
 
+        generated_at = datetime.now(timezone.utc).isoformat()
+        if agent_id == "vendor_copy":
+            output = {
+                **output,
+                "draft_only": True,
+                "review_status": output.get("review_status", "draft"),
+                "source_agent": "vendor_copy",
+                "generated_at": output.get("generated_at", generated_at),
+                "review_required_before_external_use": True,
+            }
+            output.pop("send_status", None)
+            output.pop("approval_required_before_send", None)
+
         artifact_payload = {
             "agent_id": agent_id,
             "instruction": instruction,
@@ -1254,7 +1269,7 @@ class EventProducerApp:
             "output": output,
             "model_mode": model_mode,
             "fallback_reason": fallback_reason,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at,
             "advisory_only": True,
         }
         artifact = self._casefile_store.write_artifact(event_id, artifact_name, artifact_payload)
@@ -1267,6 +1282,15 @@ class EventProducerApp:
                 "model_mode": model_mode,
             },
         )
+        if agent_id == "vendor_copy":
+            self._casefile_store.append_timeline(
+                event_id,
+                "vendor_copy_generated",
+                {
+                    "artifact_name": artifact_name,
+                    "model_mode": model_mode,
+                },
+            )
 
         updated = self._casefile_store.get_casefile(event_id)
         if self._critical_casefile_snapshot(updated) != critical_before:
@@ -1281,6 +1305,112 @@ class EventProducerApp:
             fallback_reason=fallback_reason,
             notices=updated.resolved.notices,
             next_step=updated.next_step,
+        )
+
+    def get_vendor_copy_draft(self, event_id: str) -> tuple[VendorCopyDraft, CasefileArtifact | None]:
+        """Return the current reviewable vendor-copy draft, if one exists."""
+        casefile = self._casefile_store.get_casefile(event_id)
+        artifact = casefile.artifacts.get("vendor-copy")
+        if artifact is None:
+            return VendorCopyDraft(), None
+        payload = self._casefile_store.read_artifact(event_id, "vendor-copy")
+        return self._vendor_copy_draft_from_artifact(payload, artifact.updated_at), artifact
+
+    def save_vendor_copy_draft(self, event_id: str, draft: VendorCopyDraft) -> tuple[VendorCopyDraft, CasefileArtifact]:
+        """Persist user-edited vendor copy without approving or executing outreach."""
+        self._casefile_store.get_casefile(event_id)
+        previous_payload = self._read_optional_artifact(event_id, "vendor-copy")
+        previous_draft = self._vendor_copy_draft_from_artifact(previous_payload, None)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        generated_at = draft.generated_at or previous_draft.generated_at
+        model_mode = draft.model_mode or previous_draft.model_mode
+        fallback_reason = draft.fallback_reason or previous_draft.fallback_reason
+        saved_draft = draft.model_copy(
+            update={
+                "generated_at": generated_at,
+                "updated_at": updated_at,
+                "source_agent": draft.source_agent or "vendor_copy",
+                "model_mode": model_mode,
+                "fallback_reason": fallback_reason,
+            }
+        )
+        output = {
+            **saved_draft.model_dump(mode="json"),
+            "draft_only": True,
+            "review_required_before_external_use": True,
+            "external_use_status": "not_used_externally",
+        }
+        payload: dict[str, Any]
+        if isinstance(previous_payload, dict) and isinstance(previous_payload.get("output"), dict):
+            payload = {
+                **previous_payload,
+                "output": output,
+                "model_mode": model_mode,
+                "fallback_reason": fallback_reason,
+                "updated_at": updated_at,
+                "advisory_only": True,
+            }
+        else:
+            payload = {
+                "agent_id": "vendor_copy",
+                "instruction": "",
+                "regenerate": False,
+                "previous_artifact_used": previous_payload is not None,
+                "output": output,
+                "model_mode": model_mode,
+                "fallback_reason": fallback_reason,
+                "generated_at": generated_at,
+                "updated_at": updated_at,
+                "advisory_only": True,
+            }
+        artifact = self._casefile_store.write_artifact(event_id, "vendor-copy", payload)
+        self._casefile_store.append_timeline(
+            event_id,
+            "vendor_copy_saved",
+            {
+                "artifact_name": "vendor-copy",
+                "review_status": saved_draft.review_status,
+            },
+        )
+        return saved_draft, artifact
+
+    @staticmethod
+    def _vendor_copy_draft_from_artifact(payload: Any, artifact_updated_at: str | None) -> VendorCopyDraft:
+        if not isinstance(payload, dict):
+            return VendorCopyDraft(updated_at=artifact_updated_at)
+        nested = payload.get("output")
+        source = nested if isinstance(nested, dict) else payload
+
+        def string_list(value: Any) -> list[str]:
+            if not isinstance(value, list):
+                return []
+            return [str(item) for item in value if str(item).strip()]
+
+        review_status: Literal["draft", "reviewed"] = "reviewed" if source.get("review_status") == "reviewed" else "draft"
+        return VendorCopyDraft(
+            subject=str(source.get("subject") or ""),
+            body=str(source.get("body") or source.get("draft") or ""),
+            ask_summary=str(source.get("ask_summary") or ""),
+            required_vendor_response_fields=string_list(source.get("required_vendor_response_fields")),
+            risk_notes=string_list(source.get("risk_notes")),
+            review_status=review_status,
+            generated_at=(
+                str(source.get("generated_at") or payload.get("generated_at"))
+                if source.get("generated_at") or payload.get("generated_at")
+                else None
+            ),
+            updated_at=(
+                str(source.get("updated_at") or payload.get("updated_at") or artifact_updated_at)
+                if source.get("updated_at") or payload.get("updated_at") or artifact_updated_at
+                else None
+            ),
+            source_agent=str(source.get("source_agent") or payload.get("agent_id") or "vendor_copy"),
+            model_mode=cast(AgentMode | None, source.get("model_mode") or payload.get("model_mode")),
+            fallback_reason=(
+                str(source.get("fallback_reason") or payload.get("fallback_reason"))
+                if source.get("fallback_reason") or payload.get("fallback_reason")
+                else None
+            ),
         )
 
     @staticmethod
@@ -1504,9 +1634,9 @@ class EventProducerApp:
         raw = self._vendor_reason.run(request)
         output = raw.get("vendor_draft") or {"body": raw.get("draft", "")}
         output["draft_only"] = True
-        output["send_status"] = "not_sent"
-        output["approval_required_before_send"] = True
-        output["critical_mutation_policy"] = "artifact_only_no_vendor_send_or_basics_mutation"
+        output["review_required_before_external_use"] = True
+        output["external_use_status"] = "not_used_externally"
+        output["critical_mutation_policy"] = "artifact_only_no_external_use_or_basics_mutation"
         return (
             output,
             cast(AgentMode, output.get("model_mode", raw.get("model_mode", "rule_based_fallback"))),
@@ -1535,7 +1665,7 @@ class EventProducerApp:
         if not context["schedule_result"]:
             recommended_next_actions.append("Create or review the run sheet before locking vendor lead times.")
         if not flags and not recommended_next_actions:
-            recommended_next_actions.append("Review saved artifacts and keep vendor sends behind approval.")
+            recommended_next_actions.append("Review saved artifacts and keep vendor external use behind approval.")
 
         output = {
             "risk_flags": flags,

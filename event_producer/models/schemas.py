@@ -887,6 +887,24 @@ class VendorDraftResult(BaseModel):
     fallback_reason: str | None = None
 
 
+class VendorCopyDraft(BaseModel):
+    """Reviewable vendor-copy artifact prepared for manual external use."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    subject: str = ""
+    body: str = ""
+    ask_summary: str = ""
+    required_vendor_response_fields: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    review_status: Literal["draft", "reviewed"] = "draft"
+    generated_at: str | None = None
+    updated_at: str | None = None
+    source_agent: str = "vendor_copy"
+    model_mode: AgentMode | None = None
+    fallback_reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # P7A — request / response additions
 # ------------------------------------------------------------------------------

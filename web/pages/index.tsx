@@ -15,6 +15,7 @@ import CreativeConcept from '../components/CreativeConcept'
 import AIProductionCrew from '../components/AIProductionCrew'
 import ScopeStrategy from '../components/ScopeStrategy'
 import SpecialistAgentWorkspace from '../components/SpecialistAgentWorkspace'
+import VendorCopyPanel from '../components/VendorCopyPanel'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
@@ -1067,7 +1068,16 @@ export default function Dashboard() {
           </div>
         )
       case 'vendors':
-        return <VendorsCard vendors={vendors} vendorDraft={result?.vendor_draft ?? null} />
+        return (
+          <div className="war-stack">
+            <VendorCopyPanel
+              casefile={activeCasefile}
+              onCasefileChange={applyCasefileState}
+              onError={setError}
+            />
+            <VendorsCard vendors={vendors} />
+          </div>
+        )
       case 'risks':
         return (
           <div className="war-stack">

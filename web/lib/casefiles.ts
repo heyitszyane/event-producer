@@ -7,6 +7,8 @@ import type {
   SpecialistAgentId,
   SpecialistAgentRequest,
   SpecialistAgentResponse,
+  VendorCopyArtifactResponse,
+  VendorCopyDraft,
 } from '../types/agentic'
 
 export async function createCasefile(payload: {
@@ -80,6 +82,22 @@ export async function runSpecialistAgent(
   const res = await apiFetch(`/casefiles/${eventId}/agents/${agentId}/run`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
+export async function getVendorCopyDraft(eventId: string): Promise<VendorCopyArtifactResponse> {
+  const res = await apiFetch(`/casefiles/${eventId}/artifacts/vendor-copy`)
+  return res.json()
+}
+
+export async function saveVendorCopyDraft(
+  eventId: string,
+  draft: VendorCopyDraft,
+): Promise<VendorCopyArtifactResponse> {
+  const res = await apiFetch(`/casefiles/${eventId}/artifacts/vendor-copy`, {
+    method: 'PUT',
+    body: JSON.stringify(draft),
   })
   return res.json()
 }

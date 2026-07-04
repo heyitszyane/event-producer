@@ -32,6 +32,7 @@ from event_producer.main import EventProducerApp
 from event_producer.models.schemas import (
     Approval,
     BudgetSummary,
+    CasefileArtifact,
     CasefileState,
     CasefileSummary,
     EventBasics,
@@ -43,6 +44,7 @@ from event_producer.models.schemas import (
     ScopeItemUpdate,
     SpecialistAgentId,
     SpecialistAgentRequest,
+    VendorCopyDraft,
 )
 from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
@@ -105,6 +107,14 @@ class CasefileBriefUpdateRequest(BaseModel):
     """Request body for saving a casefile brief."""
 
     brief: str = ""
+
+
+class VendorCopyArtifactResponse(BaseModel):
+    """Reviewable vendor-copy draft plus casefile artifact metadata."""
+
+    event_id: str
+    artifact: CasefileArtifact | None = None
+    draft: VendorCopyDraft
 
 
 class ChatRequest(BaseModel):
@@ -334,6 +344,30 @@ def create_app() -> FastAPI:
             artifact_id=req.artifact_id,
         )
         return response.model_dump(mode="json")
+
+    @app.get("/casefiles/{event_id}/artifacts/vendor-copy")
+    async def get_vendor_copy_artifact(event_id: str) -> dict[str, Any]:
+        """Return the current reviewable vendor-copy draft for a saved casefile."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        draft, artifact = producer.get_vendor_copy_draft(event_id)
+        return VendorCopyArtifactResponse(
+            event_id=event_id,
+            artifact=artifact,
+            draft=draft,
+        ).model_dump(mode="json")
+
+    @app.put("/casefiles/{event_id}/artifacts/vendor-copy")
+    async def save_vendor_copy_artifact(event_id: str, draft: VendorCopyDraft) -> dict[str, Any]:
+        """Save user-edited vendor copy without approving or executing outreach."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        saved, artifact = producer.save_vendor_copy_draft(event_id, draft)
+        return VendorCopyArtifactResponse(
+            event_id=event_id,
+            artifact=artifact,
+            draft=saved,
+        ).model_dump(mode="json")
 
     @app.post("/run")
     async def run_event(req: RunEventRequest) -> Any:

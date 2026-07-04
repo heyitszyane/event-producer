@@ -191,8 +191,8 @@ class VendorCoordinatorReasonAgent:
             "vendor_category": vendor_category,
             "approval_required": True,
             "safety_rules": [
-                "Draft only; do not send.",
-                "Human approval is required before send.",
+                "Draft only; prepare copy for review before external use.",
+                "Human approval is required before vendor-facing use.",
                 "No payment instructions.",
             ],
         }
@@ -364,7 +364,7 @@ class VendorDraftFormatterAgent:
             f"and would like a proposal for {category} support.\n\n"
             "Please confirm availability, recommended scope, lead time, itemized quote, "
             "and any operational constraints we should account for.\n\n"
-            "This is a draft request only. It requires human approval before send, and "
+            "This is draft copy only. It requires human review before external use, and "
             "no booking or payment is confirmed by this message.\n\n"
             "Thank you."
         )
@@ -379,10 +379,10 @@ class VendorDraftFormatterAgent:
                 "operational_constraints",
             ],
             approval_diff=(
-                f"Would send a draft RFP to {vendor_name} for {category}; no outbound message executes until approved."
+                f"Draft RFP copy for {vendor_name} covering {category}; external use waits for human review."
             ),
             risk_notes=[
-                "Human approval required before vendor-facing send.",
+                "Human approval required before vendor-facing use.",
                 "No payment instructions included.",
             ],
             model_mode=model_mode,

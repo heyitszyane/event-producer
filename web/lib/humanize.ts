@@ -14,7 +14,7 @@ export const LABELS: Record<string, string> = {
   should: 'Recommended',
   could: 'Optional',
   wow: 'Stretch',
-  send_vendor_message: 'Send vendor message',
+  send_vendor_message: 'Review vendor draft before external use',
   change_payment_details: 'Change payment details',
   mark_paid: 'Mark invoice as paid',
   reschedule: 'Change schedule',

@@ -274,6 +274,26 @@ export interface VendorDraft {
   draft?: string
 }
 
+export interface VendorCopyDraft {
+  subject: string
+  body: string
+  ask_summary: string
+  required_vendor_response_fields: string[]
+  risk_notes: string[]
+  review_status: 'draft' | 'reviewed'
+  generated_at?: string | null
+  updated_at?: string | null
+  source_agent: string
+  model_mode?: AgentMode | null
+  fallback_reason?: string | null
+}
+
+export interface VendorCopyArtifactResponse {
+  event_id: string
+  artifact?: CasefileArtifact | null
+  draft: VendorCopyDraft
+}
+
 export interface ModelModeSummary {
   brief_intake?: string
   creative_concept?: string

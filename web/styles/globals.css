@@ -1886,6 +1886,26 @@ a:hover {
   border-radius: 999px;
   font-size: var(--text-xs);
 }
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.chip--button {
+  cursor: pointer;
+  font: inherit;
+}
+.chip--button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.field-label {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
 .muted {
   color: var(--text-tertiary);
   font-size: var(--text-sm);
@@ -3022,6 +3042,51 @@ a:hover {
   padding: 8px;
 }
 
+.vendor-copy-panel {
+  gap: 14px;
+}
+
+.vendor-copy-form,
+.vendor-copy-refine {
+  display: grid;
+  gap: 10px;
+}
+
+.vendor-copy-body {
+  min-height: 220px;
+  max-height: 420px;
+  resize: vertical;
+}
+
+.vendor-copy-summary {
+  min-height: 72px;
+  max-height: 160px;
+  resize: vertical;
+}
+
+.vendor-copy-instruction {
+  min-height: 92px;
+  max-height: 92px;
+  resize: vertical;
+}
+
+.vendor-copy-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  background: var(--paper-2);
+}
+
+.vendor-copy-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .compact-list {
   margin: 0;
   padding-left: 18px;
@@ -3064,6 +3129,7 @@ a:hover {
   .overview-fact-grid,
   .requirements-edit-grid,
   .specialist-grid,
+  .vendor-copy-meta-grid,
   .settings-grid,
   .modal-grid {
     grid-template-columns: 1fr;

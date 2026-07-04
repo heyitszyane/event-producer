@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7M — Vendor copy artifact UX
+
+- Added editable vendor-copy artifacts with subject/body, save draft,
+  copy-to-clipboard, last-saved timestamp, and refinement prompts.
+- Reframed vendor workflow as "review before external use" and removed primary
+  UX language implying real outbound sends.
+- Persisted edited vendor drafts in the local casefile artifact store with
+  timeline events.
+- Added tests proving vendor copy saves/reloads and no contact/execution
+  semantics are exposed by the save endpoint.
+
 ### P7L — Direct specialist-agent workspace/actions
 
 - Added saved-casefile direct actions for Creative Concept, Scope Strategy,

@@ -111,8 +111,10 @@ def test_direct_vendor_copy_saves_draft_without_send_or_approval(
     output = data["output"]["output"]
     assert data["artifact"]["name"] == "vendor-copy"
     assert output["draft_only"] is True
-    assert output["send_status"] == "not_sent"
-    assert "sent" not in output
+    assert output["review_required_before_external_use"] is True
+    assert output["external_use_status"] == "not_used_externally"
+    assert "send_status" not in output
+    assert "approval_required_before_send" not in output
     assert "body" in output
     assert client.app.state.event_producer.event_store.get_approvals(event_id) == []
     assert (casefile_root / event_id / "artifacts" / "vendor-copy.json").exists()
