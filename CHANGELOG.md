@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7N — UX hardening: run persistence, real recompute feedback, declutter
+
+- Persisted a `run-snapshot` casefile artifact after every pipeline run and
+  after every scope edit, so the last run (scope, budget, schedule, approvals,
+  trace) is restored on page reload and after backend restart.
+- Rehydrated the in-memory event runtime from the saved snapshot, keeping scope
+  edits, orchestrator chat, proposals, and approvals working against saved
+  casefiles across backend restarts.
+- Removed the non-functional Scope "Recompute" button (every edit already
+  recomputes server-side) and de-duplicated the recompute banners into a single
+  clear notice that also explains when headroom is unchanged due to tier gating.
+- Added per-row budget status on the Scope ledger ("Counted in budget",
+  "tier excluded by budget engine", "excluded by you") plus a tier-gating
+  explainer, so exclusions no longer look like silent no-ops.
+- Replaced stacked casefile chips in the side nav with a compact dropdown
+  selector; the most recently updated casefile is auto-resumed on load.
+- Made specialist agent cards hydrate from saved artifacts (mode badge,
+  summary, detail preview) instead of only in-session responses, and removed
+  duplicated summary text in previews.
+- Reworked Overview "Recent artifacts" into "Saved casefile artifacts" with
+  route links, the local storage path, and a copy-casefile-ID action.
+- Added `GET /casefiles/{id}/run-snapshot`, `GET /casefiles/{id}/artifacts/{name}`,
+  and `GET /settings/storage` endpoints; Settings now shows a Local Data panel
+  (casefile root, count, active ID) and clearer provider-save messaging.
+- Decluttered per-route statuses: Budget basis bar removed and status moved to
+  a header badge, budget/category bars color-coded, Run Sheet banners merged
+  into header badges, requirements confirmation reduced to a compact bar
+  (facts live in Event Basics), and the sidebar runtime proof footer removed.
+- Defaulted local-dev CORS to a localhost-any-port regex when `ALLOWED_ORIGINS`
+  is unset (explicit origins still honored when set).
+- Isolated all tests from the developer's real `.local_state` casefile root via
+  an autouse fixture, and fixed a provider-diagnostics test that made real
+  network calls.
+
 ### P7M — Vendor copy artifact UX
 
 - Added editable vendor-copy artifacts with subject/body, save draft,

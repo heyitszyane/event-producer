@@ -173,6 +173,7 @@ All test code lives here.
 | `test_orchestrator_live.py` | P7H live-capable Orchestrator proposal and strict-provider behavior tests |
 | `test_vendor_draft_live.py` | P7H Vendor Draft live/fallback and approval-wall safety tests |
 | `test_p7l_specialist_agents.py` | P7L direct specialist-agent artifact, timeline, fallback, invalid-agent, and no-silent-basics-mutation tests |
+| `test_p7n_run_snapshot.py` | P7N run-snapshot persistence, restart rehydration, snapshot write-back on scope edits, artifact/storage endpoint tests |
 | `eval_cases/` | Red-team eval set written in Gherkin (`*.feature` files) |
 
 ---

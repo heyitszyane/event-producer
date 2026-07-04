@@ -27,6 +27,7 @@ export interface ScopeMutationResult {
 interface ScopeCardProps {
   items: ScopeItem[]
   eventId?: string
+  budget?: BudgetSummary | null
   onMutation?: (result: ScopeMutationResult) => void
 }
 
@@ -46,6 +47,14 @@ const TIER_COPY: Record<ScopeItem['tier'], { label: string; helper: string }> = 
   should: { label: 'Recommended', helper: 'Strong value, keep if budget allows.' },
   could: { label: 'Optional', helper: 'Useful enhancement, easy to cut.' },
   wow: { label: 'Stretch', helper: 'Premium or brand-building upgrade.' },
+}
+
+type BudgetRowStatus = 'included' | 'tier_excluded' | 'user_excluded'
+
+const BUDGET_STATUS_COPY: Record<BudgetRowStatus, string> = {
+  included: 'Counted in budget',
+  tier_excluded: 'Not counted — tier excluded by budget engine',
+  user_excluded: 'Not counted — excluded by you',
 }
 
 const blankForm: ItemForm = {
@@ -73,6 +82,7 @@ function formFromItem(item: ScopeItem): ItemForm {
 export default function ScopeCard({
   items,
   eventId,
+  budget,
   onMutation,
 }: ScopeCardProps) {
   const [loading, setLoading] = useState(false)
@@ -84,6 +94,12 @@ export default function ScopeCard({
   const [inlineEdit, setInlineEdit] = useState<{ idx: number; field: 'name' | 'category'; value: string } | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
+
+  function budgetStatus(item: ScopeItem): BudgetRowStatus {
+    if (!item.selected) return 'user_excluded'
+    if (budget && budget.tier_inclusion && budget.tier_inclusion[item.tier] === false) return 'tier_excluded'
+    return 'included'
+  }
 
   async function mutate(url: string, init: RequestInit): Promise<void> {
     if (!eventId) return
@@ -223,19 +239,18 @@ export default function ScopeCard({
           >
             + Add rental / service / vendor
           </button>
-          <button
-            className="btn btn--ghost btn--sm"
-            type="button"
-            disabled={loading || items.length === 0}
-            onClick={() => setFeedback('Budget recalculated. Schedule recomputed.')}
-          >
-            Recompute
-          </button>
         </div>
       </div>
 
       {error && <div className="error-bar" role="alert">{error}</div>}
       {feedback && <div className="block block--info" aria-live="polite">{feedback}</div>}
+      {budget && Object.values(budget.tier_inclusion || {}).some((included) => !included) && (
+        <div className="block block--warn" aria-live="polite">
+          Tier gating is all-or-nothing per tier: the budget engine includes Essential items first,
+          then adds whole tiers only if they fit the spendable pool. Rows marked &ldquo;tier excluded&rdquo;
+          below do not count toward headroom.
+        </div>
+      )}
 
       {showAddForm && (
         <div style={{ padding: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)', background: 'var(--surface-tertiary)' }}>
@@ -328,6 +343,11 @@ export default function ScopeCard({
                         {TIER_OPTIONS.map((tier) => <option key={tier} value={tier}>{TIER_COPY[tier].label}</option>)}
                       </select>
                       <div className="muted tier-helper">{TIER_COPY[item.tier].helper}</div>
+                      {budget && (
+                        <div className={`tier-helper scope-budget-status scope-budget-status--${budgetStatus(item)}`}>
+                          {BUDGET_STATUS_COPY[budgetStatus(item)]}
+                        </div>
+                      )}
                     </td>
                     <td data-label="Qty">{String(item.qty)}</td>
                     <td data-label="Unit cost">{item.currency} {String(item.estimated_cost)}</td>

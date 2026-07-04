@@ -22,10 +22,13 @@ import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import {
   createCasefile,
   getCasefile,
+  getRunSnapshot,
+  getStorageInfo,
   listCasefiles,
   runCasefileFirstPass,
   updateCasefileBasics,
   updateCasefileBrief,
+  type StorageInfo,
 } from '../lib/casefiles'
 import { humanizeValue } from '../lib/humanize'
 import type {
@@ -239,6 +242,17 @@ function formatDateRange(start?: string | null, end?: string | null): string {
   return start || end || 'Not set'
 }
 
+// Where each saved artifact is viewable in the app.
+const ARTIFACT_ROUTES: Record<string, SectionId> = {
+  'brief-intake': 'brief',
+  'creative-concept': 'ai-crew',
+  'scope-strategy': 'ai-crew',
+  'risk-review': 'ai-crew',
+  'budget-summary': 'budget',
+  'run-sheet': 'run-sheet',
+  'vendor-copy': 'vendors',
+}
+
 const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
   overview: {
     route: '00 / Event Overview',
@@ -401,6 +415,8 @@ export default function Dashboard() {
   const [settingsError, setSettingsError] = useState<string | null>(null)
   const [providerTestResult, setProviderTestResult] = useState<RuntimeModelTestResult | null>(null)
   const [providerTesting, setProviderTesting] = useState(false)
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+  const [copiedCasefileId, setCopiedCasefileId] = useState(false)
 
   function formatApiError(err: unknown): string {
     if (err instanceof ApiRequestError && err.payload.code === 'LIVE_MODEL_PROVIDER_FAILED') {
@@ -450,7 +466,13 @@ export default function Dashboard() {
     async function loadSavedCasefiles() {
       setCasefilesLoading(true)
       try {
-        setCasefiles(await listCasefiles())
+        const summaries = await listCasefiles()
+        setCasefiles(summaries)
+        // Resume the most recently updated casefile so a reload does not
+        // land on an empty workspace.
+        if (summaries.length > 0) {
+          await selectCasefile(summaries[0].event_id)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -458,6 +480,11 @@ export default function Dashboard() {
       }
     }
     loadSavedCasefiles()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    getStorageInfo().then(setStorageInfo).catch(() => setStorageInfo(null))
   }, [])
 
   async function refreshCasefiles() {
@@ -478,15 +505,22 @@ export default function Dashboard() {
       setActiveCasefile(loaded)
       setBasics(loaded.basics)
       setBrief(loaded.brief)
-      setResult((prev) => prev ? ({
-        ...prev,
-        event_id: loaded.event_id,
-        casefile: loaded,
-        resolved_event_state: loaded.resolved,
-        requirements: loaded.requirements,
-        next_step: loaded.next_step,
-      }) : null)
       setEventNameOverride(loaded.resolved.basics.working_title)
+      setRecomputeNotice(null)
+      // Restore the last saved pipeline run so every route works after a
+      // reload. A 404 just means this casefile has not been run yet.
+      try {
+        const snapshot: RunEventResponse = await getRunSnapshot(eventId)
+        setResult(snapshot)
+        setHasRun(true)
+      } catch (snapshotErr) {
+        if (snapshotErr instanceof ApiRequestError && snapshotErr.status === 404) {
+          setResult(null)
+          setHasRun(false)
+        } else {
+          throw snapshotErr
+        }
+      }
     } catch (err) {
       setError(formatApiError(err))
     }
@@ -561,7 +595,7 @@ export default function Dashboard() {
       const data: ModelSettings = await res.json()
       applyModelSettings(data)
       setSettingsApiKey('')
-      setSettingsMessage('Saved to local .env and refreshed the running backend.')
+      setSettingsMessage(`Saved to ${data.env_path} and applied to the running backend — no restart needed.`)
       setProviderTestResult(null)
     } catch (err) {
       setSettingsError(formatApiError(err))
@@ -595,6 +629,8 @@ export default function Dashboard() {
 
   function navigate(section: SectionId) {
     setActiveSection(section)
+    // One-shot mutation feedback should not linger across sections.
+    setRecomputeNotice(null)
     window.history.replaceState(null, '', `#${section}`)
   }
 
@@ -657,6 +693,8 @@ export default function Dashboard() {
   const requirements = activeCasefile?.requirements || result?.requirements || null
   const nextStep = activeCasefile?.next_step || result?.next_step || null
   const casefileArtifacts = Object.values(activeCasefile?.artifacts || result?.casefile?.artifacts || {})
+  // run-snapshot is an internal restore artifact, not a user-facing output.
+  const visibleArtifacts = casefileArtifacts.filter((artifact) => artifact.name !== 'run-snapshot')
   const turnoutLabel = resolvedBasics.expected_turnout ? `${resolvedBasics.expected_turnout} pax` : 'Expected turnout not set'
   const attendeeSource = resolvedState?.sources?.expected_turnout || result?.constraint_resolution?.attendees?.source
 
@@ -801,9 +839,6 @@ export default function Dashboard() {
       ? `Live - ${liveAgentCount} agent${liveAgentCount === 1 ? '' : 's'}`
       : 'Fallback mode'
     : 'Awaiting run'
-  const runtimeProofText = result
-    ? `${hasLiveRuntime ? 'Live model active' : 'Fallback mode'} - ${liveAgentCount} live agent${liveAgentCount === 1 ? '' : 's'} - Budget/Schedule deterministic - Approval wall active`
-    : 'Awaiting run - Budget/Schedule deterministic - Approval wall ready'
   const lastRunLabel = lastRunAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const producerConsole = result ? (
     <section className="war-panel producer-console" id="orchestrator-chat">
@@ -899,13 +934,6 @@ export default function Dashboard() {
     </section>
   ) : null
 
-  const budgetBasis = result ? {
-    attendees: resolvedBasics.expected_turnout ?? null,
-    location: [resolvedBasics.city, resolvedBasics.country].filter(Boolean).join(', ') || null,
-    contingencyPct: result.constraint_resolution?.contingency_pct?.resolved_value ?? result.budget_summary?.contingency_pct,
-    source: attendeeSource === 'brief_extracted' ? 'brief' : attendeeSource ?? 'casefile',
-  } : undefined
-
   function navigateToTarget(target: string) {
     if (WAR_ROOM_SECTIONS.some((section) => section.id === target)) {
       navigate(target as SectionId)
@@ -988,20 +1016,49 @@ export default function Dashboard() {
               </section>
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Recent artifacts</span>
-                  <span className="badge badge--info">{casefileArtifacts.length} saved</span>
+                  <span className="war-panel-title">Saved casefile artifacts</span>
+                  <span className="badge badge--info">{visibleArtifacts.length} saved</span>
                 </div>
-                {casefileArtifacts.length > 0 ? (
+                {visibleArtifacts.length > 0 ? (
                   <ul className="artifact-list">
-                    {casefileArtifacts.slice(0, 5).map((artifact) => (
+                    {visibleArtifacts.map((artifact) => (
                       <li key={artifact.name}>
-                        <strong>{humanizeValue(artifact.name)}</strong>
+                        <button
+                          type="button"
+                          className="artifact-list__link"
+                          onClick={() => navigateToTarget(ARTIFACT_ROUTES[artifact.name] || 'overview')}
+                        >
+                          {humanizeValue(artifact.name)}
+                        </button>
                         <span>{new Date(artifact.updated_at).toLocaleString()}</span>
                       </li>
                     ))}
                   </ul>
                 ) : (
                   <p className="body-copy">Run the production crew to save concept, scope, budget, schedule, and vendor draft artifacts.</p>
+                )}
+                {activeCasefile && (
+                  <div className="artifact-storage-hint">
+                    <span>
+                      Stored locally as JSON under{' '}
+                      <code>{storageInfo?.root || '.local_state/event_producer/events'}</code>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(activeCasefile.event_id)
+                          setCopiedCasefileId(true)
+                          setTimeout(() => setCopiedCasefileId(false), 2000)
+                        } catch {
+                          setError('Copy is unavailable in this browser.')
+                        }
+                      }}
+                    >
+                      {copiedCasefileId ? 'Copied' : 'Copy casefile ID'}
+                    </button>
+                  </div>
                 )}
               </section>
             </div>
@@ -1022,7 +1079,6 @@ export default function Dashboard() {
             />
             <RequirementsConfirmation
               casefile={activeCasefile}
-              fallbackBasics={basics}
               onCasefileChange={applyCasefileState}
               onError={setError}
             />
@@ -1052,12 +1108,16 @@ export default function Dashboard() {
       case 'scope':
         return (
           <div className="war-stack">
-            <ScopeCard items={result?.scope_items || []} eventId={result?.event_id} onMutation={applyMutationPayload} />
-            {recomputeNotice?.message && <div className="block block--info">{recomputeNotice.message}</div>}
+            <ScopeCard
+              items={result?.scope_items || []}
+              eventId={result?.event_id}
+              budget={result?.budget_summary || null}
+              onMutation={applyMutationPayload}
+            />
           </div>
         )
       case 'budget':
-        return <BudgetCard budget={result?.budget_summary || null} warnings={realismWarnings} basis={budgetBasis} />
+        return <BudgetCard budget={result?.budget_summary || null} warnings={realismWarnings} />
       case 'run-sheet':
         return <RunOfShowCard schedule={result?.schedule_result} callSheet={result?.call_sheet || []} />
       case 'approvals':
@@ -1069,7 +1129,7 @@ export default function Dashboard() {
         )
       case 'vendors':
         return (
-          <div className="war-stack">
+          <div className="vendors-grid">
             <VendorCopyPanel
               casefile={activeCasefile}
               onCasefileChange={applyCasefileState}
@@ -1211,27 +1271,46 @@ export default function Dashboard() {
                 </div>
               )}
             </section>
-            <section className="war-panel settings-panel">
-              <div className="war-panel__header">
-                <span className="war-panel-title">Current Backend Runtime</span>
-                <span className={`badge ${modelSettings?.has_api_key ? 'badge--ok' : 'badge--fallback'}`}>
-                  {modelSettings?.has_api_key ? 'key loaded' : 'no key loaded'}
-                </span>
-              </div>
-              <table className="data-table settings-table">
-                <tbody>
-                  <tr><th>Provider</th><td>{modelSettings?.provider || '-'}</td></tr>
-                  <tr><th>Live calls</th><td>{modelSettings?.live_enabled ? 'Enabled' : 'Disabled'}</td></tr>
-                  <tr><th>Mode</th><td>{modelSettings ? humanizeValue(modelSettings.effective_mode) : '-'}</td></tr>
-                  <tr><th>Model</th><td>{modelSettings?.model_name || '-'}</td></tr>
-                  <tr><th>Base URL</th><td>{modelSettings?.api_base_url || '-'}</td></tr>
-                  <tr><th>.env</th><td>{modelSettings?.env_path || '-'}</td></tr>
-                </tbody>
-              </table>
-              <div className={modelSettings?.fallback_reason ? 'callout callout--warning' : 'callout callout--success'}>
-                {modelSettings?.fallback_reason || 'Provider settings are loaded for the current backend process.'}
-              </div>
-            </section>
+            <div className="war-stack">
+              <section className="war-panel settings-panel">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Current Backend Runtime</span>
+                  <span className={`badge ${modelSettings?.has_api_key ? 'badge--ok' : 'badge--fallback'}`}>
+                    {modelSettings?.has_api_key ? 'key loaded from .env' : 'no key loaded'}
+                  </span>
+                </div>
+                <table className="data-table settings-table">
+                  <tbody>
+                    <tr><th>Provider</th><td>{modelSettings?.provider || '-'}</td></tr>
+                    <tr><th>Live calls</th><td>{modelSettings?.live_enabled ? 'Enabled' : 'Disabled'}</td></tr>
+                    <tr><th>Mode</th><td>{modelSettings ? humanizeValue(modelSettings.effective_mode) : '-'}</td></tr>
+                    <tr><th>Model</th><td>{modelSettings?.model_name || '-'}</td></tr>
+                    <tr><th>Base URL</th><td>{modelSettings?.api_base_url || '-'}</td></tr>
+                    <tr><th>.env</th><td>{modelSettings?.env_path || '-'}</td></tr>
+                  </tbody>
+                </table>
+                {modelSettings?.fallback_reason && (
+                  <div className="callout callout--warning">{modelSettings.fallback_reason}</div>
+                )}
+              </section>
+              <section className="war-panel settings-panel">
+                <div className="war-panel__header">
+                  <span className="war-panel-title">Local Data</span>
+                  <span className="badge badge--info">local demo storage</span>
+                </div>
+                <table className="data-table settings-table">
+                  <tbody>
+                    <tr><th>Casefile root</th><td>{storageInfo?.root || '-'}</td></tr>
+                    <tr><th>Saved casefiles</th><td>{storageInfo?.casefile_count ?? '-'}</td></tr>
+                    <tr><th>Active casefile ID</th><td>{activeCasefile?.event_id || '-'}</td></tr>
+                  </tbody>
+                </table>
+                <p className="body-copy">
+                  Casefiles and artifacts are JSON files on this machine — not a cloud
+                  database. Delete a casefile folder under the root above to remove it.
+                </p>
+              </section>
+            </div>
           </div>
         )
       default:
@@ -1260,25 +1339,41 @@ export default function Dashboard() {
           </div>
           <div className="casefile-switcher" aria-label="Saved casefiles">
             <div className="casefile-switcher__header">
-              <span className="side-section-title">Casefiles</span>
+              <span className="side-section-title">Casefile</span>
               <button type="button" className="btn btn--ghost btn--sm" onClick={newCasefile}>New</button>
             </div>
-            {casefilesLoading && <small>Loading casefiles...</small>}
-            {!casefilesLoading && casefiles.length === 0 && <small>No saved casefiles yet</small>}
-            <div className="casefile-switcher__list">
-              {casefiles.map((casefile) => (
-                <button
-                  key={casefile.event_id}
-                  type="button"
-                  className={activeCasefile?.event_id === casefile.event_id ? 'casefile-switcher__item casefile-switcher__item--active' : 'casefile-switcher__item'}
-                  onClick={() => selectCasefile(casefile.event_id)}
-                >
-                  <strong>{casefile.working_title || 'Untitled Event'}</strong>
-                  <span>{[casefile.city, casefile.start_date].filter(Boolean).join(' · ') || casefile.status}</span>
-                  <small>{casefile.expected_turnout ? `${casefile.expected_turnout} pax` : 'Expected turnout not set'}</small>
-                </button>
-              ))}
-            </div>
+            {casefilesLoading && <small className="casefile-switcher__hint">Loading casefiles...</small>}
+            {!casefilesLoading && casefiles.length === 0 && (
+              <small className="casefile-switcher__hint">No saved casefiles yet</small>
+            )}
+            {casefiles.length > 0 && (
+              <select
+                className="casefile-switcher__select"
+                aria-label="Switch casefile"
+                value={activeCasefile?.event_id || ''}
+                onChange={(e) => {
+                  if (e.target.value) void selectCasefile(e.target.value)
+                }}
+              >
+                {!activeCasefile && <option value="">Select a casefile...</option>}
+                {casefiles.map((casefile) => (
+                  <option key={casefile.event_id} value={casefile.event_id}>
+                    {(casefile.working_title || 'Untitled Event')
+                      + (casefile.start_date ? ` — ${casefile.start_date}` : '')}
+                  </option>
+                ))}
+              </select>
+            )}
+            {activeCasefile && (
+              <small className="casefile-switcher__hint">
+                {[
+                  activeCasefile.resolved.basics.city,
+                  activeCasefile.resolved.basics.expected_turnout
+                    ? `${activeCasefile.resolved.basics.expected_turnout} pax`
+                    : null,
+                ].filter(Boolean).join(' · ') || activeCasefile.status}
+              </small>
+            )}
           </div>
           <div className="side-section-title">Route Map</div>
           <nav>
@@ -1294,9 +1389,6 @@ export default function Dashboard() {
               </button>
             ))}
           </nav>
-          <div className="war-room__runtime-footer" aria-label="System status">
-            <span>{runtimeProofText}</span>
-          </div>
         </aside>
 
         <main className="war-room__main" id="main-content">

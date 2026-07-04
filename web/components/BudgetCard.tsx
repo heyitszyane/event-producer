@@ -31,12 +31,6 @@ export interface BudgetSummary {
 
 interface BudgetCardProps {
   budget: BudgetSummary | null
-  basis?: {
-    attendees?: string | number | null
-    location?: string | null
-    contingencyPct?: string | number | null
-    source?: string | null
-  }
   warnings?: string[]
 }
 
@@ -81,11 +75,13 @@ function BudgetHealthRow({
   value,
   max,
   overBy,
+  color,
 }: {
   label: string
   value: number
   max: number
   overBy?: number
+  color?: string
 }) {
   const pct = max > 0 ? Math.min(Math.max((value / max) * 100, 0), 100) : 0
   return (
@@ -96,13 +92,26 @@ function BudgetHealthRow({
         {overBy && overBy > 0 ? <em>OVER BY {formatCurrency(String(overBy))}</em> : null}
       </div>
       <div className="budget-health-row__track">
-        <div className="budget-health-row__fill" style={{ width: `${pct}%` }} />
+        <div
+          className="budget-health-row__fill"
+          style={{ width: `${pct}%`, ...(color ? { background: color } : {}) }}
+        />
       </div>
     </div>
   )
 }
 
-export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardProps) {
+// Palette used to distinguish category spend bars.
+const CATEGORY_BAR_COLORS = [
+  'var(--tier-should)',
+  'var(--tier-must)',
+  'var(--tier-could)',
+  'var(--tier-wow)',
+  'var(--status-info)',
+  'var(--status-warn)',
+]
+
+export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
   if (!budget) {
     return (
       <section className="card" id="budget" aria-labelledby="budget-heading">
@@ -121,12 +130,12 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
   const hasRealismRisk = warnings.length > 0
 
   const statusBadge = budget.over_budget
-    ? { label: 'OVER BUDGET', variant: 'badge--critical' as const, bg: 'var(--status-critical-bg)' as const, fg: 'var(--status-critical)' as const }
+    ? { label: 'Over budget', variant: 'badge--critical' as const }
     : hasRealismRisk
-      ? { label: 'AT RISK — full brief likely exceeds cap', variant: 'badge--warn' as const, bg: 'var(--status-warn-bg)' as const, fg: 'var(--status-warn)' as const }
+      ? { label: 'At risk — full brief likely exceeds cap', variant: 'badge--warn' as const }
     : budget.under_budget
-      ? { label: 'ON TRACK', variant: 'badge--ok' as const, bg: 'var(--status-ok-bg)' as const, fg: 'var(--status-ok)' as const }
-      : { label: 'ON TARGET', variant: 'badge--info' as const, bg: 'var(--status-info-bg)' as const, fg: 'var(--status-info)' as const }
+      ? { label: 'On track', variant: 'badge--ok' as const }
+      : { label: 'On target', variant: 'badge--info' as const }
 
   const categories = Object.entries(budget.category_rollups || {})
   const maxCategoryVal = Math.max(...categories.map(([, v]) => parseFloat(v || '0')), 1)
@@ -143,18 +152,11 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
     <section className="card" id="budget" aria-labelledby="budget-heading">
       <div className="card__header">
         <h2 id="budget-heading">Budget</h2>
+        <span className={`badge ${statusBadge.variant}`}>{statusBadge.label}</span>
       </div>
 
       {/* Three metric blocks */}
       <div className="card__body">
-        {basis && (
-          <div className="block block--info" style={{ marginBottom: 'var(--space-3)' }}>
-            <strong>Budget basis:</strong>{' '}
-            {basis.attendees ?? 'unknown'} attendees · {basis.location || 'location unknown'} ·{' '}
-            {basis.contingencyPct ?? 'default'}% contingency · source: {basis.source || 'mixed'}
-          </div>
-        )}
-
         {warnings.length > 0 && (
           <div className="block block--warn" style={{ marginBottom: 'var(--space-3)' }}>
             <h3 className="block__title">Budget realism risk</h3>
@@ -189,30 +191,22 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
           </div>
         </div>
 
-        {/* Status badge pill */}
-        <div
-          style={{
-            display: 'block',
-            width: '100%',
-            padding: 'var(--space-2) var(--space-3)',
-            borderRadius: 'var(--radius-md)',
-            textAlign: 'center',
-            fontWeight: 700,
-            fontSize: 'var(--text-sm)',
-            letterSpacing: '0.05em',
-            backgroundColor: statusBadge.bg,
-            color: statusBadge.fg,
-            marginBottom: 'var(--space-4)',
-          }}
-        >
-          <span className="sr-only">Status:</span>{statusBadge.label}
-        </div>
-
         <div className="budget-health">
           <BudgetHealthRow label="Budget Cap" value={budgetCap} max={budgetCap} />
-          <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} />
-          <BudgetHealthRow label="Selected Scope Spend" value={selectedSpend} max={budgetCap} />
-          <BudgetHealthRow label="Full Requested Scope" value={fullRequested} max={budgetCap} overBy={requestedOverBy} />
+          <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} color="var(--status-info)" />
+          <BudgetHealthRow
+            label="Included Scope Spend"
+            value={selectedSpend}
+            max={budgetCap}
+            color={selectedSpend > spendable ? 'var(--status-critical)' : 'var(--status-ok)'}
+          />
+          <BudgetHealthRow
+            label="Full Requested Scope"
+            value={fullRequested}
+            max={budgetCap}
+            overBy={requestedOverBy}
+            color="var(--status-warn)"
+          />
         </div>
 
         {/* Category rollup bars */}
@@ -221,14 +215,17 @@ export default function BudgetCard({ budget, basis, warnings = [] }: BudgetCardP
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Category Spend
             </h3>
-            {categories.map(([cat, val]) => {
+            {categories.map(([cat, val], idx) => {
               const numVal = parseFloat(val || '0')
               const pct = (numVal / maxCategoryVal) * 100
               return (
                 <div key={cat} className="rollup-bar">
                   <span className="rollup-bar__label">{humanizeKey(cat)}</span>
                   <div className="rollup-bar__track">
-                    <div className="rollup-bar__fill" style={{ width: `${pct}%` }} />
+                    <div
+                      className="rollup-bar__fill"
+                      style={{ width: `${pct}%`, background: CATEGORY_BAR_COLORS[idx % CATEGORY_BAR_COLORS.length] }}
+                    />
                   </div>
                   <span className="rollup-bar__value">{formatCurrency(val)}</span>
                 </div>
