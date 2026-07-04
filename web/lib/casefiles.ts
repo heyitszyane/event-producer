@@ -74,6 +74,37 @@ export async function runCasefileFirstPass(eventId: string) {
   return res.json()
 }
 
+// P7N — restore the last saved pipeline run for a casefile (404 => never run).
+export async function getRunSnapshot(eventId: string) {
+  const res = await apiFetch(`/casefiles/${eventId}/run-snapshot`)
+  return res.json()
+}
+
+export interface CasefileArtifactPayload {
+  event_id: string
+  name: string
+  payload: Record<string, unknown>
+}
+
+export async function getCasefileArtifact(
+  eventId: string,
+  name: string,
+): Promise<CasefileArtifactPayload> {
+  const res = await apiFetch(`/casefiles/${eventId}/artifacts/${name}`)
+  return res.json()
+}
+
+export interface StorageInfo {
+  root: string
+  casefile_count: number
+  storage_kind: string
+}
+
+export async function getStorageInfo(): Promise<StorageInfo> {
+  const res = await apiFetch('/settings/storage')
+  return res.json()
+}
+
 export async function runSpecialistAgent(
   eventId: string,
   agentId: SpecialistAgentId,

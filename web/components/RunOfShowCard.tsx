@@ -121,6 +121,9 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
       <div className="card__header">
         <h2 id="schedule-heading">Run of Show</h2>
         <div className="cluster" style={{ gap: 'var(--space-1)' }}>
+          <span className={hasConflicts ? 'badge badge--critical' : 'badge badge--ok'}>
+            {hasConflicts ? 'Conflicts detected' : 'Schedule valid'}
+          </span>
           <span className="badge badge--info">{totalTasks} tasks</span>
           {criticalCount > 0 && (
             <span className="badge badge--critical">{criticalCount} critical</span>
@@ -128,27 +131,12 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
         </div>
       </div>
 
-      {/* Status banner */}
-      <div
-        style={{
-          padding: 'var(--space-2) var(--space-3)',
-          borderRadius: 'var(--radius-md)',
-          textAlign: 'center',
-          fontWeight: 700,
-          fontSize: 'var(--text-sm)',
-          letterSpacing: '0.05em',
-          backgroundColor: hasConflicts ? 'var(--status-critical-bg)' : 'var(--status-ok-bg)',
-          color: hasConflicts ? 'var(--status-critical)' : 'var(--status-ok)',
-          marginBottom: 'var(--space-3)',
-        }}
-      >
-        <span className="sr-only">Schedule status:</span>
-        {hasConflicts ? 'Conflicts Detected' : 'Schedule Valid'}
-      </div>
-
-      <div className="block block--info">
-        Schedule edits are frontend drafts for review. Backend recompute remains the source of deterministic schedule truth.
-      </div>
+      {hasConflicts && (
+        <div className="block block--warn">
+          <span className="sr-only">Schedule status:</span>
+          Schedule conflicts detected — review the highlighted rows.
+        </div>
+      )}
 
       <table className="data-table run-sheet-table">
         <thead>

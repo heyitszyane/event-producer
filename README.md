@@ -244,6 +244,17 @@ proxy in Firebase Hosting. `deploy/cloudbuild.yaml` fails deployed frontend
 builds when `_NEXT_PUBLIC_API_BASE_URL` is empty or when local backend URLs are
 found in `web/out`.
 
+### Where casefiles are stored
+
+Casefiles, artifacts, and timelines are plain JSON files under
+`.local_state/event_producer/events/<event_id>/` (override the root with
+`EVENT_PRODUCER_CASEFILE_ROOT`). This is local demo storage, not a cloud
+database; the **10 Settings** route shows the resolved root, the saved
+casefile count, and the active casefile ID. Every pipeline run also saves a
+`run-snapshot` artifact so the last run is restored after a page reload or a
+backend restart. To reset local state, delete
+`.local_state/event_producer/events` and restart.
+
 To confirm which model provider the backend loaded at startup, call
 `GET /runtime/model` with the demo header, or use **10 Settings** in the UI.
 To run a tiny provider smoke test, call `POST /runtime/model/test` or click

@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react'
-import { getCasefile, runSpecialistAgent } from '../lib/casefiles'
+import { useEffect, useMemo, useState } from 'react'
+import { getCasefile, getCasefileArtifact, runSpecialistAgent } from '../lib/casefiles'
 import type {
   AgentMode,
   CasefileArtifact,
   CasefileState,
   SpecialistAgentId,
-  SpecialistAgentResponse,
 } from '../types/agentic'
 import { MODE_CLASS, MODE_LABEL } from '../types/agentic'
 
@@ -54,6 +53,10 @@ const AGENTS: AgentConfig[] = [
   },
 ]
 
+// Artifact payload shape shared by live responses and saved artifacts:
+// { output: {...}, model_mode, fallback_reason, generated_at, ... }
+type AgentPayload = Record<string, unknown>
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
@@ -66,18 +69,18 @@ function asText(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
 
-function modeLabel(mode?: AgentMode | null): string {
-  return mode ? MODE_LABEL[mode] : 'Not run'
+function modeOf(payload?: AgentPayload): AgentMode | null {
+  const mode = payload?.model_mode
+  return typeof mode === 'string' && mode in MODE_LABEL ? mode as AgentMode : null
 }
 
 function updatedLabel(artifact?: CasefileArtifact): string {
-  if (!artifact) return 'Not run'
+  if (!artifact) return 'Not run yet'
   return `Saved ${new Date(artifact.updated_at).toLocaleString()}`
 }
 
-function latestSummary(config: AgentConfig, artifact?: CasefileArtifact, response?: SpecialistAgentResponse): string {
-  const payload = asRecord(response?.output)
-  const output = asRecord(payload.output)
+function latestSummary(config: AgentConfig, artifact?: CasefileArtifact, payload?: AgentPayload): string {
+  const output = asRecord(payload?.output)
   if (config.id === 'creative_concept') {
     return asText(output.concept_summary) || (artifact ? 'Creative artifact saved.' : 'No concept saved yet.')
   }
@@ -91,17 +94,18 @@ function latestSummary(config: AgentConfig, artifact?: CasefileArtifact, respons
   return asText(actions[0]) || (artifact ? 'Risk review artifact saved.' : 'No review saved yet.')
 }
 
-function ArtifactPreview({ config, response }: { config: AgentConfig; response?: SpecialistAgentResponse }) {
-  if (!response) return null
-  const payload = asRecord(response.output)
+// Detail preview beneath each card. The one-line summary already renders in
+// the card header, so it is intentionally not repeated here.
+function ArtifactPreview({ config, payload }: { config: AgentConfig; payload?: AgentPayload }) {
+  if (!payload) return null
   const output = asRecord(payload.output)
 
   if (config.id === 'creative_concept') {
     const titles = asArray(output.event_title_options).map(String).slice(0, 3)
     const ideas = asArray(output.creative_ideas).map(asRecord).slice(0, 3)
+    if (titles.length === 0 && ideas.length === 0) return null
     return (
       <div className="specialist-preview">
-        {asText(output.concept_summary) && <p>{asText(output.concept_summary)}</p>}
         {titles.length > 0 && <p><strong>Titles:</strong> {titles.join(', ')}</p>}
         {ideas.length > 0 && (
           <ul className="compact-list">
@@ -114,9 +118,10 @@ function ArtifactPreview({ config, response }: { config: AgentConfig; response?:
 
   if (config.id === 'scope_strategy') {
     const recommendations = asArray(output.recommendations).map(asRecord).slice(0, 4)
+    const tradeoffs = asArray(output.tradeoffs).map(String).slice(0, 2)
+    if (recommendations.length === 0 && tradeoffs.length === 0) return null
     return (
       <div className="specialist-preview">
-        {asText(output.strategy_summary) && <p>{asText(output.strategy_summary)}</p>}
         {recommendations.length > 0 && (
           <ul className="compact-list">
             {recommendations.map((rec) => (
@@ -124,22 +129,24 @@ function ArtifactPreview({ config, response }: { config: AgentConfig; response?:
             ))}
           </ul>
         )}
+        {tradeoffs.length > 0 && <p><strong>Tradeoffs:</strong> {tradeoffs.join(' ')}</p>}
       </div>
     )
   }
 
   if (config.id === 'vendor_copy') {
+    if (!asText(output.subject) && !asText(output.body)) return null
     return (
       <div className="specialist-preview specialist-preview--draft">
         {asText(output.subject) && <p><strong>{asText(output.subject)}</strong></p>}
         {asText(output.body) && <pre>{asText(output.body)}</pre>}
-        {asText(output.ask_summary) && <p>{asText(output.ask_summary)}</p>}
       </div>
     )
   }
 
   const flags = asArray(output.risk_flags).map(asRecord)
   const actions = asArray(output.recommended_next_actions).map(String)
+  if (flags.length === 0 && actions.length === 0) return null
   return (
     <div className="specialist-preview">
       {flags.length > 0 && (
@@ -166,9 +173,37 @@ export default function SpecialistAgentWorkspace({
     risk_review: '',
   })
   const [running, setRunning] = useState<SpecialistAgentId | null>(null)
-  const [responses, setResponses] = useState<Partial<Record<SpecialistAgentId, SpecialistAgentResponse>>>({})
+  const [payloads, setPayloads] = useState<Partial<Record<SpecialistAgentId, AgentPayload>>>({})
 
   const artifactMap = useMemo(() => casefile?.artifacts || {}, [casefile?.artifacts])
+  const eventId = casefile?.event_id
+
+  // Load saved artifact payloads so previous agent output is visible after a
+  // reload, not only within the session that generated it.
+  useEffect(() => {
+    if (!eventId) {
+      setPayloads({})
+      return
+    }
+    let cancelled = false
+    async function loadSaved() {
+      const next: Partial<Record<SpecialistAgentId, AgentPayload>> = {}
+      await Promise.all(AGENTS.map(async (config) => {
+        if (!artifactMap[config.artifactName]) return
+        try {
+          const artifact = await getCasefileArtifact(eventId as string, config.artifactName)
+          next[config.id] = asRecord(artifact.payload)
+        } catch {
+          // Missing or unreadable artifact — the card just shows "Not run yet".
+        }
+      }))
+      if (!cancelled) setPayloads(next)
+    }
+    void loadSaved()
+    return () => {
+      cancelled = true
+    }
+  }, [eventId, artifactMap])
 
   async function handleRun(config: AgentConfig, regenerate: boolean) {
     if (!casefile) return
@@ -180,7 +215,7 @@ export default function SpecialistAgentWorkspace({
         regenerate,
         artifact_id: artifactMap[config.artifactName]?.name || null,
       })
-      setResponses((current) => ({ ...current, [config.id]: response }))
+      setPayloads((current) => ({ ...current, [config.id]: asRecord(response.output) }))
       const refreshed = await getCasefile(casefile.event_id)
       onCasefileChange(refreshed)
     } catch (err) {
@@ -205,24 +240,25 @@ export default function SpecialistAgentWorkspace({
       <div className="specialist-grid">
         {AGENTS.map((config) => {
           const artifact = artifactMap[config.artifactName]
-          const response = responses[config.id]
-          const mode = response?.model_mode
+          const payload = payloads[config.id]
+          const mode = modeOf(payload)
+          const fallbackReason = asText(payload?.fallback_reason)
           const isRunning = running === config.id
           return (
             <article className="specialist-card" key={config.id}>
               <div className="specialist-card__top">
                 <div>
                   <h3>{config.title}</h3>
-                  <p>{latestSummary(config, artifact, response)}</p>
+                  <p>{latestSummary(config, artifact, payload)}</p>
                 </div>
                 <span className={`badge ${mode ? MODE_CLASS[mode] ?? 'badge--muted' : 'badge--muted'}`}>
-                  {modeLabel(mode)}
+                  {mode ? MODE_LABEL[mode] : artifact ? 'Saved' : 'Not run'}
                 </span>
               </div>
 
               <div className="specialist-card__meta">
                 <span>{updatedLabel(artifact)}</span>
-                {response?.fallback_reason && <span>Fallback: {response.fallback_reason}</span>}
+                {fallbackReason && <span>Fallback: {fallbackReason}</span>}
               </div>
 
               <textarea
@@ -252,7 +288,7 @@ export default function SpecialistAgentWorkspace({
                 </button>
               </div>
 
-              <ArtifactPreview config={config} response={response} />
+              <ArtifactPreview config={config} payload={payload} />
             </article>
           )
         })}

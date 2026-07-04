@@ -8,6 +8,7 @@ production pipeline from brief to run-of-show.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -1211,6 +1212,89 @@ class EventProducerApp:
         for name, payload in artifact_map.items():
             if payload:
                 self._casefile_store.write_artifact(event_id, name, payload)
+        # Full run snapshot: lets the UI restore the last pipeline run after a
+        # reload and lets the backend rehydrate its in-memory event store after
+        # a restart. Casefile-derived keys are re-attached at read time.
+        snapshot = {
+            key: value
+            for key, value in result.items()
+            if key not in ("casefile", "resolved_event_state", "requirements", "next_step", "planning_assumptions")
+        }
+        self._casefile_store.write_artifact(event_id, "run-snapshot", snapshot)
+
+    def get_run_snapshot(self, event_id: str) -> dict[str, Any] | None:
+        """Return the persisted last-run snapshot for a casefile, if any."""
+        try:
+            payload = self._casefile_store.read_artifact(event_id, "run-snapshot")
+        except FileNotFoundError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def ensure_event_runtime(self, event_id: str) -> bool:
+        """Rehydrate the in-memory event store from the saved run snapshot.
+
+        The event store is in-memory, so a backend restart loses the runtime
+        state produced by the last pipeline run. Casefiles persist a
+        ``run-snapshot`` artifact; this reloads it so scope edits, approvals,
+        and chat keep working against saved casefiles.
+
+        Returns True when the event is available in the store afterwards.
+        """
+        if self._event_store.get_event(event_id) is not None:
+            return True
+        snapshot = self.get_run_snapshot(event_id)
+        if not snapshot or not isinstance(snapshot.get("event_spec"), dict):
+            return False
+
+        def from_json(model_cls: Any, payload: Any) -> Any:
+            # Snapshots store Decimals as strings; the strict models only
+            # accept that shape through JSON-mode validation.
+            return model_cls.model_validate_json(json.dumps(payload, default=str))
+
+        self._event_store.save_event(event_id, from_json(EventSpec, snapshot["event_spec"]))
+        scope_items = [
+            from_json(ScopeItem, item)
+            for item in snapshot.get("scope_items", [])
+            if isinstance(item, dict)
+        ]
+        self._event_store.save_scope(event_id, scope_items)
+        if isinstance(snapshot.get("budget_summary"), dict):
+            self._event_store.save_budget(event_id, from_json(BudgetSummary, snapshot["budget_summary"]))
+        if isinstance(snapshot.get("schedule_result"), dict):
+            self._event_store.save_schedule(event_id, from_json(ScheduleResult, snapshot["schedule_result"]))
+        if isinstance(snapshot.get("run_of_show"), dict):
+            self._event_store.save_run_of_show(event_id, from_json(RunOfShow, snapshot["run_of_show"]))
+        for vendor in snapshot.get("run_of_show", {}).get("vendors", []) or []:
+            if isinstance(vendor, dict):
+                self._event_store.save_vendor(event_id, from_json(Vendor, vendor))
+        for approval in snapshot.get("approvals", []) or []:
+            if isinstance(approval, dict):
+                self._event_store.save_approval(event_id, from_json(Approval, approval))
+        return True
+
+    def update_run_snapshot(self, event_id: str, updates: dict[str, Any]) -> None:
+        """Merge recomputed values into the saved run snapshot, if one exists.
+
+        Keeps the persisted casefile in sync with scope/budget/schedule edits
+        so a reload shows the edited state, not the pre-edit run.
+        """
+        snapshot = self.get_run_snapshot(event_id)
+        if snapshot is None:
+            return
+        snapshot.update(updates)
+        self._casefile_store.write_artifact(event_id, "run-snapshot", snapshot)
+        if isinstance(updates.get("budget_summary"), dict):
+            self._casefile_store.write_artifact(event_id, "budget-summary", updates["budget_summary"])
+        if "schedule_result" in updates or "call_sheet" in updates:
+            self._casefile_store.write_artifact(
+                event_id,
+                "run-sheet",
+                {
+                    "schedule_result": updates.get("schedule_result", snapshot.get("schedule_result")),
+                    "call_sheet": updates.get("call_sheet", snapshot.get("call_sheet", [])),
+                    "run_of_show": snapshot.get("run_of_show"),
+                },
+            )
 
     def run_specialist_agent(
         self,

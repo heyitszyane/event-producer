@@ -142,8 +142,13 @@ def test_non_strict_live_provider_failure_allows_degraded_run(monkeypatch) -> No
     monkeypatch.setenv("OPENROUTER_API_KEY", "secret-openrouter")
     app = create_app()
     app.state.event_producer._agent_model = _FakeDegradedProvider()
+    # Patch every reason agent that captured a provider reference at
+    # construction time; otherwise this test makes real network calls.
     app.state.event_producer._brief_intake_reason._provider = app.state.event_producer._agent_model
     app.state.event_producer._creative_reason._provider = app.state.event_producer._agent_model
+    app.state.event_producer._scope_strategy_reason._provider = app.state.event_producer._agent_model
+    app.state.event_producer._vendor_reason._provider = app.state.event_producer._agent_model
+    app.state.event_producer._orchestrator._provider = app.state.event_producer._agent_model
     client = TestClient(app, headers={"X-Demo-User": "demo"})
 
     response = client.post("/run", json={"brief": "Need a networking event for 50 pax."})

@@ -231,27 +231,22 @@ def create_app() -> FastAPI:
     # Added last so it is the outermost middleware and can respond to
     # OPTIONS preflight requests before auth blocks them.
     # Set ALLOWED_ORIGINS env var in production (comma-separated list).
-    _allowed_origins = os.environ.get(
-        "ALLOWED_ORIGINS",
-        ",".join(
-            [
-                "http://localhost:3000",
-                "http://localhost:3001",
-                "http://localhost:3002",
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:3001",
-                "http://127.0.0.1:3002",
-                "http://localhost:8080",
-                "http://127.0.0.1:8080",
-            ]
-        ),
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[o.strip() for o in _allowed_origins.split(",") if o.strip()],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    _allowed_origins = os.environ.get("ALLOWED_ORIGINS", "")
+    if _allowed_origins.strip():
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[o.strip() for o in _allowed_origins.split(",") if o.strip()],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        # Local dev default: the Next dev server may bind any localhost port.
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Store the EventProducerApp instance on app.state so endpoints can
     # access it without re-instantiating on every request.
@@ -345,6 +340,47 @@ def create_app() -> FastAPI:
         )
         return response.model_dump(mode="json")
 
+    _READABLE_ARTIFACTS = {
+        "brief-intake",
+        "creative-concept",
+        "scope-strategy",
+        "budget-summary",
+        "run-sheet",
+        "vendor-copy",
+        "risk-review",
+        "run-snapshot",
+    }
+
+    @app.get("/casefiles/{event_id}/run-snapshot")
+    async def get_casefile_run_snapshot(event_id: str) -> dict[str, Any]:
+        """Return the last persisted pipeline run for a saved casefile.
+
+        Also rehydrates the in-memory event runtime so scope edits, chat, and
+        approvals keep working after a backend restart.
+        """
+        producer: EventProducerApp = app.state.event_producer
+        casefile = _casefile_or_404(event_id)
+        snapshot = producer.get_run_snapshot(event_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="No saved run for this casefile yet")
+        producer.ensure_event_runtime(event_id)
+        snapshot["casefile"] = casefile.model_dump(mode="json")
+        snapshot["resolved_event_state"] = casefile.resolved.model_dump(mode="json")
+        snapshot["requirements"] = casefile.requirements.model_dump(mode="json") if casefile.requirements else None
+        snapshot["next_step"] = casefile.next_step.model_dump(mode="json") if casefile.next_step else None
+        return snapshot
+
+    @app.get("/settings/storage")
+    async def get_storage_info() -> dict[str, Any]:
+        """Describe where casefiles are stored locally (demo storage, not cloud)."""
+        producer: EventProducerApp = app.state.event_producer
+        store = producer.casefile_store
+        return {
+            "root": str(store.root.resolve()),
+            "casefile_count": len(store.list_casefiles()),
+            "storage_kind": "local_json",
+        }
+
     @app.get("/casefiles/{event_id}/artifacts/vendor-copy")
     async def get_vendor_copy_artifact(event_id: str) -> dict[str, Any]:
         """Return the current reviewable vendor-copy draft for a saved casefile."""
@@ -368,6 +404,20 @@ def create_app() -> FastAPI:
             artifact=artifact,
             draft=saved,
         ).model_dump(mode="json")
+
+    # Registered after the vendor-copy routes so those keep their richer shape.
+    @app.get("/casefiles/{event_id}/artifacts/{artifact_name}")
+    async def get_casefile_artifact(event_id: str, artifact_name: str) -> dict[str, Any]:
+        """Return one saved casefile artifact payload by name."""
+        if artifact_name not in _READABLE_ARTIFACTS:
+            raise HTTPException(status_code=404, detail="Unknown artifact name")
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        try:
+            payload = producer.casefile_store.read_artifact(event_id, artifact_name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Artifact not saved yet")
+        return {"event_id": event_id, "name": artifact_name, "payload": payload}
 
     @app.post("/run")
     async def run_event(req: RunEventRequest) -> Any:
@@ -439,6 +489,7 @@ def create_app() -> FastAPI:
     async def get_event(event_id: str) -> dict[str, Any]:
         """Retrieve full event state by its ID."""
         producer: EventProducerApp = app.state.event_producer
+        producer.ensure_event_runtime(event_id)
         event_spec = producer.event_store.get_event(event_id)
         if event_spec is None:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -686,6 +737,7 @@ def create_app() -> FastAPI:
     async def list_event_approvals(event_id: str) -> list[dict[str, Any]]:
         """List approvals for one event."""
         producer: EventProducerApp = app.state.event_producer
+        producer.ensure_event_runtime(event_id)
         if producer.event_store.get_event(event_id) is None and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
         approvals = producer.event_store.get_approvals(event_id)
@@ -700,6 +752,7 @@ def create_app() -> FastAPI:
     ) -> dict[str, Any]:
         """Approve or reject an event-scoped approval through the action-gate."""
         producer: EventProducerApp = app.state.event_producer
+        producer.ensure_event_runtime(event_id)
         if producer.event_store.get_event(event_id) is None and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
         return _update_event_approval(event_id, approval_id, body, _demo_actor(request))
@@ -808,8 +861,18 @@ def create_app() -> FastAPI:
         )
         previous_headroom_text = str(previous_headroom) if previous_headroom is not None else "unknown"
         current_headroom_text = str(updated_budget.headroom)
+        headroom_changed = previous_headroom is None or previous_headroom != updated_budget.headroom
+        if headroom_changed:
+            headroom_message = f"Headroom changed from {previous_headroom_text} to {current_headroom_text}."
+        else:
+            # Tier gating is all-or-nothing per tier, so edits to items in
+            # tiers the budget engine already excludes leave headroom as-is.
+            headroom_message = (
+                f"Headroom unchanged at {current_headroom_text} — this edit did not change "
+                "the items counted in the included tiers (see Tier Inclusion on the Budget page)."
+            )
 
-        return {
+        payload = {
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_summary": budget_summary,
             "schedule_result": schedule_result.model_dump() if schedule_result else None,
@@ -819,13 +882,22 @@ def create_app() -> FastAPI:
                 "current_headroom": current_headroom_text,
                 "schedule_status": "recomputed" if schedule_result else "warning",
                 "message": (
-                    "Budget recalculated. "
-                    f"Headroom changed from {previous_headroom_text} to {current_headroom_text}. "
-                    f"{schedule_message} Risk register and agent trace still reflect the last full pipeline run; "
-                    "rerun the event to refresh all agent outputs."
+                    f"Budget recalculated. {headroom_message} {schedule_message} "
+                    "Risk register and agent trace still reflect the last full pipeline run."
                 ),
             },
         }
+        # Keep the saved casefile in sync so a reload shows the edited state.
+        producer.update_run_snapshot(
+            event_id,
+            {
+                "scope_items": payload["scope_items"],
+                "budget_summary": payload["budget_summary"],
+                "schedule_result": payload["schedule_result"],
+                "call_sheet": payload["call_sheet"],
+            },
+        )
+        return payload
 
     # P7B scope mutation uses a generic event_id parameter; the store is keyed by event_id.
     # Using a query parameter for demo purposes (frontend drives event_id from last /run result).
@@ -835,6 +907,7 @@ def create_app() -> FastAPI:
         """Add a new scope item to an event and recompute budget."""
         producer: EventProducerApp = app.state.event_producer
 
+        producer.ensure_event_runtime(event_id)
         scope = producer.event_store.get_scope(event_id)
         if not scope and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -868,6 +941,7 @@ def create_app() -> FastAPI:
         """Update an existing scope item and recompute budget."""
         producer: EventProducerApp = app.state.event_producer
 
+        producer.ensure_event_runtime(event_id)
         scope = producer.event_store.get_scope(event_id)
         if not scope and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -898,6 +972,7 @@ def create_app() -> FastAPI:
         """Delete a scope item and recompute budget."""
         producer: EventProducerApp = app.state.event_producer
 
+        producer.ensure_event_runtime(event_id)
         scope = producer.event_store.get_scope(event_id)
         if not scope and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -923,6 +998,7 @@ def create_app() -> FastAPI:
         """Toggle the selected flag on a scope item and recompute budget."""
         producer: EventProducerApp = app.state.event_producer
 
+        producer.ensure_event_runtime(event_id)
         scope = producer.event_store.get_scope(event_id)
         if not scope and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -949,6 +1025,7 @@ def create_app() -> FastAPI:
         """Change the tier on a scope item and recompute budget."""
         producer: EventProducerApp = app.state.event_producer
 
+        producer.ensure_event_runtime(event_id)
         scope = producer.event_store.get_scope(event_id)
         if not scope and event_id != _DEMO_EVENT_ID:
             raise HTTPException(status_code=404, detail="Event not found")
@@ -986,6 +1063,7 @@ def create_app() -> FastAPI:
         proposal IDs for apply/dismiss operations.
         """
         producer: EventProducerApp = app.state.event_producer
+        producer.ensure_event_runtime(event_id)
 
         # Fetch event context for the orchestrator
         event_spec = producer.event_store.get_event(event_id)
@@ -1079,6 +1157,7 @@ def create_app() -> FastAPI:
     async def apply_proposal(event_id: str, proposal_id: str) -> dict[str, Any]:
         """Apply a pending proposal; mutates scope based on proposed actions."""
         producer: EventProducerApp = app.state.event_producer
+        producer.ensure_event_runtime(event_id)
 
         # Validate event exists
         event_spec = producer.event_store.get_event(event_id)

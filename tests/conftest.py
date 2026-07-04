@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_casefile_storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep every test's casefiles out of the developer's real .local_state.
+
+    Without this, tests that call /run or create casefiles leak blank
+    casefiles into the local demo storage root on every pytest run.
+    """
+    monkeypatch.setenv("EVENT_PRODUCER_CASEFILE_ROOT", str(tmp_path / "casefile-events"))
 
 
 @pytest.fixture(autouse=True)
