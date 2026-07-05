@@ -28,6 +28,7 @@ from event_producer.config.model_settings import (
     updates_from_settings,
     write_env_values,
 )
+from event_producer.agents.cards import load_agent_cards
 from event_producer.main import EventProducerApp
 from event_producer.models.schemas import (
     Approval,
@@ -380,6 +381,17 @@ def create_app() -> FastAPI:
             "casefile_count": len(store.list_casefiles()),
             "storage_kind": "local_json",
         }
+
+    @app.get("/agents")
+    async def get_agent_registry() -> dict[str, Any]:
+        """Serve the agent skill-card registry (the crew's runtime contracts).
+
+        Cards live as versioned markdown files under
+        ``event_producer/agents/cards/`` and are parsed/validated at load
+        time; the Mission Control UI renders the crew board from this
+        endpoint rather than from hardcoded frontend copy.
+        """
+        return {"agents": load_agent_cards()}
 
     @app.get("/casefiles/{event_id}/artifacts/vendor-copy")
     async def get_vendor_copy_artifact(event_id: str) -> dict[str, Any]:
