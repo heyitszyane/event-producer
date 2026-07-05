@@ -193,6 +193,12 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
 
         <div className="budget-health">
           <BudgetHealthRow label="Budget Cap" value={budgetCap} max={budgetCap} />
+          <BudgetHealthRow
+            label={`Contingency reserve (${formatPercent(budget.contingency_pct)})`}
+            value={numeric(budget.contingency_reserve)}
+            max={budgetCap}
+            color="var(--status-warn)"
+          />
           <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} color="var(--status-info)" />
           <BudgetHealthRow
             label="Included Scope Spend"

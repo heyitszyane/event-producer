@@ -98,10 +98,6 @@ export default function VendorsCard({ vendors }: VendorsCardProps) {
         </div>
       </div>
 
-      <div className="block block--info">
-        Vendor rows are frontend-session drafts. They are not persisted or locked until a human approves vendor-facing use.
-      </div>
-
       {editingId && (
         <div className="vendor-editor">
           <div className="vendor-editor__grid">

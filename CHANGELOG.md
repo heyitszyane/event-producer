@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7O — Agent skill cards, Mission Control, contingency input
+
+- Added the agent skill-card registry: 10 versioned role contracts under
+  `event_producer/agents/cards/` (YAML frontmatter + instruction body),
+  runtime-loaded and validated by `agents/cards.py`, served by `GET /agents`,
+  and pinned by contract tests that reject dishonest or drifting cards.
+- Rebuilt the AI Crew route as Agent Mission Control: the producer console
+  now leads the route, and a single registry-driven Production Crew board
+  (`AgentMissionControl.tsx`) replaces the former SpecialistAgentWorkspace +
+  AI Production Crew + Scope Strategy + Creative Concept stack. Each card
+  shows its kind (LLM agent / rule-based / deterministic engine / structural
+  gate), honest runtime mode, saved-artifact status, direct ask/refine
+  actions, embedded full output, engine deep links, and an expandable
+  role-card contract.
+- Added a user-configurable Contingency % field to Event Basics (0–100,
+  optional; engine default stays 15% when unset) flowing through the saved
+  casefile into the deterministic Budget Engine; the Budget route now shows
+  the contingency reserve as a health row.
+- Vendors route declutter: removed two draft-status info banners, fixed a
+  CSS specificity bug that clamped the vendor copy body to one row (now ~5
+  rows), and filled panel/card header rows with a contrasting band across
+  all routes.
+- Compact `btn--xs`/`btn--sm` sizing for dense per-card actions.
+
 ### P7N — UX hardening: run persistence, real recompute feedback, declutter
 
 - Persisted a `run-snapshot` casefile artifact after every pipeline run and

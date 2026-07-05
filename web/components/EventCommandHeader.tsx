@@ -4,6 +4,7 @@ import type { EventBasics } from '../types/agentic'
 export interface FieldErrors {
   brief?: string
   budgetCap?: string
+  contingencyPct?: string
   expectedTurnout?: string
   startDate?: string
   endDate?: string
@@ -116,6 +117,19 @@ export default function EventCommandHeader({
                 aria-invalid={!!fieldErrors.budgetCap}
               />
               {fieldErrors.budgetCap && <span className="field-error" role="alert">{fieldErrors.budgetCap}</span>}
+            </label>
+
+            <label className="event-field">
+              <span>Contingency %</span>
+              <input
+                type="text"
+                value={basics.contingency_pct ?? ''}
+                onChange={(e) => update('contingency_pct', e.target.value)}
+                placeholder="15"
+                className={`input ${fieldErrors.contingencyPct ? 'input--error' : ''}`}
+                aria-invalid={!!fieldErrors.contingencyPct}
+              />
+              {fieldErrors.contingencyPct && <span className="field-error" role="alert">{fieldErrors.contingencyPct}</span>}
             </label>
 
             <label className="event-field">

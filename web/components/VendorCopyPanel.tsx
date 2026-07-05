@@ -197,10 +197,6 @@ export default function VendorCopyPanel({
         </div>
       </div>
 
-      <div className="block block--info">
-        Event Producer prepares drafts only. Review, edit, save, and copy the text for external use.
-      </div>
-
       {!casefile && (
         <div className="empty-state">Save or load a casefile before preparing vendor copy.</div>
       )}
