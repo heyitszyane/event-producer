@@ -67,6 +67,49 @@ declutter, nav rebrand).
   `.next`) so a second verify dev server cannot corrupt the primary dev
   server's build dir; `.next-verify/` gitignored.
 
+### 6. Vendor Notebook (persistent per-vendor workspace)
+
+Diagnosis (Zyane, 2026-07-05): the Vendors route was too thin to be useful —
+one casefile-level draft, session-only vendor rows, no history, no statuses.
+Rebuilt as a solo producer's chase list, scoped down from ChatGPT's P7M2
+brief (single `vendor-notebook` artifact over the existing store seam
+instead of per-vendor file trees; one current draft per vendor with history
+in the log):
+
+- `event_producer/storage/vendor_notebook.py` — vendor records (workflow
+  status, payment planning fields, contacts), append-only logs (capped at
+  200/vendor), current draft with copied/manually-sent tracking,
+  forward-only status auto-advance, injection screening of vendor replies
+  on entry, and `prompt_context_for()` which yields the selected vendor's
+  context only, withholding flagged reply bodies.
+- Endpoints: vendors CRUD, `/log`, `/draft`, `/draft/mark-copied`,
+  `/draft/mark-manually-sent` under `/casefiles/{id}/vendors`;
+  `SpecialistAgentRequest.vendor_id` scopes `vendor_copy` runs; scoped runs
+  save onto the vendor record (draft_generated / follow_up_generated log
+  entries) instead of the legacy casefile-level artifact, which remains
+  fully supported for scope-less runs.
+- Fixed a real pre-existing gap: the refine `instruction` never reached the
+  vendor draft prompt (`_draft_context` dropped it). It now flows to live
+  and fallback paths; the deterministic fallback writes instruction-aware
+  follow-up copy addressed to the vendor contact.
+- Risk Review now surfaces a deterministic chase list from the notebook:
+  vendors awaiting replies and user-recorded payment due dates.
+- `web/components/VendorNotebook.tsx` — master-detail UI: vendor list with
+  workflow/payment/due badges; status selects that PATCH-and-log on change;
+  quick actions (mark deposit paid / paid in full / settled — recorded
+  only); per-vendor draft panel (generate/refine, save, copy, mark manually
+  sent); activity log with vendor-response input and a visible
+  `injection-flagged` badge; collapsible profile & payment editor; optional
+  import of run-fixture vendor suggestions (user-initiated, labeled).
+  Session-only `VendorsCard` deleted; the legacy casefile-level
+  `VendorCopyPanel` stays reachable under a collapsed details when that
+  artifact exists.
+- 14 new API tests: persistence across app instances, payment/settled
+  logging, injection flags, per-vendor draft isolation (vendor B's log
+  never reaches vendor A's prompt; flagged text withheld; instruction
+  present), copied/sent/follow-up flow, 409 without draft, legacy
+  compatibility, and risk-review chase signals.
+
 ## Docs
 
 README, CLAUDE.md §7, and docs/REPO_SITEMAP.md updated to the load-bearing

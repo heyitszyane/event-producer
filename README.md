@@ -125,6 +125,13 @@ Messy event brief
   (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
   `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
   without a human-approved `Approval`. Tested end-to-end.
+- **Vendor Notebook** — persistent per-vendor workspace saved as a casefile
+  artifact: workflow + payment status (user-recorded planning metadata,
+  never executed), append-only activity logs with injection-screened vendor
+  replies, and per-vendor drafts. Vendor-scoped `vendor_copy` runs receive
+  only the selected vendor's profile, recent log, and current draft;
+  flagged reply text never reaches a prompt. CRUD + log + draft endpoints
+  under `/casefiles/{id}/vendors`. Tested end-to-end.
 - **REST API** — FastAPI with `/run`, `/agents`, `/runtime/model`,
   `/runtime/model/test`, `/settings/model`, `/event/{id}`,
   `/event/{id}/chat`,
@@ -446,8 +453,11 @@ Modules:
 - **ScopeCard** — add/edit/delete/toggle/retier scope items with recompute
   feedback
 - **RiskCard** — risk/gap flags
-- **VendorsCard** — frontend-session vendor draft rows with local-only copy;
-  no backend vendor persistence or outreach claim
+- **VendorNotebook** — persistent per-vendor chase list: workflow and
+  payment status (user-recorded, never executed), append-only activity log
+  with injection-screened vendor replies, and a per-vendor draft the Vendor
+  Copy Agent writes from that vendor's own context; copy and manual-send
+  are tracked, nothing is sent from the app
 - **ChatPane** — production log (read-only) from `chat_log`
 - **ConflictReportCard** — schedule conflicts when present
 
@@ -463,13 +473,14 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-311 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+332 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
 security demo, P7B scope mutation and orchestrator proposals, P7D constraint
 override semantics, budget realism warnings, P7D-FIX recompute/provenance
-regressions, P7J-P7N casefile state truth, and P7O agent skill-card
-contracts + contingency plumbing. 9 Gherkin eval cases under
-`tests/eval_cases/`.
+regressions, P7J-P7N casefile state truth, P7O agent skill-card contracts +
+contingency plumbing, and P7P load-bearing card prompts + vendor notebook
+(persistence, per-vendor context isolation, injection screening). 9 Gherkin
+eval cases under `tests/eval_cases/`.
 
 ## Repository map
 

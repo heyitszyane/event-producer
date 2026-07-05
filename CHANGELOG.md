@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Side nav rebrand: tagline + version read from `web/package.json`.
 - Dev harness: env-driven Next `distDir` so a verify dev server cannot
   corrupt the primary dev server's `.next`.
+- **Vendor Notebook**: the Vendors route became a persistent per-vendor
+  chase list saved as a `vendor-notebook` casefile artifact — vendor
+  records with workflow/payment status (user-recorded, never executed),
+  append-only activity logs, and one current draft each. Vendor-scoped
+  `vendor_copy` runs draft from the selected vendor's profile, recent log,
+  and current draft only; vendor replies are injection-screened on entry
+  and flagged text is withheld from prompts. Copy/manual-send tracking,
+  follow-up drafting, risk-review chase signals, and full CRUD/log/draft
+  endpoints under `/casefiles/{id}/vendors`. Fixes the gap where refine
+  instructions never reached the vendor draft prompt. Session-only
+  VendorsCard deleted.
 
 ### P7O — Agent skill cards, Mission Control, contingency input
 
