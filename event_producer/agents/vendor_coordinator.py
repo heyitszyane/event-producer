@@ -395,7 +395,7 @@ class VendorDraftFormatterAgent:
             "no booking or payment is confirmed by this message.\n\n"
             "Thank you."
         )
-        return VendorDraftResult(
+        result = VendorDraftResult(
             subject=(
                 f"Follow-up: {event_name}" if is_follow_up else f"RFP request for {event_name}"
             ),
@@ -415,11 +415,14 @@ class VendorDraftFormatterAgent:
             ),
             risk_notes=[
                 "Human approval required before vendor-facing use.",
-                "No payment instructions included.",
             ],
             model_mode=model_mode,
             fallback_reason=fallback_reason,
         )
+        # Scrub payment wording the user may have typed into the instruction
+        # before it reaches the draft body, and add the honest "no payment
+        # instructions" note only when the body genuinely carries none.
+        return self._scrub_payment_instructions(result, add_clean_note=True)
 
     @staticmethod
     def _try_parse(text: str | None) -> dict | None:
@@ -437,7 +440,14 @@ class VendorDraftFormatterAgent:
         return data if isinstance(data, dict) else None
 
     @staticmethod
-    def _scrub_payment_instructions(result: VendorDraftResult) -> VendorDraftResult:
+    def _scrub_payment_instructions(
+        result: VendorDraftResult, *, add_clean_note: bool = False
+    ) -> VendorDraftResult:
+        # Payment wording can arrive from a live model OR from the user's own
+        # free-typed refine instruction (interpolated into the fallback body).
+        # Either way it is stripped before the draft is shown, and the risk
+        # notes must state what actually happened — never a blanket "no
+        # payment instructions" claim that the body could contradict.
         body = re.sub(
             r"(?im)^.*\b(?:iban|wire|bank account|payment link|pay now|routing number)\b.*$",
             "[Payment instruction removed: human approval wall requires separate review.]",
@@ -445,7 +455,9 @@ class VendorDraftFormatterAgent:
         )
         risk_notes = list(result.risk_notes)
         if body != result.body:
-            risk_notes.append("LLM-supplied payment instruction was removed from the draft.")
+            risk_notes.append("Payment instruction was removed from the draft; settle payments through the approval wall.")
+        elif add_clean_note:
+            risk_notes.append("No payment instructions included.")
         return result.model_copy(update={"body": body, "risk_notes": risk_notes})
 
 

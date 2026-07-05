@@ -296,6 +296,39 @@ def test_legacy_casefile_level_vendor_copy_still_works(client: TestClient) -> No
     assert res.json()["artifact"]["name"] == "vendor-copy"
 
 
+def test_user_typed_payment_wording_is_scrubbed_from_fallback_draft(client: TestClient) -> None:
+    """A user typing payment wording into the refine box must not produce a
+    draft body that carries it while the risk notes claim otherwise."""
+    event_id = _create_casefile(client)
+    vendor = _add_vendor(client, event_id)
+    client.post(
+        f"/casefiles/{event_id}/agents/vendor_copy/run",
+        json={
+            "instruction": "Please wire the deposit to IBAN DE00 1234 5678 today.",
+            "vendor_id": vendor["id"],
+        },
+    )
+    draft = client.get(f"/casefiles/{event_id}/vendors").json()["vendors"][0]["draft"]
+    # Payment wording is stripped from the body...
+    assert "IBAN" not in draft["body"]
+    assert "Payment instruction removed" in draft["body"]
+    # ...and the notes reflect that, never the false "no payment instructions".
+    notes = " ".join(draft["risk_notes"])
+    assert "removed from the draft" in notes
+    assert "No payment instructions included." not in draft["risk_notes"]
+
+
+def test_clean_fallback_draft_keeps_no_payment_note(client: TestClient) -> None:
+    event_id = _create_casefile(client)
+    vendor = _add_vendor(client, event_id)
+    client.post(
+        f"/casefiles/{event_id}/agents/vendor_copy/run",
+        json={"instruction": "Ask about hold policy.", "vendor_id": vendor["id"]},
+    )
+    draft = client.get(f"/casefiles/{event_id}/vendors").json()["vendors"][0]["draft"]
+    assert "No payment instructions included." in draft["risk_notes"]
+
+
 def test_risk_review_surfaces_notebook_chase_list(client: TestClient) -> None:
     event_id = _create_casefile(client)
     vendor = _add_vendor(client, event_id)
