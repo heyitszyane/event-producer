@@ -3,7 +3,7 @@ name: vendor_copy
 title: Vendor Copy Agent
 kind: llm_agent
 order: 6
-card_version: "1.1.0"
+card_version: "1.2.0"
 purpose: >
   Drafts vendor-facing copy (venue inquiries, F&B/AV asks) as an editable,
   saveable, copyable artifact. Draft-only by construction: this build has no
@@ -11,6 +11,7 @@ purpose: >
   review-required before any external use.
 capabilities:
   - Generate a vendor inquiry with subject, body, and ask summary
+  - Draft against one selected notebook vendor's profile, recent log, and current draft
   - List required vendor response fields and risk notes
   - Refine tone/length/content on instruction ("shorter", "more formal")
   - Preserve user edits — the saved draft is the canonical copy
@@ -70,3 +71,7 @@ from its output and stamps every artifact `draft_only` +
    budget cap in a first inquiry.
 4. Keep money language non-committal: request quotes and options only; the
    human reviews, approves, and sends everything outside the app.
+5. When scoped to a saved notebook vendor, draft from that vendor's profile,
+   recent activity log, and current draft only — never another vendor's
+   history. Injection-flagged vendor replies are withheld from the prompt;
+   the generated draft saves onto that vendor's record with a log entry.

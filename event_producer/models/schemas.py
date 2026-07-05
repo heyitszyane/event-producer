@@ -906,6 +906,176 @@ class VendorCopyDraft(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# P7P — Vendor Notebook (persistent per-vendor workspace)
+# ---------------------------------------------------------------------------
+# Planning metadata only: nothing here sends messages or executes payments.
+# Money fields are user-recorded strings, never engine inputs.
+
+VendorWorkflowStatus = Literal[
+    "not_started",
+    "draft_needed",
+    "draft_ready",
+    "copied_for_manual_send",
+    "manually_sent",
+    "awaiting_reply",
+    "follow_up_needed",
+    "quote_received",
+    "contract_pending",
+    "confirmed",
+    "settled",
+]
+
+VendorPaymentStatus = Literal[
+    "not_applicable",
+    "not_quoted",
+    "quote_requested",
+    "quote_received",
+    "deposit_due",
+    "deposit_paid",
+    "final_balance_due",
+    "paid_in_full",
+]
+
+VendorLogEntryType = Literal[
+    "note",
+    "draft_generated",
+    "draft_edited",
+    "draft_copied",
+    "manual_send_marked",
+    "vendor_response_logged",
+    "follow_up_generated",
+    "payment_updated",
+    "status_updated",
+    "settled",
+]
+
+
+class VendorLogEntry(BaseModel):
+    """One append-only entry in a vendor's activity log."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    id: str
+    vendor_id: str
+    timestamp: str
+    type: VendorLogEntryType = "note"
+    title: str = ""
+    body: str = ""
+    actor: Literal["user", "agent", "system"] = "user"
+    workflow_status: VendorWorkflowStatus | None = None
+    payment_status: VendorPaymentStatus | None = None
+    # Injection screen result for vendor-supplied text (data, not instruction).
+    injection_flags: list[str] = Field(default_factory=list)
+
+
+class VendorDraftRecord(BaseModel):
+    """The selected vendor's current draft plus manual-send tracking."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    subject: str = ""
+    body: str = ""
+    ask_summary: str = ""
+    required_vendor_response_fields: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    review_status: Literal["draft", "reviewed"] = "draft"
+    copy_status: Literal["not_copied", "copied", "manually_sent"] = "not_copied"
+    copied_at: str | None = None
+    manually_sent_at: str | None = None
+    generated_at: str | None = None
+    updated_at: str | None = None
+    instruction: str = ""
+    draft_only: bool = True
+    source_agent: str = "vendor_copy"
+    model_mode: AgentMode | None = None
+    fallback_reason: str | None = None
+
+
+class VendorRecord(BaseModel):
+    """A persistent vendor in the casefile's vendor notebook."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    id: str
+    name: str
+    category: str = "other"
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    website: str = ""
+    notes: str = ""
+
+    workflow_status: VendorWorkflowStatus = "not_started"
+    payment_status: VendorPaymentStatus = "not_quoted"
+
+    quoted_amount: str = ""
+    deposit_amount: str = ""
+    final_balance_amount: str = ""
+    payment_due_date: str = ""
+    payment_notes: str = ""
+
+    deposit_paid_at: str | None = None
+    settled_at: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    draft: VendorDraftRecord | None = None
+    log: list[VendorLogEntry] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_vendor_name(cls, v: str, info) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be a non-empty string")
+        return v.strip()
+
+
+class VendorCreateRequest(BaseModel):
+    """Request body for adding a vendor to the notebook."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    name: str
+    category: str = "other"
+    contact_name: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    website: str = ""
+    notes: str = ""
+
+
+class VendorUpdateRequest(BaseModel):
+    """Partial vendor update; only provided fields change."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    name: str | None = None
+    category: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    website: str | None = None
+    notes: str | None = None
+    workflow_status: VendorWorkflowStatus | None = None
+    payment_status: VendorPaymentStatus | None = None
+    quoted_amount: str | None = None
+    deposit_amount: str | None = None
+    final_balance_amount: str | None = None
+    payment_due_date: str | None = None
+    payment_notes: str | None = None
+
+
+class VendorLogCreateRequest(BaseModel):
+    """Request body for appending a manual vendor log entry."""
+
+    model_config = ConfigDict(extra="ignore", strict=False)
+
+    body: str
+    title: str = ""
+    type: Literal["note", "vendor_response_logged"] = "note"
+
+
+# ---------------------------------------------------------------------------
 # P7A — request / response additions
 # ------------------------------------------------------------------------------
 
@@ -1123,6 +1293,9 @@ class SpecialistAgentRequest(BaseModel):
     instruction: str = ""
     regenerate: bool = False
     artifact_id: str | None = None
+    # Vendor-scoped runs (vendor_copy): draft against one notebook vendor's
+    # profile, recent log, and current draft — never every vendor's history.
+    vendor_id: str | None = None
 
 
 class SpecialistAgentResponse(BaseModel):
