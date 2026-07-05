@@ -138,6 +138,11 @@ def resolve_event_state(
             message="Budget cap is not set yet.",
         ))
 
+    # Contingency % is optional with an engine default (15%); it must never
+    # block confirmation. Only record a source when the user actually set it.
+    if resolved.contingency_pct is not None:
+        sources["contingency_pct"] = source_for("contingency_pct")
+
     if resolved.expected_turnout is not None:
         sources["expected_turnout"] = source_for("expected_turnout")
         if extracted_turnout is not None and extracted_turnout != resolved.expected_turnout:

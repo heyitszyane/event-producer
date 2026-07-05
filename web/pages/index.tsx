@@ -139,6 +139,7 @@ const EMPTY_BASICS: EventBasics = {
   city: '',
   currency: 'USD',
   budget_cap: null,
+  contingency_pct: null,
   start_date: '',
   end_date: '',
   expected_turnout: null,
@@ -355,6 +356,13 @@ function validateCasefileForm(basics: EventBasics, brief: string): { valid: bool
     const bc = parseFloat(String(basics.budget_cap))
     if (isNaN(bc) || bc <= 0) {
       errors.budgetCap = 'Must be a positive number'
+    }
+  }
+
+  if (basics.contingency_pct !== null && basics.contingency_pct !== undefined && String(basics.contingency_pct).trim()) {
+    const cp = parseFloat(String(basics.contingency_pct))
+    if (isNaN(cp) || cp < 0 || cp > 100) {
+      errors.contingencyPct = 'Must be between 0 and 100'
     }
   }
 
@@ -640,6 +648,7 @@ export default function Dashboard() {
     const normalizedBasics: EventBasics = {
       ...basics,
       budget_cap: basics.budget_cap === '' ? null : basics.budget_cap,
+      contingency_pct: basics.contingency_pct === '' ? null : basics.contingency_pct,
       expected_turnout: basics.expected_turnout === undefined ? null : basics.expected_turnout,
       end_date: basics.end_date || basics.start_date,
     }

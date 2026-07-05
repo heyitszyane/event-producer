@@ -947,6 +947,7 @@ class EventBasics(BaseModel):
     city: str = ""
     currency: str = "USD"
     budget_cap: Decimal | None = None
+    contingency_pct: Decimal | None = None
     start_date: str = ""
     end_date: str = ""
     expected_turnout: int | None = None
@@ -969,6 +970,15 @@ class EventBasics(BaseModel):
             _reject_float(info.field_name, v)
             if v <= 0:
                 raise ValueError(f"{info.field_name} must be > 0")
+        return v
+
+    @field_validator("contingency_pct")
+    @classmethod
+    def validate_casefile_contingency_pct(cls, v: Decimal | None, info) -> Decimal | None:
+        if v is not None:
+            _reject_float(info.field_name, v)
+            if v < 0 or v > 100:
+                raise ValueError(f"{info.field_name} must be between 0 and 100")
         return v
 
     @field_validator("expected_turnout")

@@ -1161,6 +1161,10 @@ class EventProducerApp:
         if basics.budget_cap is None:
             planning_assumptions["budget_cap_for_costing"] = budget_cap
 
+        contingency_pct = (
+            str(basics.contingency_pct) if basics.contingency_pct is not None else None
+        )
+
         date = basics.start_date or (
             datetime.now(timezone.utc)
             + timedelta(days=int(DEFAULT_EVENT_CONSTRAINTS["fallback_date_offset_days"]))
@@ -1174,12 +1178,13 @@ class EventProducerApp:
             event_type=bool(basics.event_type),
             date=bool(basics.start_date),
             venue_type=False,
-            contingency_pct=False,
+            contingency_pct=basics.contingency_pct is not None,
         )
         self._casefile_store.append_timeline(event_id, "agent_run_started", {})
         result = self.run_event(
             brief=casefile.brief,
             budget_cap=budget_cap,
+            contingency_pct=contingency_pct,
             attendees=attendees,
             event_type=basics.event_type or None,
             date=date,

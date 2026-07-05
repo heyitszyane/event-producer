@@ -32,6 +32,7 @@ export interface EventBasics {
   city: string
   currency: string
   budget_cap?: string | number | null
+  contingency_pct?: string | number | null
   start_date: string
   end_date: string
   expected_turnout?: number | null
