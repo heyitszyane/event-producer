@@ -3,7 +3,7 @@ name: brief_intake
 title: Brief Intake / Requirements Agent
 kind: llm_agent
 order: 2
-card_version: "1.0.0"
+card_version: "1.1.0"
 purpose: >
   Interprets the free-text event brief into a structured intake result —
   supplemental details, goals, tone, must-haves, missing questions, and
@@ -55,3 +55,17 @@ to *supplement and challenge*, never to override.
    casefile says 100), keep the casefile value and record the conflict for
    the requirements-confirmation panel.
 4. Record `model_mode` and `fallback_reason` honestly on every run.
+
+## Market-realism doctrine
+1. Budget realism is market-relative: the same per-head figure can be
+   generous in one city and impossible in another. Flag tension between
+   headcount, format, and cap as a warning with reasoning — never assume
+   one market's price levels.
+2. Money-critical facts to secure before anyone contacts vendors: date (or
+   date window), city and venue status, headcount range, hard budget cap,
+   indoor/outdoor, and who pays (host vs sponsor vs ticketing).
+3. Format drives cost shape: seated dining raises F&B and rental load;
+   standing receptions raise flow and staffing needs; production-heavy
+   formats (launches, shows) shift spend toward AV and crew.
+4. Ambiguity in the brief is output, not noise: return it as questions
+   ranked by how much money hangs on the answer.

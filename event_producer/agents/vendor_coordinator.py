@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from event_producer.agents.cards import assemble_system_prompt
 from event_producer.models.schemas import (
     AgentMode,
     Approval,
@@ -37,7 +38,7 @@ _PROMPT_PATH = Path(__file__).parent / "prompts" / "vendor_draft_v1.md"
 
 
 def _load_prompt() -> str:
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+    return assemble_system_prompt("vendor_copy", _PROMPT_PATH.read_text(encoding="utf-8"))
 
 
 class VendorCoordinatorReasonAgent:

@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
+from event_producer.agents.cards import assemble_system_prompt
 from event_producer.models.schemas import (
     AgentMode,
     ScopeStrategyRecommendation,
@@ -23,7 +24,7 @@ _PROMPT_PATH = Path(__file__).parent / "prompts" / "scope_strategy_v1.md"
 
 
 def _load_prompt() -> str:
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+    return assemble_system_prompt("scope_strategy", _PROMPT_PATH.read_text(encoding="utf-8"))
 
 
 class ScopeStrategyFormatterAgent:
