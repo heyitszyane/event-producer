@@ -2260,6 +2260,7 @@ a:hover {
   align-items: center;
   padding: 7px 9px;
   margin: -10px -10px 10px;
+  background: var(--paper-2);
   border-bottom: 1.5px solid var(--rule);
 }
 
@@ -3094,8 +3095,9 @@ a:hover {
   gap: 10px;
 }
 
-.vendor-copy-body {
-  min-height: 220px;
+.vendor-copy-body,
+.war-room .vendor-copy-body {
+  min-height: calc(1.4em * 5 + 16px);
   max-height: 420px;
   resize: vertical;
 }
@@ -3180,5 +3182,174 @@ a:hover {
 
   .event-field--wide {
     grid-column: span 1;
+  }
+}
+
+/* ------------------------------------------------------------------------
+   P7O — Agent Mission Control (registry-driven crew board)
+   ------------------------------------------------------------------------ */
+
+.mission-control {
+  gap: 14px;
+}
+
+.mission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mission-card {
+  border: 1.5px solid var(--rule);
+  background: var(--paper);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.mission-card--deterministic_engine,
+.mission-card--structural_gate {
+  background: var(--paper-2);
+}
+
+.mission-card__top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.mission-card h3 {
+  margin: 0 0 4px;
+  font: 800 13px/1.1 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.mission-card__purpose {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.mission-card__badges {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.mission-kind {
+  font: 700 9px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  border: 1px solid var(--line-soft);
+  padding: 3px 5px;
+  background: var(--paper-2);
+}
+
+.mission-card__meta {
+  display: grid;
+  gap: 3px;
+  color: var(--ink-muted);
+  font: 10px/1.4 var(--font-mono);
+}
+
+.mission-card__summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Qualified with .war-room so the min-height wins over the base
+   `.war-room textarea` 32px clamp (same specificity fix as vendor-copy). */
+.mission-card__input,
+.war-room .mission-card__input {
+  min-height: 52px;
+  resize: vertical;
+  font-size: 11.5px;
+}
+
+.mission-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Compact action buttons — the war-room base .btn is too tall/wide for
+   dense per-card actions, so btn--xs (and btn--sm) tighten it here. */
+.war-room .btn--sm,
+.war-room .btn--xs {
+  min-height: 22px;
+  padding: 3px 8px;
+  box-shadow: 1px 1px 0 var(--rule);
+  font-size: 10px;
+  line-height: 1.2;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mission-card__preview {
+  border-top: 1px solid rgba(17, 17, 15, 0.18);
+  padding-top: 8px;
+  margin: 0;
+}
+
+.mission-card__preview pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font: 11px/1.45 var(--font-mono);
+  background: #fffaf0;
+  border: 1px solid var(--line-soft);
+  padding: 8px;
+}
+
+.mission-card__detail summary {
+  cursor: pointer;
+  font: 700 10px/1.3 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+.mission-card__contract {
+  display: grid;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.mission-card__contract .small {
+  margin: 0;
+}
+
+.mission-card__source {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* Embedded full-output components render flat inside a crew card instead
+   of as a nested framed panel. */
+.mission-embed {
+  padding-top: 6px;
+}
+
+.mission-embed .card,
+.war-room .mission-embed .card {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+
+@media (max-width: 900px) {
+  .mission-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -11,10 +11,7 @@ import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
 import SecurityBeat from '../components/SecurityBeat'
 import ExtractedRequirements from '../components/ExtractedRequirements'
-import CreativeConcept from '../components/CreativeConcept'
-import AIProductionCrew from '../components/AIProductionCrew'
-import ScopeStrategy from '../components/ScopeStrategy'
-import SpecialistAgentWorkspace from '../components/SpecialistAgentWorkspace'
+import AgentMissionControl from '../components/AgentMissionControl'
 import VendorCopyPanel from '../components/VendorCopyPanel'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
@@ -266,9 +263,9 @@ const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string
     desc: 'Event Basics are saved first. Brief text can add context and surface conflicts.',
   },
   'ai-crew': {
-    route: '02 / AI Production Crew Working Board',
-    title: 'AI Production Crew Working Board',
-    desc: 'Readable agent operations, prompt chips, proposals, and technical trace demotion.',
+    route: '02 / Agent Mission Control',
+    title: 'Agent Mission Control',
+    desc: 'Ask the AI Producer, then direct the crew: every card is a runtime-loaded skill contract with live status, saved output, and direct actions.',
   },
   scope: {
     route: '03 / Scope Configurator',
@@ -1096,22 +1093,26 @@ export default function Dashboard() {
       case 'ai-crew':
         return (
           <div className="war-stack">
-            <SpecialistAgentWorkspace
+            {producerConsole}
+            {!result && (
+              <section className="war-panel empty-state">
+                <p>
+                  The producer console unlocks after the first pass. You can still task the
+                  specialists below directly against the saved casefile.
+                </p>
+              </section>
+            )}
+            <AgentMissionControl
               casefile={activeCasefile}
-              onCasefileChange={applyCasefileState}
-              onError={setError}
-            />
-            <AIProductionCrew
               trace={agentTrace}
               modelModeSummary={result?.model_mode_summary}
-              briefIntake={result?.brief_intake ?? null}
-              budgetSummary={result?.budget_summary}
-              scheduleCount={scheduleResult?.ordered_tasks?.length || 0}
-              onPromptChipClick={sendProducerPrompt}
+              creativeConcept={result?.creative_concept ?? null}
+              scopeStrategy={result?.scope_strategy ?? null}
+              onCasefileChange={applyCasefileState}
+              onError={setError}
+              onNavigate={navigateToTarget}
+              onAddToScope={handleAddToScope}
             />
-            {producerConsole}
-            <ScopeStrategy strategy={result?.scope_strategy ?? null} />
-            <CreativeConcept concept={result?.creative_concept ?? null} onAddToScope={handleAddToScope} />
           </div>
         )
       case 'scope':
