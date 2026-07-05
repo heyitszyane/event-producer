@@ -183,7 +183,7 @@ The full technology stack:
 | Concept | Where |
 |---------|-------|
 | ADK-style multi-agent | `agents/` — rule-based role agents + reason->formatter splits (no live ADK runtime) |
-| Skill-like role modules | Reusable role modules with typed inputs/outputs; formal ADK Agent Skills packaging is deferred |
+| Agent skills | `agents/cards/` — 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`; formal ADK Agent Skills packaging still deferred |
 | Security / context hygiene | `security/` — structural action-gate + advisory injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
 | MCP | `mcp/` — wrapper over event-store via provider seam |
