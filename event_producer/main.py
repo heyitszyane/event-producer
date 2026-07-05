@@ -67,6 +67,7 @@ from event_producer.models.schemas import (
     SpecialistAgentResponse,
     Vendor,
     VendorCopyDraft,
+    VendorDraftRecord,
     VendorMessage,
 )
 from event_producer.providers.event_store import EventStore
@@ -77,6 +78,8 @@ from event_producer.providers.rate_card import FxRateProvider, StaticFxRateProvi
 from event_producer.providers.vendor_sourcer import VendorSourcer
 from event_producer.security.audit_log import AuditLog
 from event_producer.storage.local_casefiles import LocalCasefileStore
+from event_producer.storage.vendor_notebook import ARTIFACT_NAME as VENDOR_NOTEBOOK_ARTIFACT
+from event_producer.storage.vendor_notebook import VendorNotebook
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +297,7 @@ class EventProducerApp:
         # --- Providers ---
         self._event_store = event_store if event_store is not None else InMemoryEventStore()
         self._casefile_store = casefile_store if casefile_store is not None else LocalCasefileStore()
+        self._vendor_notebook = VendorNotebook(self._casefile_store)
         self._vendor_sourcer = InMemoryVendorSourcer()
         self._fx_provider: FxRateProvider = StaticFxRateProvider()
         self._audit_log = AuditLog()
@@ -348,6 +352,10 @@ class EventProducerApp:
     @property
     def casefile_store(self) -> LocalCasefileStore:
         return self._casefile_store
+
+    @property
+    def vendor_notebook(self) -> VendorNotebook:
+        return self._vendor_notebook
 
     @property
     def vendor_sourcer(self) -> InMemoryVendorSourcer:
@@ -1309,6 +1317,7 @@ class EventProducerApp:
         instruction: str = "",
         regenerate: bool = False,
         artifact_id: str | None = None,
+        vendor_id: str | None = None,
     ) -> SpecialistAgentResponse:
         """Run one user-directed specialist against saved casefile context."""
         casefile = self._casefile_store.get_casefile(event_id)
@@ -1324,6 +1333,14 @@ class EventProducerApp:
             regenerate=regenerate,
             previous_artifact=previous_artifact,
         )
+        vendor_scoped = agent_id == "vendor_copy" and bool(vendor_id)
+        if vendor_scoped:
+            # Selected vendor only: profile, recent injection-screened log,
+            # and current draft. Other vendors' histories stay out of the
+            # prompt by construction.
+            context["vendor_notebook"] = self._vendor_notebook.prompt_context_for(
+                event_id, cast(str, vendor_id)
+            )
 
         if agent_id == "creative_concept":
             output, model_mode, fallback_reason = self._run_direct_creative(context)
@@ -1361,7 +1378,18 @@ class EventProducerApp:
             "generated_at": generated_at,
             "advisory_only": True,
         }
-        artifact = self._casefile_store.write_artifact(event_id, artifact_name, artifact_payload)
+        if vendor_scoped:
+            # The draft lands on the selected vendor's notebook record (with
+            # its own log entry) instead of the casefile-level artifact.
+            draft = VendorDraftRecord(**{**output, "instruction": instruction})
+            self._vendor_notebook.save_draft(
+                event_id, cast(str, vendor_id), draft, generated=True, actor="agent"
+            )
+            artifact_name = VENDOR_NOTEBOOK_ARTIFACT
+            artifact = self._casefile_store.get_casefile(event_id).artifacts[artifact_name]
+            artifact_payload["vendor_id"] = vendor_id
+        else:
+            artifact = self._casefile_store.write_artifact(event_id, artifact_name, artifact_payload)
         self._casefile_store.append_timeline(
             event_id,
             "agent_artifact_generated",
@@ -1369,6 +1397,7 @@ class EventProducerApp:
                 "agent_id": agent_id,
                 "artifact_name": artifact_name,
                 "model_mode": model_mode,
+                **({"vendor_id": vendor_id} if vendor_scoped else {}),
             },
         )
         if agent_id == "vendor_copy":
@@ -1720,6 +1749,11 @@ class EventProducerApp:
             "vendor_category": "venue",
             "instruction": context["instruction"],
         }
+        notebook = context.get("vendor_notebook")
+        if notebook:
+            request["vendor_notebook"] = notebook
+            profile = notebook.get("vendor_profile") or {}
+            request["vendor_category"] = profile.get("category") or request["vendor_category"]
         raw = self._vendor_reason.run(request)
         output = raw.get("vendor_draft") or {"body": raw.get("draft", "")}
         output["draft_only"] = True
@@ -1747,6 +1781,31 @@ class EventProducerApp:
             if notice.get("type") in {"missing", "conflict"}
         ]
         recommended_next_actions = []
+        # Deterministic vendor-notebook chase list: replies to chase and
+        # user-recorded payment dates to watch. Planning signals only.
+        try:
+            notebook_vendors = self._vendor_notebook.list_vendors(context["event_id"])
+        except FileNotFoundError:
+            notebook_vendors = []
+        waiting = [
+            vendor.name
+            for vendor in notebook_vendors
+            if vendor.workflow_status in ("awaiting_reply", "follow_up_needed")
+        ]
+        payment_watch = [
+            f"{vendor.name} ({vendor.payment_due_date})"
+            for vendor in notebook_vendors
+            if vendor.payment_due_date
+            and vendor.payment_status in ("deposit_due", "final_balance_due")
+        ]
+        if waiting:
+            recommended_next_actions.append(
+                "Chase vendor replies: " + ", ".join(waiting[:4]) + "."
+            )
+        if payment_watch:
+            recommended_next_actions.append(
+                "Payment dates to watch: " + ", ".join(payment_watch[:4]) + "."
+            )
         if missing_or_conflict:
             recommended_next_actions.append("Resolve missing or conflicting casefile requirements before vendor outreach.")
         if not context["budget_summary"]:

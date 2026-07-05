@@ -23,13 +23,14 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from event_producer.agents.cards import assemble_system_prompt
 from event_producer.models.schemas import AgentMode, BriefIntakeResult
 
 _PROMPT_PATH = Path(__file__).parent / "prompts" / "brief_intake_v1.md"
 
 
 def _load_prompt() -> str:
-    return _PROMPT_PATH.read_text(encoding="utf-8")
+    return assemble_system_prompt("brief_intake", _PROMPT_PATH.read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------------------

@@ -111,16 +111,27 @@ Messy event brief
   recoverable type/shape drift before validation.
 - **Agent trace** — 8 structural role-agent steps recorded during the run
   (`AgentTraceStep` schema). Rendered as a secondary technical trace.
-- **Agent skill cards** — 10 versioned role contracts under
+- **Agent skill cards (load-bearing)** — 10 versioned role contracts under
   `event_producer/agents/cards/` (YAML frontmatter contract + instruction
   body: capabilities, inputs/outputs, structural boundaries, prompt refs).
   Parsed and validated at runtime by `agents/cards.py`, served by
   `GET /agents`, rendered as the Mission Control crew board, and pinned by
-  contract tests that reject cards that drift from the runtime.
+  contract tests that reject cards that drift from the runtime. The cards
+  are load-bearing, not display-only: every LLM agent's reason step
+  assembles its live system prompt as versioned prompt + the card's
+  instruction body (`cards.assemble_system_prompt`), so the registry
+  doctrine is what the model actually runs under (tested).
 - **Security action-gate** — `enforce()` blocks 8 gated actions
   (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
   `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
   without a human-approved `Approval`. Tested end-to-end.
+- **Vendor Notebook** — persistent per-vendor workspace saved as a casefile
+  artifact: workflow + payment status (user-recorded planning metadata,
+  never executed), append-only activity logs with injection-screened vendor
+  replies, and per-vendor drafts. Vendor-scoped `vendor_copy` runs receive
+  only the selected vendor's profile, recent log, and current draft;
+  flagged reply text never reaches a prompt. CRUD + log + draft endpoints
+  under `/casefiles/{id}/vendors`. Tested end-to-end.
 - **REST API** — FastAPI with `/run`, `/agents`, `/runtime/model`,
   `/runtime/model/test`, `/settings/model`, `/event/{id}`,
   `/event/{id}/chat`,
@@ -427,8 +438,8 @@ Modules:
 - **AgentMissionControl** — registry-driven crew board: fetches the agent
   skill cards from `GET /agents` and renders each role with its kind, honest
   runtime mode, saved-artifact status, direct ask/refine actions for the
-  four specialists, embedded full concept/strategy output, and an expandable
-  role-card contract
+  four specialists, compact concept/strategy output digests, and an
+  expandable role-card contract
 - **ExtractedRequirements** — resolved requirement basis with from-brief,
   manual-override, fallback-default, and missing provenance
 - **AgentCrewTrace** — secondary timeline of role-agent steps with statuses,
@@ -442,8 +453,11 @@ Modules:
 - **ScopeCard** — add/edit/delete/toggle/retier scope items with recompute
   feedback
 - **RiskCard** — risk/gap flags
-- **VendorsCard** — frontend-session vendor draft rows with local-only copy;
-  no backend vendor persistence or outreach claim
+- **VendorNotebook** — persistent per-vendor chase list: workflow and
+  payment status (user-recorded, never executed), append-only activity log
+  with injection-screened vendor replies, and a per-vendor draft the Vendor
+  Copy Agent writes from that vendor's own context; copy and manual-send
+  are tracked, nothing is sent from the app
 - **ChatPane** — production log (read-only) from `chat_log`
 - **ConflictReportCard** — schedule conflicts when present
 
@@ -459,13 +473,14 @@ landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
 | Type check | `python3 -m mypy event_producer` |
 | Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
 
-311 tests: budget engine, CPM scheduler, agents, API, security action-gate,
+332 tests: budget engine, CPM scheduler, agents, API, security action-gate,
 injection flag, audit log, MCP server, FX rates, default demo contract, P6F
 security demo, P7B scope mutation and orchestrator proposals, P7D constraint
 override semantics, budget realism warnings, P7D-FIX recompute/provenance
-regressions, P7J-P7N casefile state truth, and P7O agent skill-card
-contracts + contingency plumbing. 9 Gherkin eval cases under
-`tests/eval_cases/`.
+regressions, P7J-P7N casefile state truth, P7O agent skill-card contracts +
+contingency plumbing, and P7P load-bearing card prompts + vendor notebook
+(persistence, per-vendor context isolation, injection screening). 9 Gherkin
+eval cases under `tests/eval_cases/`.
 
 ## Repository map
 
@@ -510,8 +525,10 @@ This project demonstrates:
 - **ADK-style multi-agent architecture** — role agents with
   reason->formatter splits (rule-based, not live ADK runtime)
 - **Agent skill cards** — versioned, runtime-loaded role contracts
-  (capabilities, inputs/outputs, structural boundaries) that the API serves
-  and the UI renders; contract tests keep them honest
+  (capabilities, inputs/outputs, structural boundaries) that the API serves,
+  the UI renders, and the live prompt assembly consumes (card instruction
+  bodies are appended to the LLM agents' system prompts); contract tests
+  keep them honest
 - **Deterministic correctness** — Budget Engine and CPM Scheduler are pure
   Python, Decimal-only, fully testable
 - **Structural security** — action-gate enforced in code, not prompts
@@ -529,7 +546,7 @@ are optional and limited to the configured provider seam.
 | Concept | Where |
 |---------|-------|
 | ADK-style multi-agent | `event_producer/agents/` -- role agents + reason->formatter splits, coordinated pipeline + direct specialist runs over saved casefile context |
-| Agent skills | `event_producer/agents/cards/` -- 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents` and rendered as the Mission Control crew board |
+| Agent skills | `event_producer/agents/cards/` -- 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`, rendered as the Mission Control crew board, and appended into the LLM agents' live prompt assembly (load-bearing) |
 | Security / context hygiene | `event_producer/security/` -- structural action-gate + injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
 | MCP | `event_producer/mcp/` -- wrapper over event-store via provider seam |

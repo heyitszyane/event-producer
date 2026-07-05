@@ -71,8 +71,8 @@ Role-based agents plus reasoner/formatter splits. Each agent file owns a single 
 | `production_manager.py` | Manages production timeline and deliverables |
 | `vendor_coordinator.py` | Handles vendor selection, live/fallback vendor draft generation, and gated communication |
 | `risk_flagger.py` | Identifies and surfaces risks across all domains |
-| `cards.py` | Loads + validates the agent skill-card registry from `cards/` (frontmatter contracts) |
-| `cards/` | 10 versioned agent skill cards: YAML contract (capabilities, inputs/outputs, structural boundaries, prompt refs) + instruction body; served by `GET /agents` and rendered as the Mission Control crew board |
+| `cards.py` | Loads + validates the agent skill-card registry from `cards/` (frontmatter contracts); `assemble_system_prompt` appends card bodies into the LLM agents' live prompts (load-bearing seam) |
+| `cards/` | 10 versioned agent skill cards: YAML contract (capabilities, inputs/outputs, structural boundaries, prompt refs) + instruction body; served by `GET /agents`, rendered as the Mission Control crew board, and appended into live prompt assembly |
 | `prompts/` | Versioned system prompts referenced by the live-capable agents and their skill cards |
 
 Most role agents are rule-based (deterministic). Brief Intake, Creative
@@ -122,6 +122,14 @@ Abstract interfaces that define the **seam** between the agent layer and externa
 | `rate_card.py` | Vendor rate lookup and caching (FX rates) |
 | `vendor_sourcer.py` | Vendor discovery and qualification |
 
+#### `event_producer/storage/`
+Local file-backed casefile persistence (Firestore-ready provider seam; demo storage, not cloud).
+
+| File | Purpose |
+|---|---|
+| `local_casefiles.py` | Saved casefile store: state resolution/precedence, artifacts, timeline, requirements payloads, next-best-step |
+| `vendor_notebook.py` | Vendor Notebook over the casefile store: persistent per-vendor records with workflow/payment status, append-only logs (vendor replies injection-screened on entry), one current draft each, and selected-vendor-only prompt context |
+
 #### `event_producer/mcp/`
 MCP (Model Context Protocol) server implementation. Exposes EventStore operations through a uniform MCP-style interface. All CRUD goes through the `EventStore` provider ABC -- no private introspection.
 
@@ -142,7 +150,7 @@ Browser-based UI for the event producer system. Static export (`output: 'export'
 | `web/pages/` | Next.js page components (file-system routing) |
 | `web/pages/index.tsx` | Main Paper War Room page with persistent side nav, route-like section state, runtime summary strip, Settings provider test, strict-live error display, and AI Producer proposal controls |
 | `web/pages/api/[...proxy].ts` | Dev-only API proxy (not included in static export) |
-| `web/components/` | Shared UI components (AIProductionCrew, AgentCrewTrace, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, CreativeConcept, EventCommandHeader, ExtractedRequirements, IntakeHero, RiskCard, RunOfShowCard, ScopeCard, ScopeStrategy, SecurityBeat, SpecialistAgentWorkspace, VendorsCard). The UI exposes direct specialist-agent actions, live/fallback agent modes, deterministic engine outputs, vendor draft preview, and Approval Wall status inside Overview, Brief Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log sections. |
+| `web/components/` | Shared UI components (AgentCrewTrace, AgentMissionControl, ApprovalInbox, BudgetCard, ChatPane, ConflictReportCard, EventCommandHeader, ExtractedRequirements, InfoHint, IntakeHero, NextBestStep, RequirementsConfirmation, RiskCard, RunOfShowCard, ScopeCard, SecurityBeat, VendorCopyPanel, VendorNotebook). The UI exposes direct specialist-agent actions, live/fallback agent modes, deterministic engine outputs, the per-vendor notebook, and Approval Wall status inside Overview, Brief Intake, AI Crew, Scope, Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log sections. |
 | `web/lib/api.ts` | Browser API helper for API base resolution, demo header injection, structured backend error parsing, and strict-live provider failure details |
 | `web/lib/humanize.ts` | User-facing display-label helpers for enum/action/category/provenance strings |
 | `web/types/agentic.ts` | Shared frontend types for model modes, provenance, proposals, direct specialist-agent actions, Scope Strategy, Vendor Draft, provider diagnostics, and recompute notices |

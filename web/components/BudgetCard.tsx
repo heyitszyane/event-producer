@@ -1,4 +1,5 @@
 import { humanizeKey } from '../lib/humanize'
+import InfoHint from './InfoHint'
 
 export interface BudgetSummary {
   lines: Array<{
@@ -151,7 +152,10 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
   return (
     <section className="card" id="budget" aria-labelledby="budget-heading">
       <div className="card__header">
-        <h2 id="budget-heading">Budget</h2>
+        <h2 id="budget-heading">
+          Budget{' '}
+          <InfoHint text="Deterministic budget engine output: every line reconciles to zero against the cap, with contingency reserved before discretionary spend. The model never computes these numbers." />
+        </h2>
         <span className={`badge ${statusBadge.variant}`}>{statusBadge.label}</span>
       </div>
 

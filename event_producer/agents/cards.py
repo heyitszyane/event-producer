@@ -124,3 +124,28 @@ def load_agent_cards() -> list[dict[str, Any]]:
     """Return the validated crew registry, ordered for display."""
     # Copies keep callers from mutating the cached contracts.
     return [dict(card) for card in _load_cards_cached()]
+
+
+def get_agent_card(name: str) -> dict[str, Any]:
+    """Return one validated card by registry name."""
+    for card in _load_cards_cached():
+        if card["name"] == name:
+            return dict(card)
+    raise AgentCardError(f"no agent card named {name!r} in the registry")
+
+
+def assemble_system_prompt(card_name: str, base_prompt: str) -> str:
+    """Compose the live system prompt: versioned prompt + card doctrine.
+
+    This is the single seam that makes skill cards load-bearing: every LLM
+    agent's reason step appends its registry card's instruction body to the
+    versioned prompt, so the same contract served by ``GET /agents`` is the
+    doctrine the live model actually runs under.
+    """
+    card = get_agent_card(card_name)
+    return (
+        f"{base_prompt.rstrip()}\n\n"
+        "# Agent skill card (runtime-loaded from the registry)\n"
+        f"Card: {card['name']} v{card['card_version']} — {card['source_file']}\n\n"
+        f"{card['instructions']}\n"
+    )

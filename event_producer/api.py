@@ -46,9 +46,14 @@ from event_producer.models.schemas import (
     SpecialistAgentId,
     SpecialistAgentRequest,
     VendorCopyDraft,
+    VendorCreateRequest,
+    VendorDraftRecord,
+    VendorLogCreateRequest,
+    VendorUpdateRequest,
 )
 from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
+from event_producer.storage.vendor_notebook import VendorNotFoundError
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -332,12 +337,17 @@ def create_app() -> FastAPI:
         """Run one direct specialist against server-loaded saved casefile context."""
         producer: EventProducerApp = app.state.event_producer
         _casefile_or_404(event_id)
+        if req.vendor_id:
+            if agent_id != "vendor_copy":
+                raise HTTPException(status_code=422, detail="vendor_id only applies to vendor_copy runs")
+            _vendor_or_404(event_id, req.vendor_id)
         response = producer.run_specialist_agent(
             event_id,
             agent_id,
             instruction=req.instruction,
             regenerate=req.regenerate,
             artifact_id=req.artifact_id,
+            vendor_id=req.vendor_id,
         )
         return response.model_dump(mode="json")
 
@@ -348,6 +358,7 @@ def create_app() -> FastAPI:
         "budget-summary",
         "run-sheet",
         "vendor-copy",
+        "vendor-notebook",
         "risk-review",
         "run-snapshot",
     }
@@ -416,6 +427,109 @@ def create_app() -> FastAPI:
             artifact=artifact,
             draft=saved,
         ).model_dump(mode="json")
+
+    # ---- Vendor Notebook (persistent per-vendor workspace) ----------------
+    # Planning metadata only: drafts are copied manually, payments are
+    # user-recorded status, nothing is sent or executed from the app.
+
+    def _vendor_or_404(event_id: str, vendor_id: str) -> None:
+        producer: EventProducerApp = app.state.event_producer
+        try:
+            producer.vendor_notebook.get_vendor(event_id, vendor_id)
+        except VendorNotFoundError:
+            raise HTTPException(status_code=404, detail="Vendor not found in this casefile")
+
+    @app.get("/casefiles/{event_id}/vendors")
+    async def list_casefile_vendors(event_id: str) -> dict[str, Any]:
+        """List the casefile's saved vendors with logs, drafts, and statuses."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        vendors = producer.vendor_notebook.list_vendors(event_id)
+        return {"event_id": event_id, "vendors": [v.model_dump(mode="json") for v in vendors]}
+
+    @app.post("/casefiles/{event_id}/vendors")
+    async def create_casefile_vendor(event_id: str, req: VendorCreateRequest) -> dict[str, Any]:
+        """Add a vendor to the casefile's notebook."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        vendor = producer.vendor_notebook.add_vendor(event_id, req.model_dump())
+        return vendor.model_dump(mode="json")
+
+    @app.patch("/casefiles/{event_id}/vendors/{vendor_id}")
+    async def update_casefile_vendor(
+        event_id: str, vendor_id: str, req: VendorUpdateRequest
+    ) -> dict[str, Any]:
+        """Update vendor profile, workflow status, or payment planning fields."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        vendor = producer.vendor_notebook.update_vendor(
+            event_id, vendor_id, req.model_dump(exclude_none=True)
+        )
+        return vendor.model_dump(mode="json")
+
+    @app.delete("/casefiles/{event_id}/vendors/{vendor_id}")
+    async def delete_casefile_vendor(event_id: str, vendor_id: str) -> dict[str, Any]:
+        """Remove a vendor from the notebook (recorded in the casefile timeline)."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        producer.vendor_notebook.delete_vendor(event_id, vendor_id)
+        return {"event_id": event_id, "vendor_id": vendor_id, "deleted": True}
+
+    @app.post("/casefiles/{event_id}/vendors/{vendor_id}/log")
+    async def append_casefile_vendor_log(
+        event_id: str, vendor_id: str, req: VendorLogCreateRequest
+    ) -> dict[str, Any]:
+        """Log a manual note or a vendor response (injection-screened on entry)."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        entry = producer.vendor_notebook.append_log(
+            event_id,
+            vendor_id,
+            type=req.type,
+            title=req.title
+            or ("Vendor response logged" if req.type == "vendor_response_logged" else "Note"),
+            body=req.body,
+            actor="user",
+        )
+        return entry.model_dump(mode="json")
+
+    @app.put("/casefiles/{event_id}/vendors/{vendor_id}/draft")
+    async def save_casefile_vendor_draft(
+        event_id: str, vendor_id: str, draft: VendorDraftRecord
+    ) -> dict[str, Any]:
+        """Save user edits to the vendor's current draft (draft-only, no send)."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        vendor = producer.vendor_notebook.save_draft(event_id, vendor_id, draft)
+        return vendor.model_dump(mode="json")
+
+    @app.post("/casefiles/{event_id}/vendors/{vendor_id}/draft/mark-copied")
+    async def mark_casefile_vendor_draft_copied(event_id: str, vendor_id: str) -> dict[str, Any]:
+        """Record that the draft was copied for manual send outside the app."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        try:
+            vendor = producer.vendor_notebook.mark_draft_copied(event_id, vendor_id)
+        except VendorNotFoundError:
+            raise HTTPException(status_code=409, detail="This vendor has no draft yet")
+        return vendor.model_dump(mode="json")
+
+    @app.post("/casefiles/{event_id}/vendors/{vendor_id}/draft/mark-manually-sent")
+    async def mark_casefile_vendor_draft_sent(event_id: str, vendor_id: str) -> dict[str, Any]:
+        """Record that the user sent the draft outside the app. Sends nothing."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        _vendor_or_404(event_id, vendor_id)
+        try:
+            vendor = producer.vendor_notebook.mark_draft_manually_sent(event_id, vendor_id)
+        except VendorNotFoundError:
+            raise HTTPException(status_code=409, detail="This vendor has no draft yet")
+        return vendor.model_dump(mode="json")
 
     # Registered after the vendor-copy routes so those keep their richer shape.
     @app.get("/casefiles/{event_id}/artifacts/{artifact_name}")

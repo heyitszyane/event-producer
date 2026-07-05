@@ -133,6 +133,7 @@ export interface SpecialistAgentRequest {
   instruction?: string
   regenerate?: boolean
   artifact_id?: string | null
+  vendor_id?: string | null
 }
 
 export interface SpecialistAgentResponse {
@@ -287,6 +288,107 @@ export interface VendorCopyDraft {
   source_agent: string
   model_mode?: AgentMode | null
   fallback_reason?: string | null
+}
+
+// ---------------------------------------------------------------------------
+// P7P — Vendor Notebook (persistent per-vendor workspace; planning metadata
+// only — drafts are copied manually and payments are user-recorded status).
+// ---------------------------------------------------------------------------
+
+export type VendorWorkflowStatus =
+  | 'not_started'
+  | 'draft_needed'
+  | 'draft_ready'
+  | 'copied_for_manual_send'
+  | 'manually_sent'
+  | 'awaiting_reply'
+  | 'follow_up_needed'
+  | 'quote_received'
+  | 'contract_pending'
+  | 'confirmed'
+  | 'settled'
+
+export type VendorPaymentStatus =
+  | 'not_applicable'
+  | 'not_quoted'
+  | 'quote_requested'
+  | 'quote_received'
+  | 'deposit_due'
+  | 'deposit_paid'
+  | 'final_balance_due'
+  | 'paid_in_full'
+
+export type VendorLogEntryType =
+  | 'note'
+  | 'draft_generated'
+  | 'draft_edited'
+  | 'draft_copied'
+  | 'manual_send_marked'
+  | 'vendor_response_logged'
+  | 'follow_up_generated'
+  | 'payment_updated'
+  | 'status_updated'
+  | 'settled'
+
+export interface VendorLogEntry {
+  id: string
+  vendor_id: string
+  timestamp: string
+  type: VendorLogEntryType
+  title: string
+  body: string
+  actor: 'user' | 'agent' | 'system'
+  workflow_status?: VendorWorkflowStatus | null
+  payment_status?: VendorPaymentStatus | null
+  injection_flags: string[]
+}
+
+export interface VendorDraftRecord {
+  subject: string
+  body: string
+  ask_summary: string
+  required_vendor_response_fields: string[]
+  risk_notes: string[]
+  review_status: 'draft' | 'reviewed'
+  copy_status: 'not_copied' | 'copied' | 'manually_sent'
+  copied_at?: string | null
+  manually_sent_at?: string | null
+  generated_at?: string | null
+  updated_at?: string | null
+  instruction: string
+  draft_only: boolean
+  source_agent: string
+  model_mode?: AgentMode | null
+  fallback_reason?: string | null
+}
+
+export interface VendorRecord {
+  id: string
+  name: string
+  category: string
+  contact_name: string
+  contact_email: string
+  contact_phone: string
+  website: string
+  notes: string
+  workflow_status: VendorWorkflowStatus
+  payment_status: VendorPaymentStatus
+  quoted_amount: string
+  deposit_amount: string
+  final_balance_amount: string
+  payment_due_date: string
+  payment_notes: string
+  deposit_paid_at?: string | null
+  settled_at?: string | null
+  created_at: string
+  updated_at: string
+  draft?: VendorDraftRecord | null
+  log: VendorLogEntry[]
+}
+
+export interface VendorListResponse {
+  event_id: string
+  vendors: VendorRecord[]
 }
 
 export interface VendorCopyArtifactResponse {

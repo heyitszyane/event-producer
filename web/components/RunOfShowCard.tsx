@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import InfoHint from './InfoHint'
 
 export interface ScheduledTask {
   id: string
@@ -119,7 +120,10 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
   return (
     <section className="card" id="schedule" aria-labelledby="schedule-heading">
       <div className="card__header">
-        <h2 id="schedule-heading">Run of Show</h2>
+        <h2 id="schedule-heading">
+          Run of Show{' '}
+          <InfoHint text="Deterministic CPM schedule: task order respects dependencies and vendor lead times, and the critical path is computed in code." />
+        </h2>
         <div className="cluster" style={{ gap: 'var(--space-1)' }}>
           <span className={hasConflicts ? 'badge badge--critical' : 'badge badge--ok'}>
             {hasConflicts ? 'Conflicts detected' : 'Schedule valid'}

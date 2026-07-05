@@ -6,7 +6,7 @@ import ApprovalInbox from '../components/ApprovalInbox'
 import ScopeCard, { type ScopeItem } from '../components/ScopeCard'
 import BudgetCard, { type BudgetSummary } from '../components/BudgetCard'
 import RunOfShowCard, { type ScheduleResult, type CallSheetEntry } from '../components/RunOfShowCard'
-import VendorsCard, { type Vendor } from '../components/VendorsCard'
+import VendorNotebook from '../components/VendorNotebook'
 import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
 import SecurityBeat from '../components/SecurityBeat'
@@ -15,6 +15,8 @@ import AgentMissionControl from '../components/AgentMissionControl'
 import VendorCopyPanel from '../components/VendorCopyPanel'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
+import InfoHint from '../components/InfoHint'
+import pkg from '../package.json'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import {
   createCasefile,
@@ -47,6 +49,19 @@ import type {
   RequirementsPayload,
   NextBestStep as NextBestStepData,
 } from '../types/agentic'
+
+// Run-output vendor fixtures (suggestions only; the persistent records live
+// in the Vendor Notebook casefile artifact).
+interface Vendor {
+  id: string
+  name: string
+  category: string
+  contact_email: string
+  contact_phone: string
+  rating: string
+  notes: string
+  locked?: boolean
+}
 
 export interface RunEventResponse {
   event_id?: string
@@ -249,6 +264,7 @@ const ARTIFACT_ROUTES: Record<string, SectionId> = {
   'budget-summary': 'budget',
   'run-sheet': 'run-sheet',
   'vendor-copy': 'vendors',
+  'vendor-notebook': 'vendors',
 }
 
 const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
@@ -288,9 +304,9 @@ const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string
     desc: 'Human-gated vendor-facing actions with plain-English diffs and no unapproved execution.',
   },
   vendors: {
-    route: '07 / Vendors Directory',
-    title: 'Vendor Directory',
-    desc: 'Vendor records, drafts, quote status, and data-not-instruction security fixture.',
+    route: '07 / Vendor Notebook',
+    title: 'Vendor Notebook',
+    desc: 'Persistent per-vendor chase list: workflow and payment status, activity logs, and agent-drafted copy — review before external use.',
   },
   risks: {
     route: '08 / Risks, Gaps + Operational Checks',
@@ -851,7 +867,10 @@ export default function Dashboard() {
       <div className="war-panel__header">
         <div>
           <span className="war-eyebrow">Producer actions</span>
-          <h2>Ask the AI Producer</h2>
+          <h2>
+            Ask the AI Producer{' '}
+            <InfoHint text="The orchestrator reads the saved casefile and returns typed proposals — nothing is applied until you confirm it, and vendor or payment intents also require the approval gate." />
+          </h2>
         </div>
         <div className="cluster">
           <span className={`badge ${producerModeClass}`}>{producerModeLabel}</span>
@@ -975,7 +994,7 @@ export default function Dashboard() {
                 <div className="war-panel__header">
                   <div>
                     <span className="war-eyebrow">Current event</span>
-                    <h2>{eventTitle}</h2>
+                    <h2>{eventTitle} <InfoHint text={ROUTE_META.overview.desc} /></h2>
                   </div>
                   <span className={requirements?.confirmed ? 'badge badge--ok' : 'badge badge--info'}>
                     {requirements?.confirmed ? 'Requirements confirmed' : 'Requirements open'}
@@ -1005,7 +1024,10 @@ export default function Dashboard() {
             <div className="war-stack">
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Budget and schedule health</span>
+                  <span className="war-panel-title">
+                    Budget and schedule health{' '}
+                    <InfoHint text="Headroom, task count, and pending approvals — computed by the deterministic engines on every run, never by the model." />
+                  </span>
                   <span className={budgetSummary?.over_budget ? 'badge badge--critical' : budgetSummary ? 'badge badge--ok' : 'badge badge--muted'}>
                     {budgetSummary?.over_budget ? 'Over budget' : budgetSummary ? 'On track' : 'Awaiting run'}
                   </span>
@@ -1022,7 +1044,10 @@ export default function Dashboard() {
               </section>
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Saved casefile artifacts</span>
+                  <span className="war-panel-title">
+                    Saved casefile artifacts{' '}
+                    <InfoHint text="Every agent output is saved to the casefile as a named artifact. Click one to open the route where it lives." />
+                  </span>
                   <span className="badge badge--info">{visibleArtifacts.length} saved</span>
                 </div>
                 {visibleArtifacts.length > 0 ? (
@@ -1139,13 +1164,23 @@ export default function Dashboard() {
         )
       case 'vendors':
         return (
-          <div className="vendors-grid">
-            <VendorCopyPanel
+          <div className="war-stack">
+            <VendorNotebook
               casefile={activeCasefile}
+              suggestedVendors={vendors}
               onCasefileChange={applyCasefileState}
               onError={setError}
             />
-            <VendorsCard vendors={vendors} />
+            {activeCasefile?.artifacts?.['vendor-copy'] && (
+              <details className="war-panel vendor-legacy-draft">
+                <summary>Casefile-level draft (legacy — new drafts live on each vendor)</summary>
+                <VendorCopyPanel
+                  casefile={activeCasefile}
+                  onCasefileChange={applyCasefileState}
+                  onError={setError}
+                />
+              </details>
+            )}
           </div>
         )
       case 'risks':
@@ -1340,7 +1375,8 @@ export default function Dashboard() {
         <aside className="war-room__nav" aria-label="Paper War Room sections">
           <div className="war-room__brand">
             <strong>Event<br />Producer</strong>
-            <small>Operational casefile</small>
+            <small>Your AI production crew</small>
+            <small className="war-room__version">v{pkg.version}</small>
           </div>
           <div className="nav-status-card" aria-label="Current casefile status">
             <strong>{eventState}</strong>
