@@ -6,7 +6,7 @@ import ApprovalInbox from '../components/ApprovalInbox'
 import ScopeCard, { type ScopeItem } from '../components/ScopeCard'
 import BudgetCard, { type BudgetSummary } from '../components/BudgetCard'
 import RunOfShowCard, { type ScheduleResult, type CallSheetEntry } from '../components/RunOfShowCard'
-import VendorsCard, { type Vendor } from '../components/VendorsCard'
+import VendorNotebook from '../components/VendorNotebook'
 import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
 import SecurityBeat from '../components/SecurityBeat'
@@ -49,6 +49,19 @@ import type {
   RequirementsPayload,
   NextBestStep as NextBestStepData,
 } from '../types/agentic'
+
+// Run-output vendor fixtures (suggestions only; the persistent records live
+// in the Vendor Notebook casefile artifact).
+interface Vendor {
+  id: string
+  name: string
+  category: string
+  contact_email: string
+  contact_phone: string
+  rating: string
+  notes: string
+  locked?: boolean
+}
 
 export interface RunEventResponse {
   event_id?: string
@@ -251,6 +264,7 @@ const ARTIFACT_ROUTES: Record<string, SectionId> = {
   'budget-summary': 'budget',
   'run-sheet': 'run-sheet',
   'vendor-copy': 'vendors',
+  'vendor-notebook': 'vendors',
 }
 
 const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string }> = {
@@ -290,9 +304,9 @@ const ROUTE_META: Record<SectionId, { route: string; title: string; desc: string
     desc: 'Human-gated vendor-facing actions with plain-English diffs and no unapproved execution.',
   },
   vendors: {
-    route: '07 / Vendors Directory',
-    title: 'Vendor Directory',
-    desc: 'Vendor records, drafts, quote status, and data-not-instruction security fixture.',
+    route: '07 / Vendor Notebook',
+    title: 'Vendor Notebook',
+    desc: 'Persistent per-vendor chase list: workflow and payment status, activity logs, and agent-drafted copy — review before external use.',
   },
   risks: {
     route: '08 / Risks, Gaps + Operational Checks',
@@ -1150,13 +1164,23 @@ export default function Dashboard() {
         )
       case 'vendors':
         return (
-          <div className="vendors-grid">
-            <VendorCopyPanel
+          <div className="war-stack">
+            <VendorNotebook
               casefile={activeCasefile}
+              suggestedVendors={vendors}
               onCasefileChange={applyCasefileState}
               onError={setError}
             />
-            <VendorsCard vendors={vendors} />
+            {activeCasefile?.artifacts?.['vendor-copy'] && (
+              <details className="war-panel vendor-legacy-draft">
+                <summary>Casefile-level draft (legacy — new drafts live on each vendor)</summary>
+                <VendorCopyPanel
+                  casefile={activeCasefile}
+                  onCasefileChange={applyCasefileState}
+                  onError={setError}
+                />
+              </details>
+            )}
           </div>
         )
       case 'risks':

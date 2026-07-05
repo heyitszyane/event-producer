@@ -9,6 +9,10 @@ import type {
   SpecialistAgentResponse,
   VendorCopyArtifactResponse,
   VendorCopyDraft,
+  VendorDraftRecord,
+  VendorListResponse,
+  VendorLogEntry,
+  VendorRecord,
 } from '../types/agentic'
 
 export async function createCasefile(payload: {
@@ -129,6 +133,80 @@ export async function saveVendorCopyDraft(
   const res = await apiFetch(`/casefiles/${eventId}/artifacts/vendor-copy`, {
     method: 'PUT',
     body: JSON.stringify(draft),
+  })
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// P7P — Vendor Notebook helpers (planning metadata only; nothing sends).
+// ---------------------------------------------------------------------------
+
+export async function listVendors(eventId: string): Promise<VendorListResponse> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors`)
+  return res.json()
+}
+
+export async function createVendor(
+  eventId: string,
+  payload: { name: string; category: string; contact_name?: string; contact_email?: string; contact_phone?: string; website?: string; notes?: string },
+): Promise<VendorRecord> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
+export async function updateVendor(
+  eventId: string,
+  vendorId: string,
+  updates: Partial<VendorRecord>,
+): Promise<VendorRecord> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  })
+  return res.json()
+}
+
+export async function deleteVendor(eventId: string, vendorId: string): Promise<void> {
+  await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}`, { method: 'DELETE' })
+}
+
+export async function appendVendorLog(
+  eventId: string,
+  vendorId: string,
+  payload: { body: string; title?: string; type?: 'note' | 'vendor_response_logged' },
+): Promise<VendorLogEntry> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}/log`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  return res.json()
+}
+
+export async function saveVendorDraft(
+  eventId: string,
+  vendorId: string,
+  draft: Partial<VendorDraftRecord>,
+): Promise<VendorRecord> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}/draft`, {
+    method: 'PUT',
+    body: JSON.stringify(draft),
+  })
+  return res.json()
+}
+
+export async function markVendorDraftCopied(eventId: string, vendorId: string): Promise<VendorRecord> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}/draft/mark-copied`, {
+    method: 'POST',
+  })
+  return res.json()
+}
+
+export async function markVendorDraftManuallySent(eventId: string, vendorId: string): Promise<VendorRecord> {
+  const res = await apiFetch(`/casefiles/${eventId}/vendors/${vendorId}/draft/mark-manually-sent`, {
+    method: 'POST',
   })
   return res.json()
 }
