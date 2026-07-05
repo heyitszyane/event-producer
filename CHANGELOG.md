@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7P — Load-bearing skill cards + submission UI polish
+
+- Skill cards became load-bearing: every LLM agent's reason step now
+  assembles its live system prompt as versioned prompt + the registry
+  card's instruction body through a single seam
+  (`cards.assemble_system_prompt`), so the contract served by `GET /agents`
+  is the doctrine the model actually runs under (pinned by
+  `tests/test_p7p_load_bearing_cards.py`).
+- Enriched the 5 LLM cards with market-neutral event-production doctrine
+  (triage order, cost structure, allocation bands, savings levers,
+  negotiation asks); `card_version` 1.0.0 → 1.1.0.
+- Mission Control: compact purpose-made concept/strategy output digests
+  replace the embedded legacy full-page components (deleted); cards prefer
+  the freshest saved artifact payload and skip the redundant re-fetch of a
+  just-run agent.
+- Added `InfoHint` hover hints across Overview, Budget, Run of Show,
+  Approvals, Vendor Copy, the producer console, and every mission card.
+- Vendor Copy: persistent "Draft only — not sent from the app" badge;
+  response fields & risk notes collapsed into a details band.
+- Side nav rebrand: tagline + version read from `web/package.json`.
+- Dev harness: env-driven Next `distDir` so a verify dev server cannot
+  corrupt the primary dev server's `.next`.
+
 ### P7O — Agent skill cards, Mission Control, contingency input
 
 - Added the agent skill-card registry: 10 versioned role contracts under

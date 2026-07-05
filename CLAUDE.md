@@ -183,7 +183,7 @@ The full technology stack:
 | Concept | Where |
 |---------|-------|
 | ADK-style multi-agent | `agents/` — rule-based role agents + reason->formatter splits (no live ADK runtime) |
-| Agent skills | `agents/cards/` — 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`; formal ADK Agent Skills packaging still deferred |
+| Agent skills | `agents/cards/` — 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`; card bodies are load-bearing — appended into the 5 LLM agents' live prompt assembly via `cards.assemble_system_prompt` (tested); formal ADK Agent Skills packaging still deferred |
 | Security / context hygiene | `security/` — structural action-gate + advisory injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
 | MCP | `mcp/` — wrapper over event-store via provider seam |

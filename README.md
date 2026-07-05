@@ -111,12 +111,16 @@ Messy event brief
   recoverable type/shape drift before validation.
 - **Agent trace** — 8 structural role-agent steps recorded during the run
   (`AgentTraceStep` schema). Rendered as a secondary technical trace.
-- **Agent skill cards** — 10 versioned role contracts under
+- **Agent skill cards (load-bearing)** — 10 versioned role contracts under
   `event_producer/agents/cards/` (YAML frontmatter contract + instruction
   body: capabilities, inputs/outputs, structural boundaries, prompt refs).
   Parsed and validated at runtime by `agents/cards.py`, served by
   `GET /agents`, rendered as the Mission Control crew board, and pinned by
-  contract tests that reject cards that drift from the runtime.
+  contract tests that reject cards that drift from the runtime. The cards
+  are load-bearing, not display-only: every LLM agent's reason step
+  assembles its live system prompt as versioned prompt + the card's
+  instruction body (`cards.assemble_system_prompt`), so the registry
+  doctrine is what the model actually runs under (tested).
 - **Security action-gate** — `enforce()` blocks 8 gated actions
   (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
   `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
@@ -427,8 +431,8 @@ Modules:
 - **AgentMissionControl** — registry-driven crew board: fetches the agent
   skill cards from `GET /agents` and renders each role with its kind, honest
   runtime mode, saved-artifact status, direct ask/refine actions for the
-  four specialists, embedded full concept/strategy output, and an expandable
-  role-card contract
+  four specialists, compact concept/strategy output digests, and an
+  expandable role-card contract
 - **ExtractedRequirements** — resolved requirement basis with from-brief,
   manual-override, fallback-default, and missing provenance
 - **AgentCrewTrace** — secondary timeline of role-agent steps with statuses,
@@ -510,8 +514,10 @@ This project demonstrates:
 - **ADK-style multi-agent architecture** — role agents with
   reason->formatter splits (rule-based, not live ADK runtime)
 - **Agent skill cards** — versioned, runtime-loaded role contracts
-  (capabilities, inputs/outputs, structural boundaries) that the API serves
-  and the UI renders; contract tests keep them honest
+  (capabilities, inputs/outputs, structural boundaries) that the API serves,
+  the UI renders, and the live prompt assembly consumes (card instruction
+  bodies are appended to the LLM agents' system prompts); contract tests
+  keep them honest
 - **Deterministic correctness** — Budget Engine and CPM Scheduler are pure
   Python, Decimal-only, fully testable
 - **Structural security** — action-gate enforced in code, not prompts
@@ -529,7 +535,7 @@ are optional and limited to the configured provider seam.
 | Concept | Where |
 |---------|-------|
 | ADK-style multi-agent | `event_producer/agents/` -- role agents + reason->formatter splits, coordinated pipeline + direct specialist runs over saved casefile context |
-| Agent skills | `event_producer/agents/cards/` -- 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents` and rendered as the Mission Control crew board |
+| Agent skills | `event_producer/agents/cards/` -- 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`, rendered as the Mission Control crew board, and appended into the LLM agents' live prompt assembly (load-bearing) |
 | Security / context hygiene | `event_producer/security/` -- structural action-gate + injection flag |
 | Deployment | Cloud Run + Firebase Hosting |
 | MCP | `event_producer/mcp/` -- wrapper over event-store via provider seam |
