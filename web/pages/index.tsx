@@ -15,6 +15,8 @@ import AgentMissionControl from '../components/AgentMissionControl'
 import VendorCopyPanel from '../components/VendorCopyPanel'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
+import InfoHint from '../components/InfoHint'
+import pkg from '../package.json'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import {
   createCasefile,
@@ -851,7 +853,10 @@ export default function Dashboard() {
       <div className="war-panel__header">
         <div>
           <span className="war-eyebrow">Producer actions</span>
-          <h2>Ask the AI Producer</h2>
+          <h2>
+            Ask the AI Producer{' '}
+            <InfoHint text="The orchestrator reads the saved casefile and returns typed proposals — nothing is applied until you confirm it, and vendor or payment intents also require the approval gate." />
+          </h2>
         </div>
         <div className="cluster">
           <span className={`badge ${producerModeClass}`}>{producerModeLabel}</span>
@@ -975,7 +980,7 @@ export default function Dashboard() {
                 <div className="war-panel__header">
                   <div>
                     <span className="war-eyebrow">Current event</span>
-                    <h2>{eventTitle}</h2>
+                    <h2>{eventTitle} <InfoHint text={ROUTE_META.overview.desc} /></h2>
                   </div>
                   <span className={requirements?.confirmed ? 'badge badge--ok' : 'badge badge--info'}>
                     {requirements?.confirmed ? 'Requirements confirmed' : 'Requirements open'}
@@ -1005,7 +1010,10 @@ export default function Dashboard() {
             <div className="war-stack">
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Budget and schedule health</span>
+                  <span className="war-panel-title">
+                    Budget and schedule health{' '}
+                    <InfoHint text="Headroom, task count, and pending approvals — computed by the deterministic engines on every run, never by the model." />
+                  </span>
                   <span className={budgetSummary?.over_budget ? 'badge badge--critical' : budgetSummary ? 'badge badge--ok' : 'badge badge--muted'}>
                     {budgetSummary?.over_budget ? 'Over budget' : budgetSummary ? 'On track' : 'Awaiting run'}
                   </span>
@@ -1022,7 +1030,10 @@ export default function Dashboard() {
               </section>
               <section className="war-panel">
                 <div className="war-panel__header">
-                  <span className="war-panel-title">Saved casefile artifacts</span>
+                  <span className="war-panel-title">
+                    Saved casefile artifacts{' '}
+                    <InfoHint text="Every agent output is saved to the casefile as a named artifact. Click one to open the route where it lives." />
+                  </span>
                   <span className="badge badge--info">{visibleArtifacts.length} saved</span>
                 </div>
                 {visibleArtifacts.length > 0 ? (
@@ -1340,7 +1351,8 @@ export default function Dashboard() {
         <aside className="war-room__nav" aria-label="Paper War Room sections">
           <div className="war-room__brand">
             <strong>Event<br />Producer</strong>
-            <small>Operational casefile</small>
+            <small>Your AI production crew</small>
+            <small className="war-room__version">v{pkg.version}</small>
           </div>
           <div className="nav-status-card" aria-label="Current casefile status">
             <strong>{eventState}</strong>

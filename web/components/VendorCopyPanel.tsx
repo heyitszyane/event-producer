@@ -7,6 +7,7 @@ import {
 } from '../lib/casefiles'
 import type { CasefileState, VendorCopyDraft } from '../types/agentic'
 import { MODE_CLASS, MODE_LABEL } from '../types/agentic'
+import InfoHint from './InfoHint'
 
 interface VendorCopyPanelProps {
   casefile: CasefileState | null
@@ -34,7 +35,7 @@ const PROMPT_CHIPS = [
   'More casual',
   'Ask for itemized quote',
   'Ask about minimum spend',
-  'Mention 100 pax and SGD 10k cap',
+  'Mention headcount and budget cap',
 ]
 
 function formatTimestamp(value?: string | null): string {
@@ -187,9 +188,13 @@ export default function VendorCopyPanel({
       <div className="card__header">
         <div>
           <span className="war-eyebrow">Review before external use</span>
-          <h2 id="vendor-copy-heading">Vendor Copy</h2>
+          <h2 id="vendor-copy-heading">
+            Vendor Copy{' '}
+            <InfoHint text="Drafts vendor-facing copy from the saved casefile. Nothing is sent from the app — you review, copy, and send it yourself." />
+          </h2>
         </div>
         <div className="cluster">
+          <span className="badge badge--info">Draft only — not sent from the app</span>
           {modeBadge}
           <span className={dirty ? 'badge badge--warn' : 'badge badge--ok'}>
             {dirty ? 'Unsaved edits' : 'Saved state'}
@@ -241,28 +246,34 @@ export default function VendorCopyPanel({
           />
         </label>
 
-        <div className="vendor-copy-meta-grid">
-          <div>
-            <span className="field-label">Required response fields</span>
-            {draft.required_vendor_response_fields.length > 0 ? (
-              <div className="chip-row">
-                {draft.required_vendor_response_fields.map((field) => <span key={field} className="chip">{field}</span>)}
-              </div>
-            ) : (
-              <p className="small">No required response fields listed yet.</p>
-            )}
+        <details className="vendor-copy-meta">
+          <summary>
+            Response fields &amp; risk notes
+            {' '}({draft.required_vendor_response_fields.length + draft.risk_notes.length})
+          </summary>
+          <div className="vendor-copy-meta-grid">
+            <div>
+              <span className="field-label">Required response fields</span>
+              {draft.required_vendor_response_fields.length > 0 ? (
+                <div className="chip-row">
+                  {draft.required_vendor_response_fields.map((field) => <span key={field} className="chip">{field}</span>)}
+                </div>
+              ) : (
+                <p className="small">No required response fields listed yet.</p>
+              )}
+            </div>
+            <div>
+              <span className="field-label">Risk notes</span>
+              {draft.risk_notes.length > 0 ? (
+                <ul className="compact-list">
+                  {draft.risk_notes.map((note) => <li key={note}>{note}</li>)}
+                </ul>
+              ) : (
+                <p className="small">No risk notes listed yet.</p>
+              )}
+            </div>
           </div>
-          <div>
-            <span className="field-label">Risk notes</span>
-            {draft.risk_notes.length > 0 ? (
-              <ul className="compact-list">
-                {draft.risk_notes.map((note) => <li key={note}>{note}</li>)}
-              </ul>
-            ) : (
-              <p className="small">No risk notes listed yet.</p>
-            )}
-          </div>
-        </div>
+        </details>
 
         <div className="vendor-copy-footer">
           <span className="small">Last saved: {formatTimestamp(draft.updated_at)}</span>

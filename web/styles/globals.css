@@ -1916,47 +1916,6 @@ a:hover {
   border-radius: 8px;
   padding: var(--space-2);
 }
-.ideas,
-.sugs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.idea-card__head,
-.sug-card__head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-1);
-}
-.idea-card__title,
-.sug-card__title {
-  font-size: var(--text-sm);
-  font-weight: 700;
-  color: var(--text-primary);
-  flex: 1 1 auto;
-}
-.idea-card__desc,
-.sug-card__desc {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  margin: 0 0 var(--space-1);
-}
-.idea-card__meta {
-  display: flex;
-  gap: var(--space-3);
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  margin-bottom: var(--space-2);
-}
-.idea-card__why,
-.sug-card__why {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  font-style: italic;
-  margin: 0;
-}
 .header__sub {
   margin-top: var(--space-1);
 }
@@ -3334,22 +3293,106 @@ a:hover {
   word-break: break-all;
 }
 
-/* Embedded full-output components render flat inside a crew card instead
-   of as a nested framed panel. */
-.mission-embed {
-  padding-top: 6px;
-}
-
-.mission-embed .card,
-.war-room .mission-embed .card {
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  background: transparent;
-}
-
 @media (max-width: 900px) {
   .mission-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---- P7P: info hints, compact mission output, vendor meta collapse ---- */
+
+.info-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  font: 700 9px/1 var(--font-mono);
+  color: var(--text-tertiary);
+  background: var(--surface-elevated);
+  cursor: help;
+  flex: none;
+  vertical-align: middle;
+}
+
+.info-hint:hover,
+.info-hint:focus-visible {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.mission-output {
+  display: grid;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.mission-output__group {
+  display: grid;
+  gap: 4px;
+}
+
+.mission-output__label {
+  font: 700 10px/1.3 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.mission-output__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.mission-output__list li {
+  border-left: 2px solid var(--border-subtle);
+  padding-left: 8px;
+}
+
+.mission-output__list p {
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.mission-output__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.mission-output__line strong {
+  font-size: var(--text-sm);
+}
+
+.vendor-copy-meta {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: var(--space-2);
+  background: var(--surface-secondary);
+}
+
+.vendor-copy-meta summary {
+  cursor: pointer;
+  font: 700 10px/1.3 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.vendor-copy-meta[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+.war-room__version {
+  display: block;
+  margin-top: 2px;
+  letter-spacing: 0.08em;
+  color: #8f8672;
 }

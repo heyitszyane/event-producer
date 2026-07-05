@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import { getCasefile, getCasefileArtifact, runSpecialistAgent } from '../lib/casefiles'
-import { humanizeSummary } from '../lib/humanize'
-import CreativeConcept from './CreativeConcept'
-import ScopeStrategy from './ScopeStrategy'
+import { displayLabel, humanizeSummary } from '../lib/humanize'
+import InfoHint from './InfoHint'
 import type {
   AgentMode,
   AgentTraceStep,
@@ -55,6 +54,14 @@ const KIND_LABEL: Record<AgentKind, string> = {
   rule_based_agent: 'Rule-based',
   deterministic_engine: 'Deterministic engine',
   structural_gate: 'Structural gate',
+}
+
+const KIND_EXPLAIN: Record<AgentKind, string> = {
+  llm_agent:
+    'LLM agent — the reason step runs on the live provider (or an honest rule-based fallback), with its skill-card doctrine appended to the live prompt.',
+  rule_based_agent: 'Rule-based agent — deterministic code, reproducible output, no model call.',
+  deterministic_engine: 'Deterministic engine — computes money/time truth in code; never an LLM.',
+  structural_gate: 'Structural gate enforced in code — nothing passes without explicit human approval.',
 }
 
 // Honest default mode per kind, used until a run reports the actual mode.
@@ -150,6 +157,162 @@ function VendorCopyPreview({ payload }: { payload?: AgentPayload }) {
   )
 }
 
+// The freshest specialist output for a card: a direct run's payload wins
+// over the last pipeline run's result prop.
+function payloadOutput<T>(payload?: AgentPayload): T | null {
+  const output = payload?.output
+  if (output && typeof output === 'object' && !Array.isArray(output) && Object.keys(output).length > 0) {
+    return output as T
+  }
+  return null
+}
+
+const TIER_BADGE: Record<string, string> = {
+  must: 'badge--must',
+  should: 'badge--should',
+  could: 'badge--could',
+  wow: 'badge--wow',
+}
+
+function TierBadge({ tier }: { tier?: string }) {
+  if (!tier) return null
+  return <span className={`badge ${TIER_BADGE[tier] ?? 'badge--muted'}`}>{tier}</span>
+}
+
+// ---------------------------------------------------------------------------
+// Compact, purpose-made artifact digests — mission cards show a scannable
+// summary instead of embedding the legacy full-page panels.
+// ---------------------------------------------------------------------------
+
+function ConceptOutput({
+  concept,
+  onAddToScope,
+}: {
+  concept: CreativeConceptData
+  onAddToScope: AgentMissionControlProps['onAddToScope']
+}) {
+  const titles = concept.event_title_options ?? []
+  const ideas = concept.creative_ideas ?? []
+  const additions = concept.suggested_additions ?? []
+  const cuts = concept.suggested_cuts_or_reductions ?? []
+  return (
+    <div className="mission-output">
+      {titles.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Title options</span>
+          <div className="chip-row">
+            {titles.map((title) => <span key={title} className="chip">{title}</span>)}
+          </div>
+        </div>
+      )}
+      {ideas.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Creative ideas</span>
+          <ul className="mission-output__list">
+            {ideas.map((idea) => (
+              <li key={idea.title}>
+                <div className="mission-output__line">
+                  <strong>{idea.title}</strong>
+                  <TierBadge tier={idea.tier} />
+                  {idea.budget_pressure === 'high' && <span className="badge badge--warn">high pressure</span>}
+                </div>
+                <p>{idea.description}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {additions.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Suggested additions</span>
+          <ul className="mission-output__list">
+            {additions.map((suggestion) => (
+              <li key={suggestion.title}>
+                <div className="mission-output__line">
+                  <strong>{suggestion.title}</strong>
+                  <TierBadge tier={suggestion.tier} />
+                  <span className="chip">{suggestion.category}</span>
+                  {suggestion.action_hint === 'add' && (
+                    <button
+                      type="button"
+                      className="btn btn--primary btn--xs"
+                      onClick={() => onAddToScope(suggestion)}
+                    >
+                      Add to scope
+                    </button>
+                  )}
+                </div>
+                <p>{suggestion.rationale}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {cuts.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Suggested cuts</span>
+          <ul className="mission-output__list">
+            {cuts.map((suggestion) => (
+              <li key={suggestion.title}>
+                <div className="mission-output__line">
+                  <strong>{suggestion.title}</strong>
+                  <span className="badge badge--muted">{displayLabel(suggestion.action_hint)}</span>
+                </div>
+                <p>{suggestion.rationale}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StrategyOutput({ strategy }: { strategy: ScopeStrategyData }) {
+  const recommendations = strategy.recommendations ?? []
+  const tradeoffs = strategy.tradeoffs ?? []
+  const questions = strategy.questions_for_user ?? []
+  return (
+    <div className="mission-output">
+      {recommendations.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Recommendations</span>
+          <ul className="mission-output__list">
+            {recommendations.map((rec) => (
+              <li key={`${rec.recommendation_type}-${rec.title}`}>
+                <div className="mission-output__line">
+                  <strong>{rec.title}</strong>
+                  <span className="badge badge--info">{displayLabel(rec.recommendation_type)}</span>
+                  <TierBadge tier={rec.tier} />
+                  {rec.budget_pressure === 'high' && <span className="badge badge--warn">budget high</span>}
+                  {rec.operational_risk === 'high' && <span className="badge badge--warn">ops risk high</span>}
+                </div>
+                <p>{rec.rationale}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {tradeoffs.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Tradeoffs</span>
+          <ul className="compact-list">
+            {tradeoffs.map((tradeoff) => <li key={tradeoff}>{tradeoff}</li>)}
+          </ul>
+        </div>
+      )}
+      {questions.length > 0 && (
+        <div className="mission-output__group">
+          <span className="mission-output__label">Questions for you</span>
+          <ul className="compact-list">
+            {questions.map((question) => <li key={question}>{question}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export interface AgentMissionControlProps {
   casefile: CasefileState | null
   trace: AgentTraceStep[]
@@ -184,6 +347,9 @@ export default function AgentMissionControl({
   const [instructions, setInstructions] = useState<Partial<Record<SpecialistAgentId, string>>>({})
   const [running, setRunning] = useState<SpecialistAgentId | null>(null)
   const [payloads, setPayloads] = useState<Partial<Record<SpecialistAgentId, AgentPayload>>>({})
+  // Set by handleRun so the next hydration pass skips re-fetching the
+  // artifact we already hold from the run response.
+  const justRanRef = useRef<SpecialistAgentId | null>(null)
 
   const artifactMap = useMemo(() => casefile?.artifacts || {}, [casefile?.artifacts])
   const eventId = casefile?.event_id
@@ -218,11 +384,14 @@ export default function AgentMissionControl({
     }
     let cancelled = false
     async function loadSaved() {
+      const skipAgent = justRanRef.current
+      justRanRef.current = null
       const next: Partial<Record<SpecialistAgentId, AgentPayload>> = {}
       await Promise.all(cards.map(async (card) => {
         const agentId = card.runtime.direct_agent_id
         const artifactName = card.output.artifact
         if (!agentId || !artifactName || !artifactMap[artifactName]) return
+        if (agentId === skipAgent) return
         try {
           const artifact = await getCasefileArtifact(eventId as string, artifactName)
           next[agentId] = asRecord(artifact.payload)
@@ -230,7 +399,11 @@ export default function AgentMissionControl({
           // Missing or unreadable artifact — the card just shows "Not run yet".
         }
       }))
-      if (!cancelled) setPayloads(next)
+      if (!cancelled) {
+        setPayloads((current) => (
+          skipAgent && current[skipAgent] ? { ...next, [skipAgent]: current[skipAgent] } : next
+        ))
+      }
     }
     void loadSaved()
     return () => {
@@ -249,6 +422,7 @@ export default function AgentMissionControl({
         artifact_id: artifactName ? artifactMap[artifactName]?.name || null : null,
       })
       setPayloads((current) => ({ ...current, [agentId]: asRecord(response.output) }))
+      justRanRef.current = agentId
       const refreshed = await getCasefile(casefile.event_id)
       onCasefileChange(refreshed)
     } catch (err) {
@@ -286,7 +460,10 @@ export default function AgentMissionControl({
       <div className="card__header">
         <div>
           <span className="war-eyebrow">Runtime-loaded agent skill cards</span>
-          <h2 id="mission-control-heading">Production Crew</h2>
+          <h2 id="mission-control-heading">
+            Production Crew{' '}
+            <InfoHint text="Every card is a live contract from the agent registry: what the agent may do, its boundaries, and its latest run. LLM agents can be tasked directly from their cards." />
+          </h2>
         </div>
         <div className="cluster">
           <span className={casefile ? 'badge badge--ok' : 'badge badge--muted'}>
@@ -312,12 +489,18 @@ export default function AgentMissionControl({
           const summary = specialistSummary(card, payload)
           const routeAction = ROUTE_ACTION_LABEL[card.ui.route]
           const isOrchestrator = card.name === 'orchestrator'
+          const conceptData = agentId === 'creative_concept'
+            ? (payloadOutput<CreativeConceptData>(payload) ?? creativeConcept)
+            : null
+          const strategyData = agentId === 'scope_strategy'
+            ? (payloadOutput<ScopeStrategyData>(payload) ?? scopeStrategy)
+            : null
 
           return (
             <article className={`mission-card mission-card--${card.kind}`} key={card.name}>
               <div className="mission-card__top">
                 <div>
-                  <h3>{card.title}</h3>
+                  <h3>{card.title} <InfoHint text={KIND_EXPLAIN[card.kind]} /></h3>
                   <p className="mission-card__purpose">{card.purpose}</p>
                 </div>
                 <div className="mission-card__badges">
@@ -390,20 +573,16 @@ export default function AgentMissionControl({
               {agentId === 'vendor_copy' && <VendorCopyPreview payload={payload} />}
               {agentId === 'risk_review' && <RiskPreview payload={payload} />}
 
-              {agentId === 'creative_concept' && creativeConcept && (
+              {agentId === 'creative_concept' && conceptData && (
                 <details className="mission-card__detail">
-                  <summary>Full concept output</summary>
-                  <div className="mission-embed">
-                    <CreativeConcept concept={creativeConcept} onAddToScope={onAddToScope} />
-                  </div>
+                  <summary>Concept output</summary>
+                  <ConceptOutput concept={conceptData} onAddToScope={onAddToScope} />
                 </details>
               )}
-              {agentId === 'scope_strategy' && scopeStrategy && (
+              {agentId === 'scope_strategy' && strategyData && (
                 <details className="mission-card__detail">
-                  <summary>Full strategy output</summary>
-                  <div className="mission-embed">
-                    <ScopeStrategy strategy={scopeStrategy} />
-                  </div>
+                  <summary>Strategy output</summary>
+                  <StrategyOutput strategy={strategyData} />
                 </details>
               )}
 

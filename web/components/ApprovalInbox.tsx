@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import { displayLabel } from '../lib/humanize'
+import InfoHint from './InfoHint'
 
 export interface Approval {
   id: string
@@ -59,7 +60,8 @@ export default function ApprovalInbox({ approvals, eventId, defaultExpanded = fa
     <section className="card card--security" id="approvals" aria-labelledby="approvals-heading">
       <div className="card__header">
         <h2 id="approvals-heading">
-          <span aria-hidden="true">🔒</span> Approvals
+          <span aria-hidden="true">🔒</span> Approvals{' '}
+          <InfoHint text="The structural action gate: vendor-facing and financial actions stop here until a human approves or rejects them. Enforced in code, not in prompts." />
         </h2>
         {pendingCount > 0 && (
           <span className="badge badge--warn">{pendingCount} pending</span>
