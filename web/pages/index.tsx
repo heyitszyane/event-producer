@@ -50,6 +50,8 @@ import type {
   BookingDeadline,
 } from '../types/agentic'
 
+const SEED_DEMO_CASEFILE_ID = 'seed-sg-networking'
+
 // Run-output vendor fixtures (suggestions only; the persistent records live
 // in the Vendor Notebook casefile artifact).
 interface Vendor {
@@ -590,16 +592,18 @@ export default function Dashboard() {
     navigate('brief')
   }
 
-  // Materialize the committed demo casefiles (LA + Singapore) and open one so a
-  // fresh clone has real reference events to explore.
+  // Materialize the committed demo casefiles (LA + Singapore) and open the
+  // Singapore founder networking casefile used for recording.
   async function seedDemo() {
     setSeeding(true)
     setError(null)
     try {
       const data = await seedCasefiles()
       await refreshCasefiles()
-      const firstId = data.seeded_ids[0]
-      if (firstId) await selectCasefile(firstId)
+      const targetId = data.seeded_ids.includes(SEED_DEMO_CASEFILE_ID)
+        ? SEED_DEMO_CASEFILE_ID
+        : data.seeded_ids[0]
+      if (targetId) await selectCasefile(targetId)
       navigate('brief')
     } catch (err) {
       setError(formatApiError(err))
