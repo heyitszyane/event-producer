@@ -101,6 +101,11 @@ function suggestedCategory(raw: string): string {
   return 'other'
 }
 
+function moneyLabel(currency: string, amount?: string | null): string | null {
+  if (!amount || !String(amount).trim()) return null
+  return `${currency} ${amount}`.trim()
+}
+
 export default function VendorNotebook({
   casefile,
   suggestedVendors = [],
@@ -108,10 +113,10 @@ export default function VendorNotebook({
   onError,
 }: VendorNotebookProps) {
   const eventId = casefile?.event_id || null
+  const currency = casefile?.resolved.basics.currency || ''
   const [vendors, setVendors] = useState<VendorRecord[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [statusNote, setStatusNote] = useState('')
 
   const [adding, setAdding] = useState(false)
   const [addForm, setAddForm] = useState({ name: '', category: 'venue', contact_name: '' })
@@ -125,6 +130,7 @@ export default function VendorNotebook({
   const [logType, setLogType] = useState<'vendor_response_logged' | 'note'>('vendor_response_logged')
 
   const [profileForm, setProfileForm] = useState<Partial<VendorRecord>>({})
+  const [profileOpen, setProfileOpen] = useState(false)
 
   const selected = useMemo(
     () => vendors.find((vendor) => vendor.id === selectedId) || null,
@@ -163,21 +169,25 @@ export default function VendorNotebook({
     setDraftSubject(selected?.draft?.subject || '')
     setDraftBody(selected?.draft?.body || '')
     setDraftDirty(false)
-    setProfileForm(selected ? {
-      name: selected.name,
-      category: selected.category,
-      contact_name: selected.contact_name,
-      contact_email: selected.contact_email,
-      contact_phone: selected.contact_phone,
-      website: selected.website,
-      notes: selected.notes,
-      quoted_amount: selected.quoted_amount,
-      deposit_amount: selected.deposit_amount,
-      final_balance_amount: selected.final_balance_amount,
-      payment_due_date: selected.payment_due_date,
-      payment_notes: selected.payment_notes,
-    } : {})
+    setProfileForm(selected ? profileFromVendor(selected) : {})
   }, [selectedId, selected])
+
+  function profileFromVendor(vendor: VendorRecord): Partial<VendorRecord> {
+    return {
+      name: vendor.name,
+      category: vendor.category,
+      contact_name: vendor.contact_name,
+      contact_email: vendor.contact_email,
+      contact_phone: vendor.contact_phone,
+      website: vendor.website,
+      notes: vendor.notes,
+      quoted_amount: vendor.quoted_amount,
+      deposit_amount: vendor.deposit_amount,
+      final_balance_amount: vendor.final_balance_amount,
+      payment_due_date: vendor.payment_due_date,
+      payment_notes: vendor.payment_notes,
+    }
+  }
 
   function applyVendor(updated: VendorRecord) {
     setVendors((current) => current.map((vendor) => (vendor.id === updated.id ? updated : vendor)))
@@ -186,7 +196,6 @@ export default function VendorNotebook({
   async function withBusy<T>(work: () => Promise<T>): Promise<T | undefined> {
     setBusy(true)
     onError('')
-    setStatusNote('')
     try {
       return await work()
     } catch (err) {
@@ -195,6 +204,12 @@ export default function VendorNotebook({
     } finally {
       setBusy(false)
     }
+  }
+
+  function openProfile(vendor: VendorRecord) {
+    setSelectedId(vendor.id)
+    setProfileForm(profileFromVendor(vendor))
+    setProfileOpen(true)
   }
 
   async function handleAddVendor() {
@@ -221,7 +236,6 @@ export default function VendorNotebook({
       const response = await listVendors(eventId)
       setVendors(response.vendors)
       setSelectedId(response.vendors[0]?.id || null)
-      setStatusNote(`Imported ${suggestedVendors.length} suggested vendors.`)
     })
   }
 
@@ -232,6 +246,7 @@ export default function VendorNotebook({
       await deleteVendor(eventId, vendorId)
       setVendors((current) => current.filter((vendor) => vendor.id !== vendorId))
       setSelectedId((current) => (current === vendorId ? null : current))
+      setProfileOpen(false)
     })
   }
 
@@ -242,11 +257,10 @@ export default function VendorNotebook({
     })
   }
 
-  async function handleQuickPayment(status: VendorPaymentStatus, note: string) {
+  async function handleQuickPayment(status: VendorPaymentStatus) {
     if (!eventId || !selected) return
     await withBusy(async () => {
       applyVendor(await updateVendor(eventId, selected.id, { payment_status: status }))
-      setStatusNote(note)
     })
   }
 
@@ -254,7 +268,6 @@ export default function VendorNotebook({
     if (!eventId || !selected) return
     await withBusy(async () => {
       applyVendor(await updateVendor(eventId, selected.id, { workflow_status: 'settled' }))
-      setStatusNote('Vendor marked settled.')
     })
   }
 
@@ -262,7 +275,7 @@ export default function VendorNotebook({
     if (!eventId || !selected) return
     await withBusy(async () => {
       applyVendor(await updateVendor(eventId, selected.id, profileForm))
-      setStatusNote('Vendor details saved.')
+      setProfileOpen(false)
     })
   }
 
@@ -279,7 +292,6 @@ export default function VendorNotebook({
       })
       const response = await listVendors(eventId)
       setVendors(response.vendors)
-      setStatusNote(selected.draft ? 'Follow-up drafted from this vendor’s log.' : 'Draft prepared for this vendor.')
       setInstruction('')
       onCasefileChange(await getCasefile(eventId))
     })
@@ -294,7 +306,6 @@ export default function VendorNotebook({
         body: draftBody,
       }))
       setDraftDirty(false)
-      setStatusNote('Draft saved.')
     })
   }
 
@@ -304,12 +315,11 @@ export default function VendorNotebook({
     try {
       await navigator.clipboard.writeText(text)
     } catch {
-      setStatusNote('Copy is unavailable in this browser; select the text manually.')
+      onError('Copy is unavailable in this browser; select the text manually.')
       return
     }
     await withBusy(async () => {
       applyVendor(await markVendorDraftCopied(eventId, selected.id))
-      setStatusNote('Draft copied. Review it before sending it yourself.')
     })
   }
 
@@ -317,7 +327,6 @@ export default function VendorNotebook({
     if (!eventId || !selected?.draft) return
     await withBusy(async () => {
       applyVendor(await markVendorDraftManuallySent(eventId, selected.id))
-      setStatusNote('Recorded as manually sent outside the app.')
     })
   }
 
@@ -328,7 +337,6 @@ export default function VendorNotebook({
       const response = await listVendors(eventId)
       setVendors(response.vendors)
       setLogInput('')
-      setStatusNote(logType === 'vendor_response_logged' ? 'Vendor response logged.' : 'Note logged.')
     })
   }
 
@@ -419,34 +427,59 @@ export default function VendorNotebook({
               </div>
             )}
 
-            {vendors.map((vendor) => (
-              <button
-                key={vendor.id}
-                type="button"
-                className={
-                  vendor.id === selectedId
-                    ? 'vendor-notebook__row vendor-notebook__row--active'
-                    : 'vendor-notebook__row'
-                }
-                onClick={() => setSelectedId(vendor.id)}
-              >
-                <span className="vendor-notebook__row-name">{vendor.name}</span>
-                <span className="vendor-notebook__row-meta">
-                  <span className="chip">{displayLabel(vendor.category)}</span>
-                  <span className={`badge ${WORKFLOW_BADGE[vendor.workflow_status]}`}>
-                    {displayLabel(vendor.workflow_status)}
-                  </span>
-                  {vendor.payment_status !== 'not_quoted' && vendor.payment_status !== 'not_applicable' && (
-                    <span className={`badge ${PAYMENT_BADGE[vendor.payment_status]}`}>
-                      {displayLabel(vendor.payment_status)}
+            {vendors.map((vendor) => {
+              const quoted = moneyLabel(currency, vendor.quoted_amount)
+              const contactLine = [vendor.contact_name, vendor.contact_email, vendor.contact_phone]
+                .filter(Boolean)
+                .join(' · ')
+              return (
+                <div
+                  key={vendor.id}
+                  className={
+                    vendor.id === selectedId
+                      ? 'vendor-card vendor-card--active'
+                      : 'vendor-card'
+                  }
+                >
+                  <button
+                    type="button"
+                    className="vendor-card__select"
+                    onClick={() => setSelectedId(vendor.id)}
+                  >
+                    <span className="vendor-card__top">
+                      <span className="vendor-card__name">{vendor.name}</span>
+                      <span className="vendor-card__category">{displayLabel(vendor.category)}</span>
                     </span>
-                  )}
-                  {vendor.payment_due_date && !vendor.settled_at && (
-                    <span className="badge badge--warn">due {vendor.payment_due_date}</span>
-                  )}
-                </span>
-              </button>
-            ))}
+                    {contactLine && <span className="vendor-card__contact">{contactLine}</span>}
+                    <span className="vendor-card__money">
+                      {quoted && <span>Quoted {quoted}</span>}
+                      {vendor.payment_due_date && !vendor.settled_at && (
+                        <span>Due {vendor.payment_due_date}</span>
+                      )}
+                    </span>
+                    <span className="vendor-card__badges">
+                      <span className={`badge ${WORKFLOW_BADGE[vendor.workflow_status]}`}>
+                        {displayLabel(vendor.workflow_status)}
+                      </span>
+                      {vendor.payment_status !== 'not_quoted' && vendor.payment_status !== 'not_applicable' && (
+                        <span className={`badge ${PAYMENT_BADGE[vendor.payment_status]}`}>
+                          {displayLabel(vendor.payment_status)}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="vendor-card__edit"
+                    onClick={() => openProfile(vendor)}
+                    aria-label={`Edit ${vendor.name} details`}
+                    title="Edit vendor details"
+                  >
+                    ✎
+                  </button>
+                </div>
+              )
+            })}
           </div>
 
           <div className="vendor-notebook__workspace">
@@ -484,14 +517,17 @@ export default function VendorNotebook({
                     </select>
                   </label>
                   <div className="cluster vendor-notebook__quick">
-                    <button type="button" className="btn btn--ghost btn--xs" onClick={() => handleQuickPayment('deposit_paid', 'Deposit recorded as paid.')} disabled={busy}>
+                    <button type="button" className="btn btn--ghost btn--xs" onClick={() => handleQuickPayment('deposit_paid')} disabled={busy}>
                       Mark deposit paid
                     </button>
-                    <button type="button" className="btn btn--ghost btn--xs" onClick={() => handleQuickPayment('paid_in_full', 'Recorded as paid in full.')} disabled={busy}>
+                    <button type="button" className="btn btn--ghost btn--xs" onClick={() => handleQuickPayment('paid_in_full')} disabled={busy}>
                       Mark paid in full
                     </button>
                     <button type="button" className="btn btn--ghost btn--xs" onClick={handleMarkSettled} disabled={busy || Boolean(selected.settled_at)}>
                       {selected.settled_at ? 'Settled' : 'Mark settled'}
+                    </button>
+                    <button type="button" className="btn btn--ghost btn--xs" onClick={() => openProfile(selected)} disabled={busy}>
+                      Edit details
                     </button>
                   </div>
                 </div>
@@ -523,6 +559,7 @@ export default function VendorNotebook({
                         <textarea
                           className="textarea vendor-notebook__body"
                           value={draftBody}
+                          rows={10}
                           onChange={(event) => { setDraftBody(event.target.value); setDraftDirty(true) }}
                           disabled={busy}
                         />
@@ -634,80 +671,88 @@ export default function VendorNotebook({
                     </ul>
                   )}
                 </div>
-
-                <details className="vendor-notebook__profile">
-                  <summary>Profile &amp; payment details</summary>
-                  <div className="vendor-notebook__profile-grid">
-                    {([
-                      ['name', 'Vendor name', 'text'],
-                      ['contact_name', 'Contact name', 'text'],
-                      ['contact_email', 'Email', 'text'],
-                      ['contact_phone', 'Phone', 'text'],
-                      ['website', 'Website', 'text'],
-                      ['quoted_amount', 'Quoted amount', 'text'],
-                      ['deposit_amount', 'Deposit amount', 'text'],
-                      ['final_balance_amount', 'Final balance', 'text'],
-                      ['payment_due_date', 'Payment due date', 'date'],
-                    ] as const).map(([key, label, type]) => (
-                      <label className="field-compact" key={key}>
-                        <span>{label}</span>
-                        <input
-                          className="input"
-                          type={type}
-                          value={String(profileForm[key] ?? '')}
-                          onChange={(event) => setProfileForm((current) => ({ ...current, [key]: event.target.value }))}
-                          disabled={busy}
-                        />
-                      </label>
-                    ))}
-                    <label className="field-compact">
-                      <span>Category</span>
-                      <select
-                        className="input"
-                        value={String(profileForm.category ?? 'other')}
-                        onChange={(event) => setProfileForm((current) => ({ ...current, category: event.target.value }))}
-                        disabled={busy}
-                      >
-                        {CATEGORIES.map((category) => (
-                          <option key={category} value={category}>{displayLabel(category)}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field-compact vendor-notebook__notes">
-                      <span>Notes</span>
-                      <textarea
-                        className="textarea"
-                        value={String(profileForm.notes ?? '')}
-                        onChange={(event) => setProfileForm((current) => ({ ...current, notes: event.target.value }))}
-                        disabled={busy}
-                      />
-                    </label>
-                    <label className="field-compact vendor-notebook__notes">
-                      <span>Payment notes (recorded only — never executed)</span>
-                      <textarea
-                        className="textarea"
-                        value={String(profileForm.payment_notes ?? '')}
-                        onChange={(event) => setProfileForm((current) => ({ ...current, payment_notes: event.target.value }))}
-                        disabled={busy}
-                      />
-                    </label>
-                  </div>
-                  <div className="cluster">
-                    <button type="button" className="btn btn--primary btn--sm" onClick={handleSaveProfile} disabled={busy}>
-                      Save details
-                    </button>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleDelete(selected.id)} disabled={busy}>
-                      Remove vendor
-                    </button>
-                  </div>
-                </details>
               </>
             )}
           </div>
         </div>
       )}
 
-      {statusNote && <div className="callout callout--success">{statusNote}</div>}
+      {profileOpen && selected && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="vendor-profile-title">
+          <div className="modal-card">
+            <div className="war-panel__header">
+              <h2 id="vendor-profile-title">{selected.name} — profile &amp; payment</h2>
+              <span className="badge badge--muted">recorded only — never executed</span>
+            </div>
+            <div className="vendor-notebook__profile-grid">
+              {([
+                ['name', 'Vendor name', 'text'],
+                ['contact_name', 'Contact name', 'text'],
+                ['contact_email', 'Email', 'text'],
+                ['contact_phone', 'Phone', 'text'],
+                ['website', 'Website', 'text'],
+                ['quoted_amount', `Quoted amount${currency ? ` (${currency})` : ''}`, 'text'],
+                ['deposit_amount', `Deposit amount${currency ? ` (${currency})` : ''}`, 'text'],
+                ['final_balance_amount', `Final balance${currency ? ` (${currency})` : ''}`, 'text'],
+                ['payment_due_date', 'Payment due date', 'date'],
+              ] as const).map(([key, label, type]) => (
+                <label className="field-compact" key={key}>
+                  <span>{label}</span>
+                  <input
+                    className="input"
+                    type={type}
+                    value={String(profileForm[key] ?? '')}
+                    onChange={(event) => setProfileForm((current) => ({ ...current, [key]: event.target.value }))}
+                    disabled={busy}
+                  />
+                </label>
+              ))}
+              <label className="field-compact">
+                <span>Category</span>
+                <select
+                  className="input"
+                  value={String(profileForm.category ?? 'other')}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, category: event.target.value }))}
+                  disabled={busy}
+                >
+                  {CATEGORIES.map((category) => (
+                    <option key={category} value={category}>{displayLabel(category)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-compact vendor-notebook__notes">
+                <span>Notes</span>
+                <textarea
+                  className="textarea"
+                  value={String(profileForm.notes ?? '')}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, notes: event.target.value }))}
+                  disabled={busy}
+                />
+              </label>
+              <label className="field-compact vendor-notebook__notes">
+                <span>Payment notes (recorded only — never executed)</span>
+                <textarea
+                  className="textarea"
+                  value={String(profileForm.payment_notes ?? '')}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, payment_notes: event.target.value }))}
+                  disabled={busy}
+                />
+              </label>
+            </div>
+            <div className="cluster" style={{ marginTop: 'var(--space-3)' }}>
+              <button type="button" className="btn btn--primary" onClick={handleSaveProfile} disabled={busy}>
+                Save details
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={() => setProfileOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn--reject btn--sm vendor-notebook__remove" onClick={() => handleDelete(selected.id)} disabled={busy}>
+                Remove vendor
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

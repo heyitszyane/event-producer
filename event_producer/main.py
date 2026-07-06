@@ -378,6 +378,7 @@ class EventProducerApp:
         event_type: str | None = None,
         venue_type: str | None = None,
         date: str | None = None,
+        currency: str | None = None,
         manual_constraints: ManualConstraintFlags | dict | None = None,
         event_id: str | None = None,
     ) -> dict:
@@ -405,6 +406,8 @@ class EventProducerApp:
                 conference / corporate).
             venue_type: Optional override (indoor / outdoor / ...).
             date: Optional override in YYYY-MM-DD.
+            currency: Optional casefile currency (ISO 4217). Drives scope
+                item pricing and the budget reporting currency; USD default.
 
         Returns:
             A dict with all legacy keys (event_id, event_spec, scope_items,
@@ -455,7 +458,7 @@ class EventProducerApp:
         agent_trace.append(AgentTraceStep(
             id="trace-brief-intake",
             role="Brief Intake Agent",
-            label="Interpreted messy brief and extracted requirements",
+            label="Interpreted the event brief and extracted requirements",
             status="warning" if intake_has_warning else "complete",
             input_summary=f"Raw brief ({len(brief)} chars): \"{input_summary}\"",
             output_summary=(
@@ -693,9 +696,11 @@ class EventProducerApp:
             role="agent",
             agent="Creative Concept Agent",
             content=(
-                f"Proposed direction: {creative.concept_summary}. "
-                f"{len(creative.creative_ideas)} ideas; add {len(creative.suggested_additions)}, "
-                f"cut {len(creative.suggested_cuts_or_reductions)}. Advisory only (P7A)."
+                f"Proposed direction: {creative.concept_summary} "
+                f"{len(creative.creative_ideas)} idea(s), "
+                f"{len(creative.suggested_additions)} suggested addition(s), "
+                f"{len(creative.suggested_cuts_or_reductions)} watch-out(s). "
+                "Advisory only — nothing was added to scope."
             ),
         ))
         model_mode_summary["creative_concept"] = creative.model_mode
@@ -704,6 +709,7 @@ class EventProducerApp:
         # ------------------------------------------------------------------
         # Step 1: Brief / Scope
         # ------------------------------------------------------------------
+        resolved_currency = (currency or "USD").upper()
         brief_request = {
             "brief": brief,
             "budget_cap": resolved_budget_cap,
@@ -711,6 +717,7 @@ class EventProducerApp:
             "event_type": resolved_event_type,
             "venue_type": resolved_venue_type,
             "date": resolved_date,
+            "currency": resolved_currency,
         }
         brief_raw = self._brief_scope_reason.run(brief_request)
         brief_validated = self._brief_scope_formatter.run(brief_raw)
@@ -723,13 +730,17 @@ class EventProducerApp:
         self._event_store.save_scope(event_id, scope_items)
 
         # Trace + chat
+        brief_preview = " ".join(brief.split())
+        if len(brief_preview) > 120:
+            brief_preview = f"{brief_preview[:117].rstrip()}..."
         agent_trace.append(AgentTraceStep(
             id="trace-brief-scope",
             role="Brief/Scope Agent",
             label="Parsed event brief and proposed initial scope",
             status="complete",
             input_summary=(
-                f"{brief}, {resolved_attendees} attendees, ${resolved_budget_cap} cap, "
+                f"{brief_preview} — {resolved_attendees} attendees, "
+                f"{resolved_currency} {resolved_budget_cap} cap, "
                 f"{resolved_venue_type} {resolved_event_type} setting"
             ),
             output_summary=f"Created event identity and must/should/could scope tiers ({len(scope_items)} items)",
@@ -743,7 +754,7 @@ class EventProducerApp:
         ))
         chat_log.append(ChatLogMessage(
             role="system",
-            content=f"Event production pipeline started for '{brief}'",
+            content=f"Production pipeline started. Brief: “{brief_preview}”",
         ))
         chat_log.append(ChatLogMessage(
             role="agent",
@@ -813,7 +824,7 @@ class EventProducerApp:
             "scope_items": brief_validated["scope_items"],
             "budget_cap": resolved_budget_cap,
             "contingency_pct": resolved_contingency_pct,
-            "reporting_currency": "USD",
+            "reporting_currency": resolved_currency,
         }
         budget_raw = self._budget_reason.run(budget_request)
         budget_validated = self._budget_formatter.run(budget_raw)
@@ -829,7 +840,10 @@ class EventProducerApp:
             role="Budget Manager",
             label="Costed scope through Budget Engine",
             status="complete",
-            input_summary=f"Scope items and ${resolved_budget_cap} budget cap with {resolved_contingency_pct}% contingency",
+            input_summary=(
+                f"Scope items and {resolved_currency} {resolved_budget_cap} budget cap "
+                f"with {resolved_contingency_pct}% contingency"
+            ),
             output_summary="Reserved contingency, computed spendable budget, rollups, and headroom",
             artifacts=["budget_summary"],
             deterministic_core="Budget Engine",
@@ -843,36 +857,30 @@ class EventProducerApp:
             role="agent",
             agent="Budget Manager",
             content=(
-                f"Reconciled budget: ${resolved_budget_cap} cap, "
-                f"${budget_summary.contingency_reserve} contingency ({resolved_contingency_pct}%), "
-                f"${budget_summary.spendable} spendable. "
-                f"Included ${budget_summary.included_totals}. "
-                f"Headroom: ${budget_summary.headroom}."
+                f"Reconciled budget: {resolved_currency} {resolved_budget_cap} cap, "
+                f"{resolved_currency} {budget_summary.contingency_reserve} contingency ({resolved_contingency_pct}%), "
+                f"{resolved_currency} {budget_summary.spendable} spendable. "
+                f"Included {resolved_currency} {budget_summary.included_totals}. "
+                f"Headroom: {resolved_currency} {budget_summary.headroom}."
             ),
         ))
 
         # ------------------------------------------------------------------
         # Step 3: Production (Schedule)
         # ------------------------------------------------------------------
-        # Start 30 days before the event so that vendor lead times (e.g.,
-        # catering 7 days, staging 5 days, AV 3 days, security 3 days) are
-        # feasible.  The production manager further adjusts the start time
-        # to account for the maximum lead time across all tasks.
-        event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
-        start_time = event_date.replace(
-            hour=8, minute=0, second=0, tzinfo=timezone.utc,
-        ) - timedelta(days=30)
-
+        # The production manager anchors the day-of run-of-show to the event
+        # date itself (doors 09:00 local) and reports vendor booking lead
+        # times as book-by deadlines counted back from that date.
         production_request = {
             "event_spec": brief_validated["event_spec"],
             "scope_items": brief_validated["scope_items"],
-            "start_time": start_time.isoformat(),
         }
         production_raw = self._production_reason.run(production_request)
         production_validated = self._production_formatter.run(production_raw)
 
         schedule_result = None
         call_sheet = []
+        booking_deadlines = list(production_validated.get("booking_deadlines", []))
         if "schedule_result" in production_validated and production_validated["schedule_result"] is not None:
             sr = production_validated["schedule_result"]
             schedule_result = sr if isinstance(sr, ScheduleResult) else ScheduleResult(**sr)
@@ -910,64 +918,64 @@ class EventProducerApp:
         ))
 
         # ------------------------------------------------------------------
-        # Step 4: Vendor (draft RFP — sample) + Approval creation
+        # Step 4: Vendor (category-level venue inquiry draft) + Approval
         # ------------------------------------------------------------------
-        # Pick a sample vendor from the sourcer for the RFP draft
-        sample_vendors = self._vendor_sourcer.search("venue")
-        vendor_draft = None
-        if sample_vendors:
-            sample_vendor = sample_vendors[0]
-            self._event_store.save_vendor(event_id, sample_vendor)
+        # The draft is category-level (venue) with a neutral recipient — real
+        # named vendors live in the Vendor Notebook, where drafts are written
+        # per vendor from that vendor's own history. Fixture vendors are still
+        # stored so the notebook can offer them as import suggestions.
+        fixture_vendors = self._vendor_sourcer.search("venue")
+        for fixture_vendor in fixture_vendors:
+            self._event_store.save_vendor(event_id, fixture_vendor)
 
-            vendor_request = {
-                "action": "draft_rfp",
-                "vendor_id": sample_vendor.id,
-                "event_id": event_id,
-                "scope_items": [item.model_dump() for item in scope_items],
-                "vendor_category": sample_vendor.category,
-                "schedule_context": {
-                    "task_count": task_count,
-                    "critical_path": schedule_result.critical_path if schedule_result else [],
-                    "event_date": event_spec.date,
-                },
+        vendor_request = {
+            "action": "draft_rfp",
+            "vendor_id": "",
+            "event_id": event_id,
+            "scope_items": [item.model_dump() for item in scope_items],
+            "vendor_category": "venue",
+            "schedule_context": {
+                "task_count": task_count,
+                "critical_path": schedule_result.critical_path if schedule_result else [],
+                "event_date": event_spec.date,
+            },
+        }
+        vendor_raw = self._vendor_reason.run(vendor_request)
+        vendor_validated = self._vendor_formatter.run(vendor_raw)
+        if isinstance(vendor_validated.get("vendor_draft"), dict):
+            vendor_validated = {
+                **vendor_validated["vendor_draft"],
+                **vendor_validated,
             }
-            vendor_raw = self._vendor_reason.run(vendor_request)
-            vendor_validated = self._vendor_formatter.run(vendor_raw)
-            if isinstance(vendor_validated.get("vendor_draft"), dict):
-                vendor_validated = {
-                    **vendor_validated["vendor_draft"],
-                    **vendor_validated,
-                }
-            vendor_draft = vendor_validated
+        vendor_draft = vendor_validated
 
-            # Create a real pending approval for the vendor draft
-            approval_diff = (
-                vendor_validated.get("approval_diff")
-                or vendor_validated.get("vendor_draft", {}).get("approval_diff")
-                or f"Send RFP to {sample_vendor.name} for {sample_vendor.category} booking."
-            )
-            approval = Approval(
-                id=f"aprv-{event_id[:8]}-vendor",
-                action="send_vendor_message",
-                requested_by="vendor-coordinator",
-                approved_by="",
-                status="pending",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                notes=f"{approval_diff} Draft requires human review before external use.",
-            )
-            self._event_store.save_approval(event_id, approval)
-            approvals.append(approval)
-            model_mode_summary["vendor_draft"] = str(vendor_validated.get("model_mode") or "rule_based_fallback")
+        # Create a real pending approval for the vendor draft
+        approval_diff = (
+            vendor_validated.get("approval_diff")
+            or vendor_validated.get("vendor_draft", {}).get("approval_diff")
+            or "Venue inquiry draft prepared from the confirmed scope."
+        )
+        approval = Approval(
+            id=f"aprv-{event_id[:8]}-vendor",
+            action="send_vendor_message",
+            requested_by="vendor-coordinator",
+            approved_by="",
+            status="pending",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            notes=f"{approval_diff} Draft requires human review before external use.",
+        )
+        self._event_store.save_approval(event_id, approval)
+        approvals.append(approval)
+        model_mode_summary["vendor_draft"] = str(vendor_validated.get("model_mode") or "rule_based_fallback")
 
         # Trace + chat
-        vendor_name = sample_vendors[0].name if sample_vendors else "unknown"
         agent_trace.append(AgentTraceStep(
             id="trace-vendor",
             role="Vendor Draft Agent",
             label="Drafted vendor-facing copy behind the approval wall",
             status="pending_approval",
             input_summary="Venue / AV / F&B needs from scope",
-            output_summary=f"Prepared vendor-facing draft for {vendor_name} blocked behind human review",
+            output_summary="Prepared a venue inquiry draft, blocked behind human review",
             artifacts=["vendors", "approvals"],
             deterministic_core=None,
             approval_required=True,
@@ -979,7 +987,7 @@ class EventProducerApp:
         chat_log.append(ChatLogMessage(
             role="agent",
             agent="Vendor Coordinator",
-            content=f"Drafted RFP for {vendor_name}. Review before external use.",
+            content="Drafted a venue inquiry. Review before external use.",
         ))
 
         # ------------------------------------------------------------------
@@ -990,7 +998,7 @@ class EventProducerApp:
             "budget_summary": budget_validated["budget_summary"],
             "schedule_result": production_validated.get("schedule_result"),
             "conflict_report": production_validated.get("conflict_report"),
-            "vendors": [v.model_dump() for v in sample_vendors] if sample_vendors else [],
+            "vendors": [v.model_dump() for v in fixture_vendors] if fixture_vendors else [],
             "vendor_messages": [],
         }
         risk_flags_raw = self._risk_flagger.run(risk_state)
@@ -1029,7 +1037,7 @@ class EventProducerApp:
             budget_summary=budget_summary,
             schedule_result=schedule_result,
             call_sheet=call_sheet,
-            vendors=sample_vendors if sample_vendors else [],
+            vendors=fixture_vendors if fixture_vendors else [],
             risk_flags=risk_flags,
             approvals=approvals,
         )
@@ -1134,6 +1142,7 @@ class EventProducerApp:
             "schedule_result": schedule_result.model_dump() if schedule_result else None,
             "conflict_report": conflict_report,
             "call_sheet": [c.model_dump() for c in call_sheet],
+            "booking_deadlines": booking_deadlines,
             "risk_flags": [f.model_dump() for f in risk_flags],
             "vendor_draft": vendor_draft,
             "run_of_show": run_of_show.model_dump(),
@@ -1196,6 +1205,7 @@ class EventProducerApp:
             attendees=attendees,
             event_type=basics.event_type or None,
             date=date,
+            currency=basics.currency or None,
             manual_constraints=flags,
             event_id=event_id,
         )
@@ -1218,6 +1228,7 @@ class EventProducerApp:
             "run-sheet": {
                 "schedule_result": result.get("schedule_result"),
                 "call_sheet": result.get("call_sheet", []),
+                "booking_deadlines": result.get("booking_deadlines", []),
                 "run_of_show": result.get("run_of_show"),
             },
             "vendor-copy": result.get("vendor_draft"),
@@ -1305,6 +1316,7 @@ class EventProducerApp:
                 {
                     "schedule_result": updates.get("schedule_result", snapshot.get("schedule_result")),
                     "call_sheet": updates.get("call_sheet", snapshot.get("call_sheet", [])),
+                    "booking_deadlines": updates.get("booking_deadlines", snapshot.get("booking_deadlines", [])),
                     "run_of_show": snapshot.get("run_of_show"),
                 },
             )

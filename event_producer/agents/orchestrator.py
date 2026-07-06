@@ -122,9 +122,16 @@ class OrchestratorAgent:
         schedule = context.get("schedule_result") or {}
         approvals = list(context.get("approvals") or [])
         risk_flags = list(context.get("risk_flags") or [])
+        # Casefile reporting currency rides on the scope lines; the orchestrator
+        # quotes money in it instead of a hardcoded dollar sign.
+        currency = next(
+            (str(item["currency"]) for item in scope_items if item.get("currency")),
+            "USD",
+        )
 
         return {
             "event_id": context.get("event_id"),
+            "currency": currency,
             "event_spec": {
                 "name": event_spec.get("name"),
                 "event_type": event_spec.get("event_type"),
@@ -251,20 +258,21 @@ class OrchestratorAgent:
         scope_items = context.get("selected_scope_items", [])
         budget = context.get("budget", {})
         headroom = _decimal(budget.get("headroom"))
+        currency = str(context.get("currency") or "USD")
         proposals: list[ProposedAction] = []
-        reply = self._generate_reply(message, scope_items, headroom)
+        reply = self._generate_reply(message, scope_items, headroom, currency)
 
         msg_lower = message.lower()
         if "premium" in msg_lower or "upgrade" in msg_lower:
             if headroom > Decimal("1000"):
-                premium_suggestions = self._suggest_premium_upgrades(headroom)
+                premium_suggestions = self._suggest_premium_upgrades(headroom, currency)
                 proposals.extend(premium_suggestions)
                 reply += f"\n\nFound {len(premium_suggestions)} premium upgrade option(s) within budget headroom."
             else:
                 reply += "\n\nHeadroom is low, so I would cut or retier before adding premium scope."
 
         if "cut" in msg_lower or "reduce" in msg_lower or "save" in msg_lower:
-            cut_suggestions = self._suggest_cuts(scope_items)
+            cut_suggestions = self._suggest_cuts(scope_items, currency)
             proposals.extend(cut_suggestions)
             reply += f"\n\nFound {len(cut_suggestions)} cut/reduction suggestion(s)."
 
@@ -275,14 +283,14 @@ class OrchestratorAgent:
             fallback_reason=fallback_reason,
         )
 
-    def _generate_reply(self, message: str, scope_items: list[dict[str, Any]], headroom: Decimal) -> str:
+    def _generate_reply(self, message: str, scope_items: list[dict[str, Any]], headroom: Decimal, currency: str = "USD") -> str:
         item_count = len(scope_items)
         return (
             f"Analyzing your request: '{message}'. "
-            f"Event has {item_count} selected scope items and ${headroom:,.0f} headroom."
+            f"Event has {item_count} selected scope items and {currency} {headroom:,.0f} headroom."
         )
 
-    def _suggest_premium_upgrades(self, headroom: Decimal) -> list[ProposedAction]:
+    def _suggest_premium_upgrades(self, headroom: Decimal, currency: str = "USD") -> list[ProposedAction]:
         max_suggestion = min(headroom, Decimal("5000"))
         if max_suggestion < Decimal("1500"):
             return []
@@ -291,14 +299,14 @@ class OrchestratorAgent:
                 id=f"prop_{uuid.uuid4().hex[:8]}",
                 type="add_scope_item",
                 title="Premium catering upgrade",
-                rationale=f"Adds elevated catering within available headroom of ${headroom:,.0f}",
+                rationale=f"Adds elevated catering within available headroom of {currency} {headroom:,.0f}",
                 payload={
                     "name": "Premium Catering",
                     "description": "Upgraded menu with premium options and bar service",
                     "category": "catering",
                     "tier": "should",
                     "estimated_cost": str(max_suggestion),
-                    "currency": "USD",
+                    "currency": currency,
                     "qty": "1",
                     "selected": True,
                 },
@@ -309,7 +317,7 @@ class OrchestratorAgent:
             )
         ]
 
-    def _suggest_cuts(self, scope_items: list[dict[str, Any]]) -> list[ProposedAction]:
+    def _suggest_cuts(self, scope_items: list[dict[str, Any]], currency: str = "USD") -> list[ProposedAction]:
         proposals: list[ProposedAction] = []
         for item in scope_items:
             cost = _decimal(item.get("estimated_cost")) * _decimal(item.get("qty") or "1")
@@ -319,7 +327,7 @@ class OrchestratorAgent:
                         id=f"prop_{uuid.uuid4().hex[:8]}",
                         type="toggle_scope_item",
                         title=f"Exclude {item.get('name', 'item')}",
-                        rationale=f"Removes about ${cost:,.0f} by de-selecting this optional item",
+                        rationale=f"Removes about {currency} {cost:,.0f} by de-selecting this optional item",
                         payload={"name": item.get("name"), "selected": False},
                         requires_confirmation=True,
                         requires_approval_gate=False,

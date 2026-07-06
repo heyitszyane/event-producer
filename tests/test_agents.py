@@ -477,11 +477,9 @@ class TestProductionManagerAgent:
         self,
         production_reason: ProductionManagerReasonAgent,
     ) -> None:
-        """Reason agent calls compute_schedule."""
-        # Use categories without lead-time requirements to avoid conflicts.
-        # Provide ≥6 scope items so operational tasks are NOT added.
+        """Reason agent builds the day-of template anchored to the event date."""
         request = {
-            "event_spec": {"name": "Test Event"},
+            "event_spec": {"name": "Test Event", "date": "2026-08-15"},
             "scope_items": [
                 {"name": "Venue Rental", "category": "venue"},
                 {"name": "Decor and Signage", "category": "decor"},
@@ -490,7 +488,6 @@ class TestProductionManagerAgent:
                 {"name": "Signage and Wayfinding", "category": "signage"},
                 {"name": "Security", "category": "security"},
             ],
-            "start_time": "2026-08-15T08:00:00+00:00",
         }
         result = production_reason.run(request)
 
@@ -498,33 +495,46 @@ class TestProductionManagerAgent:
         assert "call_sheet" in result
         assert "explanation" in result
         schedule = result["schedule_result"]
-        # With 6 scope items (≥6), no operational tasks are added
+        # Fixed day-of arc: setup -> tech check -> registration -> doors ->
+        # program -> strike.
         assert len(schedule["ordered_tasks"]) == 6
+        by_id = {task["id"]: task for task in schedule["ordered_tasks"]}
+        assert set(by_id) == {
+            "setup", "tech_check", "registration", "doors_open", "program", "strike",
+        }
+        # Every task happens on the event day, doors open 09:00 wall-clock.
+        for task in schedule["ordered_tasks"]:
+            assert task["earliest_start"].date().isoformat() == "2026-08-15"
+        doors = by_id["doors_open"]
+        assert (doors["earliest_start"].hour, doors["earliest_start"].minute) == (9, 0)
+        # One combined setup row covers the setup scope categories.
+        assert by_id["setup"]["name"].startswith("Setup & Load-In")
 
-    def test_production_manager_repeated_categories_have_unique_task_ids(
+    def test_production_manager_booking_deadlines_from_lead_times(
         self,
         production_reason: ProductionManagerReasonAgent,
     ) -> None:
-        """Repeated category/default other items must not collide in scheduler IDs."""
+        """Lead-time categories become book-by deadlines before the event date."""
         request = {
-            "event_spec": {"name": "Repeated Category Event"},
+            "event_spec": {"name": "Lead Time Event", "date": "2026-08-15"},
             "scope_items": [
                 {"name": "Venue Rental", "category": "venue"},
                 {"name": "Canape Station", "category": "catering"},
-                {"name": "Dessert Station", "category": "catering"},
-                {"name": "Sponsor Lounge Host", "category": "other"},
-                {"name": "Gift Bag Prep", "category": "other"},
-                {"name": "Registration Desk", "category": "registration"},
+                {"name": "AV Equipment", "category": "av_equipment"},
             ],
-            "start_time": "2026-08-15T08:00:00+00:00",
         }
         result = production_reason.run(request)
 
-        assert "schedule_result" in result
-        task_ids = [task["id"] for task in result["schedule_result"]["ordered_tasks"]]
-        assert len(task_ids) == len(set(task_ids))
-        assert any(task_id.startswith("scope-2-catering") for task_id in task_ids)
-        assert any(task_id.startswith("scope-4-other") for task_id in task_ids)
+        deadlines = result["booking_deadlines"]
+        by_category = {entry["category"]: entry for entry in deadlines}
+        # Venue 21 days, catering 7 days, AV 3 days — all counted back from the
+        # 2026-08-15 event date.
+        assert set(by_category) == {"venue", "catering", "av_equipment"}
+        assert by_category["venue"]["book_by"] == "2026-07-25"
+        assert by_category["catering"]["book_by"] == "2026-08-08"
+        assert by_category["av_equipment"]["book_by"] == "2026-08-12"
+        # Sorted by earliest deadline first (venue locks first).
+        assert deadlines[0]["category"] == "venue"
 
     def test_production_manager_reason_conflict_detection(
         self,

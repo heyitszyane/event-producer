@@ -9,8 +9,7 @@ Reason -> Formatter split:
 
 from __future__ import annotations
 
-import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -28,93 +27,101 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# Category -> duration (hours) and dependency mapping
+# Day-of run-of-show template + vendor booking lead times
 # ---------------------------------------------------------------------------
 
-_CATEGORY_DURATION: dict[str, Decimal] = {
-    "venue": Decimal("4"),
-    "catering": Decimal("2"),
-    "av_equipment": Decimal("3"),
-    "staffing": Decimal("1"),
-    "decor": Decimal("2"),
-    "security": Decimal("1"),
-    "staging": Decimal("4"),
-    "registration": Decimal("1"),
-    "signage": Decimal("1"),
-}
-
-_CATEGORY_DEPENDENCIES: dict[str, list[str]] = {
-    "catering": ["venue"],
-    "av_equipment": ["venue"],
-    "decor": ["venue"],
-    "staffing": ["venue"],
-}
-
-# Categories that need lead time for vendor booking (days)
+# Categories that need lead time for vendor booking (days). These are NOT
+# day-of schedule rows — they become booking deadlines counted back from the
+# event date. Venue is listed first with the longest lead time because it is
+# usually the earliest commitment an event needs to lock.
 _CATEGORY_LEAD_TIME: dict[str, Decimal] = {
+    "venue": Decimal("21"),
     "catering": Decimal("7"),
-    "av_equipment": Decimal("3"),
     "staging": Decimal("5"),
+    "av_equipment": Decimal("3"),
     "security": Decimal("3"),
 }
 
-# Operational run-of-show tasks added per event type.
-# These ensure a credible event-production timeline with ≥6 ordered tasks.
-# Each entry: (task_id, task_name, duration_hours, dependencies, lead_time_days)
-_OPERATIONAL_TASKS: list[tuple[str, str, Decimal, list[str], Decimal | None]] = [
-    ("load_in", "Load In", Decimal("2"), [], None),
-    ("venue_setup", "Venue Setup", Decimal("3"), ["load_in"], None),
-    ("registration_check_in", "Registration Check-In", Decimal("1"), ["venue_setup"], None),
-    ("doors_open", "Doors Open", Decimal("1"), ["registration_check_in"], None),
-    ("networking_program", "Networking Program", Decimal("4"), ["doors_open"], None),
-    ("strike", "Strike", Decimal("2"), ["networking_program"], None),
-]
+# Scope categories whose physical setup is covered by the single combined
+# "Setup & Load-In" task (they are not scheduled individually).
+_SETUP_CATEGORIES: tuple[str, ...] = (
+    "venue", "av_equipment", "decor", "signage", "staging",
+)
+
+# Doors open at 09:00 wall-clock on the event day; the pre-doors chain
+# (setup -> tech check -> registration) is counted back from that anchor.
+_DOORS_OPEN_HOUR = 9
+
+# Program label by event type.
+_PROGRAM_NAME: dict[str, str] = {
+    "networking": "Networking Program",
+    "conference": "Conference Sessions",
+    "product_launch": "Launch Program",
+    "corporate": "Main Program",
+}
 
 
-def _scope_item_to_schedule_task(
-    item: dict,
-    task_id: str,
-    dependency_ids_by_category: dict[str, str],
-) -> ScheduleTask:
-    """Convert a scope item dict to a ScheduleTask.
+def _day_of_tasks(event_spec: dict, scope_items: list[dict]) -> list[ScheduleTask]:
+    """Build the day-of run-of-show template.
 
-    Args:
-        item: Scope item dict with at least 'name' and 'category' keys.
-        task_id: Stable unique task ID assigned to this scope item.
-        dependency_ids_by_category: Primary task ID for each dependency
-            category.
-
-    Returns:
-        A ScheduleTask ready for the CPM scheduler.
+    One combined Setup task covers all setup scope (venue prep, AV, decor,
+    signage, staging); the rest is the standard arc of an event day. Users
+    add rows manually when their show needs more granularity.
     """
-    name: str = item["name"]
-    category: str = item.get("category", "")
-
-    duration: Decimal = _CATEGORY_DURATION.get(category, Decimal("1"))
-
-    # Resolve dependency names to task IDs
-    dep_names: list[str] = _CATEGORY_DEPENDENCIES.get(category, [])
-    dep_ids: list[str] = []
-    for dep_name in dep_names:
-        dep_id = dependency_ids_by_category.get(dep_name)
-        if dep_id:
-            dep_ids.append(dep_id)
-
-    lead_time: Decimal | None = _CATEGORY_LEAD_TIME.get(category)
-
-    return ScheduleTask(
-        id=task_id,
-        name=name,
-        duration=duration,
-        dependencies=dep_ids,
-        lead_time=lead_time,
+    categories = {str(item.get("category", "")) for item in scope_items}
+    setup_covered = sorted(
+        cat for cat in categories if cat in _SETUP_CATEGORIES
     )
+    setup_name = "Setup & Load-In"
+    if setup_covered:
+        pretty = ", ".join(cat.replace("_", " ").replace("av equipment", "AV") for cat in setup_covered)
+        setup_name = f"Setup & Load-In ({pretty})"
+    # Staging builds take longer than a standard room flip.
+    setup_duration = Decimal("3") if "staging" in categories else Decimal("2")
+
+    program_name = _PROGRAM_NAME.get(
+        str(event_spec.get("event_type", "")), "Main Program"
+    )
+    try:
+        program_duration = Decimal(str(event_spec.get("duration_hours") or "4"))
+    except ArithmeticError:
+        program_duration = Decimal("4")
+    if program_duration <= Decimal("0"):
+        program_duration = Decimal("4")
+
+    return [
+        ScheduleTask(id="setup", name=setup_name, duration=setup_duration, dependencies=[]),
+        ScheduleTask(id="tech_check", name="AV & Tech Check", duration=Decimal("0.5"), dependencies=["setup"]),
+        ScheduleTask(id="registration", name="Registration & Check-In Opens", duration=Decimal("0.5"), dependencies=["tech_check"]),
+        ScheduleTask(id="doors_open", name="Doors Open", duration=Decimal("0.5"), dependencies=["registration"]),
+        ScheduleTask(id="program", name=program_name, duration=program_duration, dependencies=["doors_open"]),
+        ScheduleTask(id="strike", name="Strike & Load-Out", duration=Decimal("1.5"), dependencies=["program"]),
+    ]
 
 
-def _slug(value: str) -> str:
-    """Return a stable, readable task-id segment."""
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug or "item"
+def _booking_deadlines(event_date: datetime, scope_items: list[dict]) -> list[dict]:
+    """Derive vendor booking deadlines from scope lead times.
+
+    Returns one entry per lead-time category present in scope: book this
+    category by ``book_by`` or the vendor cannot deliver by the event date.
+    """
+    deadlines: list[dict] = []
+    seen: set[str] = set()
+    for item in scope_items:
+        category = str(item.get("category", ""))
+        lead = _CATEGORY_LEAD_TIME.get(category)
+        if lead is None or category in seen:
+            continue
+        seen.add(category)
+        book_by = event_date - timedelta(days=int(lead))
+        deadlines.append({
+            "item": str(item.get("name", category)),
+            "category": category,
+            "lead_time_days": int(lead),
+            "book_by": book_by.date().isoformat(),
+        })
+    deadlines.sort(key=lambda entry: entry["book_by"])
+    return deadlines
 
 
 def _schedule_result_to_dict(result: ScheduleResult) -> dict:
@@ -201,89 +208,51 @@ class ProductionManagerReasonAgent:
 
         Args:
             request: Request dict containing:
-                - event_spec: EventSpec dict (at least 'name', 'date')
+                - event_spec: EventSpec dict (at least 'name'; 'date' drives
+                  the day-of anchor when present)
                 - scope_items: list of ScopeItem dicts (at least 'name',
                   'category')
-                - start_time: ISO datetime string for project start
+                - start_time: optional ISO datetime string; its date is used
+                  only when event_spec has no usable date
 
         Returns:
             On success: {"schedule_result": {...}, "call_sheet": [...],
-                         "explanation": str}
+                         "booking_deadlines": [...], "explanation": str}
             On conflict: {"conflict_report": {...}, "explanation": str}
         """
         event_spec: dict = request["event_spec"]
         scope_items: list[dict] = request["scope_items"]
-        start_time_str: str = request["start_time"]
 
-        # 1. Parse start_time
-        start_time: datetime = datetime.fromisoformat(start_time_str)
+        # 1. Anchor the run-of-show to the event date. Naive local wall-clock
+        # times by design: "doors open 09:00" means 09:00 on the event day,
+        # not a UTC instant the browser shifts by timezone.
+        event_date: datetime | None = None
+        date_str = str(event_spec.get("date") or "").strip()
+        if date_str:
+            try:
+                event_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                event_date = None
+        if event_date is None and request.get("start_time"):
+            parsed = datetime.fromisoformat(str(request["start_time"]))
+            event_date = datetime(parsed.year, parsed.month, parsed.day)
+        if event_date is None:
+            event_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # 2. Build stable unique task IDs, plus a primary category lookup for
-        # dependency resolution when multiple scope items share one category.
-        task_ids_by_index: dict[int, str] = {}
-        dependency_ids_by_category: dict[str, str] = {}
-        for idx, item in enumerate(scope_items):
-            cat = item.get("category", "")
-            task_id = f"scope-{idx + 1}-{_slug(cat)}-{_slug(item['name'])}"
-            task_ids_by_index[idx] = task_id
-            if cat and cat not in dependency_ids_by_category:
-                dependency_ids_by_category[cat] = task_id
+        # 2. Build the day-of template and count the pre-doors chain back
+        # from the doors-open anchor so doors always open at 09:00.
+        tasks = _day_of_tasks(event_spec, scope_items)
+        pre_doors_hours = sum(
+            (task.duration for task in tasks if task.id in ("setup", "tech_check", "registration")),
+            Decimal("0"),
+        )
+        doors_open = event_date.replace(hour=_DOORS_OPEN_HOUR, minute=0)
+        start_time = doors_open - timedelta(seconds=int(pre_doors_hours * Decimal("3600")))
 
-        # 3. Convert scope items to ScheduleTask objects
-        tasks: list[ScheduleTask] = [
-            _scope_item_to_schedule_task(
-                item,
-                task_ids_by_index[idx],
-                dependency_ids_by_category,
-            )
-            for idx, item in enumerate(scope_items)
-        ]
-        scope_task_ids: set[str] = {t.id for t in tasks}
-
-        # 3c. Append operational run-of-show tasks (load_in → strike) when
-        # the scope-derived task count is < 6.  These event-production tasks
-        # ensure a credible timeline with ≥6 ordered tasks.
-        op_task_ids: set[str] = set()
-        if len(tasks) < 6:
-            for op_id, op_name, op_duration, op_deps, op_lead in _OPERATIONAL_TASKS:
-                # Skip if a scope task already uses this ID
-                if op_id in scope_task_ids:
-                    continue
-                tasks.append(ScheduleTask(
-                    id=op_id,
-                    name=op_name,
-                    duration=op_duration,
-                    dependencies=list(op_deps),
-                    lead_time=op_lead,
-                ))
-                op_task_ids.add(op_id)
-
-            # 3d. Re-root scope tasks: tasks with no deps or whose deps
-            # reference other scope tasks only are linked into the operational
-            # flow.
-            for i, t in enumerate(tasks):
-                if t.id in op_task_ids:
-                    continue  # skip operational tasks
-                has_only_scope_deps = (
-                    t.dependencies and
-                    all(d in scope_task_ids for d in t.dependencies)
-                )
-                if not t.dependencies or has_only_scope_deps:
-                    new_deps = list(t.dependencies) if t.dependencies else []
-                    if "venue_setup" not in new_deps:
-                        new_deps.append("venue_setup")
-                    tasks[i] = ScheduleTask(
-                        id=t.id,
-                        name=t.name,
-                        duration=t.duration,
-                        dependencies=new_deps,
-                        lead_time=t.lead_time,
-                    )
-
-        # 4. Call compute_schedule from code (NOT as an LLM tool)
+        # 3. Call compute_schedule from code (NOT as an LLM tool)
         result = compute_schedule(tasks, start_time)
 
-        # 5. Handle conflict report
+        # 4. Handle conflict report
         if isinstance(result, SchedulerConflictReport):
             report_dict = _conflict_report_to_dict(result)
             explanation = self._build_conflict_explanation(result, event_spec)
@@ -292,19 +261,21 @@ class ProductionManagerReasonAgent:
                 "explanation": explanation,
             }
 
-        # 6. Handle successful schedule
+        # 5. Handle successful schedule
         assert isinstance(result, ScheduleResult)
         schedule_dict = _schedule_result_to_dict(result)
 
-        # 7. Derive call sheet from the schedule
+        # 6. Derive call sheet + vendor booking deadlines
         call_sheet_entries = derive_call_sheet(result)
         call_sheet_dicts = _call_sheet_to_dict(call_sheet_entries)
+        booking_deadlines = _booking_deadlines(event_date, scope_items)
 
         explanation = self._build_success_explanation(result, event_spec)
 
         return {
             "schedule_result": schedule_dict,
             "call_sheet": call_sheet_dicts,
+            "booking_deadlines": booking_deadlines,
             "explanation": explanation,
         }
 
@@ -404,5 +375,7 @@ class ProductionManagerFormatterAgent:
             result["schedule_result"] = schedule_result
         if call_sheet:
             result["call_sheet"] = call_sheet
+        if "booking_deadlines" in raw_output:
+            result["booking_deadlines"] = list(raw_output["booking_deadlines"])
 
         return result

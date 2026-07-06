@@ -54,7 +54,9 @@ Business**.
   human-approved `Approval` object.
 - **Scripted deterministic security beat** — 3 vendor/payment-change fixtures
   treated as untrusted data; no external action executed, no state mutation
-  executed.
+  executed. Generated on every run and asserted by `test_p6f_security_demo.py`;
+  the live security story is shown interactively through the Approvals wall and
+  the injection-flagged vendor replies in the Vendor Notebook.
 - **Paper War Room frontend** — Next.js 14 static export with a persistent
   side nav and route-like sections for Overview, Brief Intake, AI Crew, Scope,
   Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log. FastAPI backend
@@ -81,7 +83,7 @@ Messy event brief
   -> CPM Scheduler creates run-of-show and critical path
   -> live/fallback Vendor Draft Agent drafts outbound copy
   -> structural approval wall blocks vendor-facing execution
-  -> scripted security beat shows vendor/payment-change text treated as untrusted data
+  -> vendor replies are injection-screened; payment-change text is treated as untrusted data
   -> Paper War Room UI renders the state for human review
 ```
 
@@ -440,18 +442,20 @@ Modules:
   runtime mode, saved-artifact status, direct ask/refine actions for the
   four specialists, compact concept/strategy output digests, and an
   expandable role-card contract
-- **ExtractedRequirements** — resolved requirement basis with from-brief,
-  manual-override, fallback-default, and missing provenance
+- **ExtractedRequirements** — read-only requirement-provenance table
+  (from-brief, you-entered, planning-default, and missing) plus realism
+  warnings and follow-up questions
 - **AgentCrewTrace** — secondary timeline of role-agent steps with statuses,
   deterministic cores, artifacts
-- **BudgetCard** — budget basis, realism warnings, lines, category rollups,
-  tier pills, headroom, variance
-- **RunOfShowCard** — ordered tasks, critical path, anchor highlighting
+- **BudgetCard** — budget basis in the casefile currency, realism warnings,
+  health bars, category rollups, and an included/excluded tier-inclusion table
+- **RunOfShowCard** — day-of ordered tasks anchored to the event date,
+  critical path, editable/added draft rows, and a vendor booking-deadlines list
 - **ApprovalInbox** — event-scoped approvals auto-expanded when pending;
-  structural gate banner and mutation error/status feedback
-- **SecurityBeat** — 3 scripted fixtures, blocked actions, no-execution status
-- **ScopeCard** — add/edit/delete/toggle/retier scope items with recompute
-  feedback
+  plain-English human-gate explanation, structural gate banner, and mutation
+  error/status feedback
+- **ScopeCard** — add (modal) / edit (modal) / delete / toggle / retier scope
+  items in the casefile currency
 - **RiskCard** — risk/gap flags
 - **VendorNotebook** — persistent per-vendor chase list: workflow and
   payment status (user-recorded, never executed), append-only activity log

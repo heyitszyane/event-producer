@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7Q — Post-P7P UI/behavior refinements
+
+- Currency truth end-to-end: the casefile currency now threads through scope
+  pricing, the budget engine's reporting currency, scope-item recompute, new
+  items added from the UI/creative/orchestrator, and agent money prose (was
+  hardcoded USD downstream of an SGD casefile).
+- Intelligent scope quantities: per-line `qty_basis` (per-attendee vs
+  lump-sum vs per-25/per-50) replaces "every line = pax count"; Event Staffing
+  is now optional and unselected by default.
+- Day-of run-of-show anchored to the event date with sane local wall-clock
+  times (doors 09:00); vendor lead times surface as a book-by deadlines list
+  instead of nonsensical schedule rows.
+- UI refinements: centered loader; decluttered Overview; logged producer chat
+  transcript; real "Add to scope" feedback; modal scope edit; informative
+  budget tier table (Variance removed); run-sheet Add-row + booking deadlines;
+  plain-English Approvals; redesigned Vendor cards + profile modal; read-only
+  Requirement Provenance; removed the scripted Security Posture panel and the
+  legacy vendor-copy draft. Demo jargon (`P7A`, fixture vendor names) scrubbed
+  from logs/trace/approvals.
+
 ### P7P — Load-bearing skill cards + submission UI polish
 
 - Skill cards became load-bearing: every LLM agent's reason step now

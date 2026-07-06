@@ -13,13 +13,26 @@ export interface Approval {
   notes?: string
 }
 
+// The vendor-facing draft that a pending "send_vendor_message" approval gates.
+// Rendered read-only so the human actually reviews the copy before approving.
+export interface ApprovalVendorDraft {
+  subject?: string
+  body?: string
+  draft?: string
+}
+
 interface ApprovalInboxProps {
   approvals: Approval[]
   eventId?: string
   defaultExpanded?: boolean
+  vendorDraft?: ApprovalVendorDraft | null
 }
 
-export default function ApprovalInbox({ approvals, eventId, defaultExpanded = false }: ApprovalInboxProps) {
+function isVendorMessageAction(action: string): boolean {
+  return /send_vendor_message|vendor/i.test(action)
+}
+
+export default function ApprovalInbox({ approvals, eventId, defaultExpanded = false, vendorDraft = null }: ApprovalInboxProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [acting, setActing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -76,6 +89,13 @@ export default function ApprovalInbox({ approvals, eventId, defaultExpanded = fa
         </span>
       </div>
 
+      <p className="body-copy approval-lead">
+        This is the human-in-the-loop gate. Anything that would reach a vendor,
+        move money, or change saved state is held here until you approve or reject
+        it — the app never sends or spends on its own. Each run queues its vendor
+        draft here for your sign-off before external use.
+      </p>
+
       {/* Collapsed: count line */}
       {!expanded && (
         <button
@@ -120,7 +140,10 @@ export default function ApprovalInbox({ approvals, eventId, defaultExpanded = fa
           </div>
 
           {localApprovals.length === 0 && (
-            <div className="empty-state">No approvals.</div>
+            <div className="empty-state">
+              Nothing waiting for approval. When the crew drafts a vendor message or
+              proposes a state change, it appears here for you to approve or reject.
+            </div>
           )}
 
           {localApprovals.map((ap) => (
@@ -148,6 +171,16 @@ export default function ApprovalInbox({ approvals, eventId, defaultExpanded = fa
               {ap.notes && (
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 'var(--space-1)', fontStyle: 'italic' }}>
                   {ap.notes}
+                </div>
+              )}
+
+              {isVendorMessageAction(ap.action) && vendorDraft && (vendorDraft.subject || vendorDraft.body || vendorDraft.draft) && (
+                <div className="approval-draft">
+                  <span className="approval-draft__label">Draft held for your review — this is the exact copy that stays unsent until you approve it.</span>
+                  {vendorDraft.subject && (
+                    <div className="approval-draft__subject"><strong>Subject:</strong> {vendorDraft.subject}</div>
+                  )}
+                  <pre className="approval-draft__body">{vendorDraft.body || vendorDraft.draft}</pre>
                 </div>
               )}
 

@@ -492,3 +492,10 @@ export interface RecomputeNotice {
   schedule_status?: 'recomputed' | 'warning' | string
   message?: string
 }
+
+export interface BookingDeadline {
+  item: string
+  category: string
+  lead_time_days: number
+  book_by: string
+}

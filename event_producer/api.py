@@ -8,7 +8,7 @@ and HTTP concerns.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -941,11 +941,23 @@ def create_app() -> FastAPI:
             else Decimal(str(DEFAULT_EVENT_CONSTRAINTS["contingency_pct"]))
         )
 
+        # Reporting currency follows the saved casefile; scope items carry
+        # their own currency, so an event without a casefile stays USD.
+        reporting_currency = "USD"
+        try:
+            reporting_currency = (
+                producer.casefile_store.get_casefile(event_id).resolved.basics.currency
+                or "USD"
+            )
+        except FileNotFoundError:
+            if scope_items:
+                reporting_currency = scope_items[0].currency or "USD"
+
         budget_request = {
             "scope_items": [s.model_dump() for s in scope_items],
             "budget_cap": budget_cap,
             "contingency_pct": contingency_pct,
-            "reporting_currency": "USD",
+            "reporting_currency": reporting_currency,
         }
         budget_raw = producer._budget_reason.run(budget_request)
         budget_validated = producer._budget_formatter.run(budget_raw)
@@ -953,22 +965,18 @@ def create_app() -> FastAPI:
         updated_budget = BudgetSummary(**budget_summary)
         producer.event_store.save_budget(event_id, updated_budget)
 
-        # Recompute schedule (best effort; may be None)
-        event_date = datetime.strptime(event_spec.date, "%Y-%m-%d")
-        start_time = event_date.replace(
-            hour=8, minute=0, second=0, tzinfo=timezone.utc,
-        ) - timedelta(days=30)
-
+        # Recompute schedule (best effort; may be None). The production
+        # manager anchors the day-of run-of-show to the event date itself.
         production_request = {
             "event_spec": event_spec.model_dump(),
             "scope_items": [s.model_dump() for s in scope_items],
-            "start_time": start_time.isoformat(),
         }
         production_raw = producer._production_reason.run(production_request)
         production_validated = producer._production_formatter.run(production_raw)
 
         schedule_result = None
         call_sheet = []
+        booking_deadlines = list(production_validated.get("booking_deadlines", []))
         if "schedule_result" in production_validated and production_validated["schedule_result"] is not None:
             schedule_result = production_validated["schedule_result"]
             if schedule_result is not None:
@@ -1003,6 +1011,7 @@ def create_app() -> FastAPI:
             "budget_summary": budget_summary,
             "schedule_result": schedule_result.model_dump() if schedule_result else None,
             "call_sheet": [c.model_dump() for c in call_sheet],
+            "booking_deadlines": booking_deadlines,
             "recompute_notice": {
                 "previous_headroom": previous_headroom_text,
                 "current_headroom": current_headroom_text,
@@ -1021,6 +1030,7 @@ def create_app() -> FastAPI:
                 "budget_summary": payload["budget_summary"],
                 "schedule_result": payload["schedule_result"],
                 "call_sheet": payload["call_sheet"],
+                "booking_deadlines": payload["booking_deadlines"],
             },
         )
         return payload

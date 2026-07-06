@@ -219,11 +219,14 @@ class BriefIntakeFormatterAgent:
             )
 
         # Market realism: flag only obvious tensions and state the assumption.
+        # Intake reads the raw brief and does not know the casefile's reporting
+        # currency, so the per-head figure is stated without a currency symbol.
         warnings: list[str] = []
         if budget_cap and attendees and int(budget_cap.replace(",", "")) / max(attendees, 1) < 25:
+            per_head = int(budget_cap.replace(",", "")) // max(attendees, 1)
             warnings.append(
-                f"Per-head budget looks tight given "
-                f"${budget_cap} / {attendees} attendees."
+                f"Per-head budget looks tight — about {per_head} per attendee "
+                f"across {attendees} attendees."
             )
 
         # P7D: Singapore open-bar realism warning (common contradiction)

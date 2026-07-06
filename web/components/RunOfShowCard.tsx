@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import InfoHint from './InfoHint'
+import { displayLabel } from '../lib/humanize'
+import type { BookingDeadline } from '../types/agentic'
 
 export interface ScheduledTask {
   id: string
@@ -29,6 +31,7 @@ export interface CallSheetEntry {
 interface RunOfShowCardProps {
   schedule: ScheduleResult | null | undefined
   callSheet: CallSheetEntry[]
+  bookingDeadlines?: BookingDeadline[]
 }
 
 interface DraftTask {
@@ -68,7 +71,7 @@ function formatDate(isoString: string | undefined): string {
   }
 }
 
-export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProps) {
+export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = [] }: RunOfShowCardProps) {
   const taskNamesById = useMemo(() => {
     const entries = (schedule?.ordered_tasks || []).map((task) => [task.id, task.name] as const)
     return new Map(entries)
@@ -92,6 +95,22 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
   useEffect(() => {
     setDraftTasks(sourceTasks)
   }, [sourceTasks])
+
+  function addRow() {
+    const newTask: DraftTask = {
+      id: `draft-${Date.now()}`,
+      name: 'New run-of-show item',
+      start: '',
+      end: '',
+      duration: '1',
+      owner: 'Production',
+      dependencies: '',
+      status: 'Scheduled',
+      notes: '',
+    }
+    setDraftTasks((prev) => [...prev, newTask])
+    setEditing(newTask)
+  }
 
   const tasks = draftTasks
   const criticalPath = schedule?.critical_path || []
@@ -132,6 +151,9 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
           {criticalCount > 0 && (
             <span className="badge badge--critical">{criticalCount} critical</span>
           )}
+          <button className="btn btn--primary btn--sm" type="button" onClick={addRow}>
+            + Add row
+          </button>
         </div>
       </div>
 
@@ -206,6 +228,33 @@ export default function RunOfShowCard({ schedule, callSheet }: RunOfShowCardProp
             ))}
           </>
         )}
+      {bookingDeadlines.length > 0 && (
+        <div className="booking-deadlines">
+          <div className="booking-deadlines__head">
+            <span className="war-panel-title">Vendor booking deadlines</span>
+            <InfoHint text="Book-by dates counted back from the event date using each category's lead time. These are planning deadlines, not day-of schedule rows." />
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Category</th>
+                <th scope="col">Book by</th>
+                <th scope="col">Lead time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bookingDeadlines.map((deadline) => (
+                <tr key={deadline.category}>
+                  <td data-label="Category">{displayLabel(deadline.category)}</td>
+                  <td data-label="Book by" className="mono">{deadline.book_by}</td>
+                  <td data-label="Lead time">{deadline.lead_time_days} days before event</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {editing && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="run-sheet-modal-title">
           <div className="modal-card">
