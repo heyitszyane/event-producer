@@ -9,10 +9,8 @@ import RunOfShowCard, { type ScheduleResult, type CallSheetEntry } from '../comp
 import VendorNotebook from '../components/VendorNotebook'
 import RiskCard, { type RiskFlag } from '../components/RiskCard'
 import ChatPane from '../components/ChatPane'
-import SecurityBeat from '../components/SecurityBeat'
 import ExtractedRequirements from '../components/ExtractedRequirements'
 import AgentMissionControl from '../components/AgentMissionControl'
-import VendorCopyPanel from '../components/VendorCopyPanel'
 import RequirementsConfirmation from '../components/RequirementsConfirmation'
 import NextBestStep from '../components/NextBestStep'
 import InfoHint from '../components/InfoHint'
@@ -48,6 +46,7 @@ import type {
   ResolvedEventState,
   RequirementsPayload,
   NextBestStep as NextBestStepData,
+  BookingDeadline,
 } from '../types/agentic'
 
 // Run-output vendor fixtures (suggestions only; the persistent records live
@@ -91,6 +90,7 @@ export interface RunEventResponse {
   budget_summary?: BudgetSummary
   schedule_result?: ScheduleResult | null
   call_sheet?: CallSheetEntry[]
+  booking_deadlines?: BookingDeadline[]
   vendors?: Vendor[]
   risk_flags?: RiskFlag[]
   run_of_show?: {
@@ -241,6 +241,13 @@ function displayMetaValue(value?: string | number | null): string | null {
   if (value === undefined || value === null || value === '') return null
   const text = String(value).trim()
   return text || null
+}
+
+// Money in the casefile's own currency (ISO code prefix, e.g. "SGD -650").
+function formatMoney(currency: string | undefined, value: number): string {
+  const code = (currency || 'USD').toUpperCase()
+  const sign = value < 0 ? '-' : ''
+  return `${sign}${code} ${Math.abs(value).toLocaleString()}`
 }
 
 function formatEventDate(value?: string | null): string | null {
@@ -415,9 +422,16 @@ export default function Dashboard() {
   // P7B — orchestrator chat state
   const [chatInput, setChatInput] = useState('')
   const [orchestratorProposals, setOrchestratorProposals] = useState<ProposedAction[]>([])
-  const [chatReply, setChatReply] = useState<string | null>(null)
+  // The producer console keeps a running transcript so each answer is logged
+  // alongside the question that produced it, instead of replacing the last one.
+  const [producerThread, setProducerThread] = useState<Array<{
+    id: string
+    prompt: string
+    reply: string
+    modelMode: string | null
+    fallbackReason: string | null
+  }>>([])
   const [chatModelMode, setChatModelMode] = useState<string | null>(null)
-  const [chatFallbackReason, setChatFallbackReason] = useState<string | null>(null)
   const [selectedProducerPrompt, setSelectedProducerPrompt] = useState('')
   const [producerLoading, setProducerLoading] = useState(false)
   const [producerError, setProducerError] = useState<string | null>(null)
@@ -709,7 +723,6 @@ export default function Dashboard() {
   const agentTrace = result?.agent_trace || []
   const chatLog = result?.chat_log || []
   const riskFlags = result?.risk_flags || result?.run_of_show?.risk_flags || []
-  const securityBeat = result?.security_beat
   const resolvedState = result?.resolved_event_state || activeCasefile?.resolved || null
   const resolvedBasics = resolvedState?.basics || basics
   const requirements = activeCasefile?.requirements || result?.requirements || null
@@ -741,11 +754,20 @@ export default function Dashboard() {
         body: JSON.stringify({ message }),
       })
       const data: OrchestratorChatResponse = await res.json()
-      setChatReply(data.reply)
+      setProducerThread((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}`,
+          prompt: message,
+          reply: data.reply,
+          modelMode: data.model_mode,
+          fallbackReason: data.fallback_reason || null,
+        },
+      ])
       setOrchestratorProposals(data.proposals)
       setChatModelMode(data.model_mode)
-      setChatFallbackReason(data.fallback_reason || null)
       setChatInput('')
+      setSelectedProducerPrompt('')
     } catch (err) {
       setProducerError(formatApiError(err))
     } finally {
@@ -804,16 +826,20 @@ export default function Dashboard() {
     }
   }
 
-  // P7B — handle creative suggestion → add to scope
+  // P7B — handle creative suggestion → add to scope. Returns whether the item
+  // was added so the card can show real "Added" feedback instead of theatre.
   async function handleAddToScope(suggestion: {
     title: string
     description: string
     category: string
     estimated_cost?: string | null
     tier?: string
-  }) {
-    if (!result?.event_id) return
-    const cost = suggestion.estimated_cost || '1000'
+  }): Promise<boolean> {
+    if (!result?.event_id) return false
+    // The estimated cost from the creative agent may arrive as "$500" or
+    // "500 SGD"; keep only the number and fall back to a modest default.
+    const parsed = Number(String(suggestion.estimated_cost ?? '').replace(/[^0-9.]/g, ''))
+    const cost = Number.isFinite(parsed) && parsed > 0 ? String(parsed) : '500'
     setProducerError(null)
     try {
       const res = await apiFetch(`/event/${result.event_id}/scope-items`, {
@@ -824,13 +850,16 @@ export default function Dashboard() {
           category: suggestion.category,
           tier: (suggestion.tier as 'must' | 'should' | 'could' | 'wow') || 'could',
           estimated_cost: cost,
+          currency: resolvedBasics.currency,
           qty: '1',
         }),
       })
       const data = await res.json()
       applyMutationPayload(data)
+      return true
     } catch (err) {
       setProducerError(formatApiError(err))
+      return false
     }
   }
 
@@ -877,6 +906,38 @@ export default function Dashboard() {
           <span className="badge badge--info">{orchestratorProposals.length} proposal{orchestratorProposals.length === 1 ? '' : 's'}</span>
         </div>
       </div>
+      {producerThread.length > 0 && (
+        <div className="producer-thread" aria-live="polite">
+          {producerThread.map((turn) => (
+            <div key={turn.id} className="producer-turn">
+              <div className="producer-turn__msg producer-turn__msg--user">
+                <span className="producer-turn__who">You</span>
+                <p>{turn.prompt}</p>
+              </div>
+              <div className="producer-turn__msg producer-turn__msg--agent">
+                <span className="producer-turn__who">AI Producer</span>
+                <p>{turn.reply}</p>
+                {turn.fallbackReason && (
+                  <span className="producer-turn__note">Degraded fallback: {turn.fallbackReason}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <form onSubmit={handleOrchestratorChat} className="ai-producer-form">
+        <textarea
+          value={chatInput}
+          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
+          placeholder="Ask for cuts, premium swaps, vendor additions, or assumption checks"
+          disabled={!result?.event_id || producerLoading}
+          rows={3}
+          className="ai-producer-textarea"
+        />
+        <button type="submit" disabled={!result?.event_id || producerLoading || !chatInput.trim()} className="btn btn--primary">
+          {producerLoading ? 'Thinking...' : 'Ask'}
+        </button>
+      </form>
       <div className="producer-prompt-tools">
         <label className="producer-prompt-select">
           <span>Sample prompt</span>
@@ -900,32 +961,9 @@ export default function Dashboard() {
           Run sample
         </button>
       </div>
-      <form onSubmit={handleOrchestratorChat} className="ai-producer-form">
-        <textarea
-          value={chatInput}
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setChatInput(e.target.value)}
-          placeholder="Ask for cuts, premium swaps, vendor additions, or assumption checks"
-          disabled={!result?.event_id || producerLoading}
-          rows={5}
-          className="ai-producer-textarea"
-        />
-        <button type="submit" disabled={!result?.event_id || producerLoading || !chatInput.trim()} className="btn btn--primary">
-          {producerLoading ? 'Thinking...' : 'Ask'}
-        </button>
-      </form>
       {producerError && (
         <div className="error-bar" role="alert" aria-live="polite">
           {producerError}
-        </div>
-      )}
-      {chatReply && (
-        <div className="block block--info">
-          <strong>Producer reply:</strong> {chatReply}
-        </div>
-      )}
-      {chatFallbackReason && (
-        <div className="block block--warn">
-          Degraded fallback: {chatFallbackReason}
         </div>
       )}
       {orchestratorProposals.length > 0 && (
@@ -938,7 +976,7 @@ export default function Dashboard() {
               </div>
               <p>{p.rationale}</p>
               {p.payload?.estimated_cost !== undefined && p.payload?.estimated_cost !== null && (
-                <p className="muted">Budget impact: ${String(p.payload.estimated_cost)}</p>
+                <p className="muted">Budget impact: {resolvedBasics.currency} {String(p.payload.estimated_cost)}</p>
               )}
               <div className="cluster">
                 {p.requires_approval_gate && <span className="badge badge--approval">approval gate</span>}
@@ -968,12 +1006,10 @@ export default function Dashboard() {
   function renderActiveSection() {
     if (loading) {
       return (
-        <section className="war-panel">
-          <div className="loading-state">
-            <div className="loading-spinner" />
-            <p>Running event production pipeline...</p>
-          </div>
-        </section>
+        <div className="pipeline-loading" role="status" aria-live="polite">
+          <div className="loading-spinner" />
+          <p>Running event production pipeline...</p>
+        </div>
       )
     }
 
@@ -1008,40 +1044,10 @@ export default function Dashboard() {
                   <div><span>Event type</span><strong>{resolvedBasics.event_type ? humanizeValue(resolvedBasics.event_type) : 'Not set'}</strong></div>
                   <div><span>Brief</span><strong>{brief.trim() ? 'Saved' : 'Not saved'}</strong></div>
                 </div>
-                {requirements?.conflicts && requirements.conflicts.length > 0 && (
-                  <div className="block block--warn">
-                    {requirements.conflicts[0].message}
-                  </div>
-                )}
-                {requirements?.missing && requirements.missing.length > 0 && (
-                  <div className="block block--warn">
-                    {requirements.missing[0].message}
-                  </div>
-                )}
               </section>
               <NextBestStep nextStep={nextStep} onNavigate={navigateToTarget} />
             </div>
             <div className="war-stack">
-              <section className="war-panel">
-                <div className="war-panel__header">
-                  <span className="war-panel-title">
-                    Budget and schedule health{' '}
-                    <InfoHint text="Headroom, task count, and pending approvals — computed by the deterministic engines on every run, never by the model." />
-                  </span>
-                  <span className={budgetSummary?.over_budget ? 'badge badge--critical' : budgetSummary ? 'badge badge--ok' : 'badge badge--muted'}>
-                    {budgetSummary?.over_budget ? 'Over budget' : budgetSummary ? 'On track' : 'Awaiting run'}
-                  </span>
-                </div>
-                <table className="data-table overview-basis-table">
-                  <tbody>
-                    <tr><th>Measure</th><th>Status</th></tr>
-                    <tr><td>Headroom</td><td>{headroomNumber !== null ? `${resolvedBasics.currency} ${headroomNumber.toLocaleString()}` : '-'}</td></tr>
-                    <tr><td>Tasks</td><td>{scheduleResult?.ordered_tasks?.length || 0} total, {criticalCount} critical</td></tr>
-                    <tr><td>Approvals</td><td>{pendingApprovalCount} pending</td></tr>
-                  </tbody>
-                </table>
-                {realismWarnings[0] && <div className="block block--warn">{realismWarnings[0]}</div>}
-              </section>
               <section className="war-panel">
                 <div className="war-panel__header">
                   <span className="war-panel-title">
@@ -1070,10 +1076,7 @@ export default function Dashboard() {
                 )}
                 {activeCasefile && (
                   <div className="artifact-storage-hint">
-                    <span>
-                      Stored locally as JSON under{' '}
-                      <code>{storageInfo?.root || '.local_state/event_producer/events'}</code>
-                    </span>
+                    <span>Saved to this casefile.</span>
                     <button
                       type="button"
                       className="btn btn--ghost btn--sm"
@@ -1147,19 +1150,30 @@ export default function Dashboard() {
               items={result?.scope_items || []}
               eventId={result?.event_id}
               budget={result?.budget_summary || null}
+              currency={resolvedBasics.currency}
               onMutation={applyMutationPayload}
             />
           </div>
         )
       case 'budget':
-        return <BudgetCard budget={result?.budget_summary || null} warnings={realismWarnings} />
+        return <BudgetCard budget={result?.budget_summary || null} warnings={realismWarnings} currency={resolvedBasics.currency} />
       case 'run-sheet':
-        return <RunOfShowCard schedule={result?.schedule_result} callSheet={result?.call_sheet || []} />
+        return (
+          <RunOfShowCard
+            schedule={result?.schedule_result}
+            callSheet={result?.call_sheet || []}
+            bookingDeadlines={result?.booking_deadlines || []}
+          />
+        )
       case 'approvals':
         return (
           <div className="war-stack">
-            <ApprovalInbox approvals={approvals} eventId={result?.event_id} defaultExpanded />
-            <SecurityBeat securityBeat={securityBeat || null} />
+            <ApprovalInbox
+              approvals={approvals}
+              eventId={result?.event_id}
+              defaultExpanded
+              vendorDraft={result?.vendor_draft ?? null}
+            />
           </div>
         )
       case 'vendors':
@@ -1171,16 +1185,6 @@ export default function Dashboard() {
               onCasefileChange={applyCasefileState}
               onError={setError}
             />
-            {activeCasefile?.artifacts?.['vendor-copy'] && (
-              <details className="war-panel vendor-legacy-draft">
-                <summary>Casefile-level draft (legacy — new drafts live on each vendor)</summary>
-                <VendorCopyPanel
-                  casefile={activeCasefile}
-                  onCasefileChange={applyCasefileState}
-                  onError={setError}
-                />
-              </details>
-            )}
           </div>
         )
       case 'risks':
@@ -1207,7 +1211,6 @@ export default function Dashboard() {
             </section>
             <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
             <AgentCrewTrace steps={agentTrace} />
-            <SecurityBeat securityBeat={securityBeat || null} />
           </div>
         )
       case 'settings':
@@ -1504,7 +1507,7 @@ export default function Dashboard() {
             <div>
               <label>Budget Headroom</label>
               <span className={budgetSummary?.over_budget ? 'metric-value--red' : 'metric-value--green'}>
-                {headroomNumber !== null ? `$${headroomNumber.toLocaleString()}` : '-'}
+                {headroomNumber !== null ? formatMoney(resolvedBasics.currency, headroomNumber) : '-'}
               </span>
               <small>{budgetSummary ? (budgetSummary.over_budget ? 'over cap' : 'computed') : 'awaiting run'}</small>
             </div>

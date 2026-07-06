@@ -9,6 +9,7 @@ import type {
   CasefileArtifact,
   CasefileState,
   CreativeConcept as CreativeConceptData,
+  CreativeScopeSuggestion,
   ModelModeSummary,
   ScopeStrategy as ScopeStrategyData,
   SpecialistAgentId,
@@ -195,6 +196,16 @@ function ConceptOutput({
   const ideas = concept.creative_ideas ?? []
   const additions = concept.suggested_additions ?? []
   const cuts = concept.suggested_cuts_or_reductions ?? []
+  const [added, setAdded] = useState<Set<string>>(new Set())
+  const [pendingTitle, setPendingTitle] = useState<string | null>(null)
+
+  async function handleAdd(suggestion: CreativeScopeSuggestion) {
+    setPendingTitle(suggestion.title)
+    const ok = await onAddToScope(suggestion)
+    if (ok) setAdded((prev) => new Set(prev).add(suggestion.title))
+    setPendingTitle(null)
+  }
+
   return (
     <div className="mission-output">
       {titles.length > 0 && (
@@ -233,13 +244,18 @@ function ConceptOutput({
                   <TierBadge tier={suggestion.tier} />
                   <span className="chip">{suggestion.category}</span>
                   {suggestion.action_hint === 'add' && (
-                    <button
-                      type="button"
-                      className="btn btn--primary btn--xs"
-                      onClick={() => onAddToScope(suggestion)}
-                    >
-                      Add to scope
-                    </button>
+                    added.has(suggestion.title) ? (
+                      <span className="badge badge--ok">Added to scope</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--xs"
+                        disabled={pendingTitle === suggestion.title}
+                        onClick={() => handleAdd(suggestion)}
+                      >
+                        {pendingTitle === suggestion.title ? 'Adding...' : 'Add to scope'}
+                      </button>
+                    )
                   )}
                 </div>
                 <p>{suggestion.rationale}</p>
@@ -250,7 +266,7 @@ function ConceptOutput({
       )}
       {cuts.length > 0 && (
         <div className="mission-output__group">
-          <span className="mission-output__label">Suggested cuts</span>
+          <span className="mission-output__label">Avoid / reconsider</span>
           <ul className="mission-output__list">
             {cuts.map((suggestion) => (
               <li key={suggestion.title}>
@@ -328,7 +344,7 @@ export interface AgentMissionControlProps {
     category: string
     estimated_cost?: string | null
     tier?: string
-  }) => void
+  }) => Promise<boolean>
 }
 
 export default function AgentMissionControl({

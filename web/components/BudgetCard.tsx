@@ -33,16 +33,20 @@ export interface BudgetSummary {
 interface BudgetCardProps {
   budget: BudgetSummary | null
   warnings?: string[]
+  currency?: string
 }
 
-function formatCurrency(value: string | undefined | null): string {
-  if (value === undefined || value === null) return '$0.00'
-  const num = parseFloat(value)
-  if (isNaN(num)) return '$0.00'
-  const isNegative = num < 0
-  const abs = Math.abs(num)
-  const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return isNegative ? `-$${formatted}` : `$${formatted}`
+function makeFormatCurrency(currency: string) {
+  const code = (currency || 'USD').toUpperCase()
+  return (value: string | number | undefined | null): string => {
+    if (value === undefined || value === null) return `${code} 0.00`
+    const num = typeof value === 'number' ? value : parseFloat(value)
+    if (isNaN(num)) return `${code} 0.00`
+    const isNegative = num < 0
+    const abs = Math.abs(num)
+    const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return isNegative ? `-${code} ${formatted}` : `${code} ${formatted}`
+  }
 }
 
 function formatPercent(value: string | undefined | null): string {
@@ -77,20 +81,22 @@ function BudgetHealthRow({
   max,
   overBy,
   color,
+  format,
 }: {
   label: string
   value: number
   max: number
   overBy?: number
   color?: string
+  format: (value: string | number) => string
 }) {
   const pct = max > 0 ? Math.min(Math.max((value / max) * 100, 0), 100) : 0
   return (
     <div className="budget-health-row">
       <div className="budget-health-row__meta">
         <span>{label}</span>
-        <strong>{formatCurrency(String(value))}</strong>
-        {overBy && overBy > 0 ? <em>OVER BY {formatCurrency(String(overBy))}</em> : null}
+        <strong>{format(value)}</strong>
+        {overBy && overBy > 0 ? <em>OVER BY {format(overBy)}</em> : null}
       </div>
       <div className="budget-health-row__track">
         <div
@@ -112,7 +118,8 @@ const CATEGORY_BAR_COLORS = [
   'var(--status-warn)',
 ]
 
-export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
+export default function BudgetCard({ budget, warnings = [], currency = 'USD' }: BudgetCardProps) {
+  const formatCurrency = makeFormatCurrency(currency)
   if (!budget) {
     return (
       <section className="card" id="budget" aria-labelledby="budget-heading">
@@ -148,6 +155,19 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
     budget.lines.reduce((sum, line) => sum + (numeric(line.qty) * numeric(line.unit_cost)), 0)
   )
   const requestedOverBy = Math.max(fullRequested - budgetCap, 0)
+
+  // Per-tier rollup straight from the reconciled lines: how many items sit in
+  // each priority tier, what they cost, and whether the engine included them.
+  const tierBreakdown = TIER_ORDER.map((tier) => {
+    const lines = budget.lines.filter((line) => line.tier === tier)
+    const total = lines.reduce((sum, line) => sum + numeric(line.qty) * numeric(line.unit_cost), 0)
+    return {
+      tier,
+      count: lines.length,
+      total,
+      included: budget.tier_inclusion?.[tier] ?? false,
+    }
+  }).filter((row) => row.count > 0)
 
   return (
     <section className="card" id="budget" aria-labelledby="budget-heading">
@@ -196,19 +216,21 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
         </div>
 
         <div className="budget-health">
-          <BudgetHealthRow label="Budget Cap" value={budgetCap} max={budgetCap} />
+          <BudgetHealthRow label="Budget Cap" value={budgetCap} max={budgetCap} format={formatCurrency} />
           <BudgetHealthRow
             label={`Contingency reserve (${formatPercent(budget.contingency_pct)})`}
             value={numeric(budget.contingency_reserve)}
             max={budgetCap}
             color="var(--status-warn)"
+            format={formatCurrency}
           />
-          <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} color="var(--status-info)" />
+          <BudgetHealthRow label="Spendable after reserve" value={spendable} max={budgetCap} color="var(--status-info)" format={formatCurrency} />
           <BudgetHealthRow
             label="Included Scope Spend"
             value={selectedSpend}
             max={budgetCap}
             color={selectedSpend > spendable ? 'var(--status-critical)' : 'var(--status-ok)'}
+            format={formatCurrency}
           />
           <BudgetHealthRow
             label="Full Requested Scope"
@@ -216,6 +238,7 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
             max={budgetCap}
             overBy={requestedOverBy}
             color="var(--status-warn)"
+            format={formatCurrency}
           />
         </div>
 
@@ -244,71 +267,45 @@ export default function BudgetCard({ budget, warnings = [] }: BudgetCardProps) {
           </div>
         )}
 
-        {/* Tier inclusion pills */}
-        {Object.keys(budget.tier_inclusion || {}).length > 0 && (
-          <div style={{ marginBottom: 'var(--space-4)' }}>
+        {/* Tier breakdown — what each priority tier costs and whether the
+            budget engine could fit it into the spendable pool. */}
+        {tierBreakdown.length > 0 && (
+          <div style={{ marginBottom: 'var(--space-2)' }}>
             <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Tier Inclusion
             </h3>
-            <div className="cluster" style={{ gap: 'var(--space-2)' }}>
-              {TIER_ORDER.map((tier) => {
-                const included = budget.tier_inclusion[tier]
-                const color = TIER_COLORS[tier] || 'var(--text-tertiary)'
-                return (
-                  <span
-                    key={tier}
-                    className={`tier-pill ${included ? 'tier-pill--included' : ''}`}
-                    style={{
-                      color: included ? color : 'var(--text-tertiary)',
-                      borderColor: included ? color : 'var(--border-subtle)',
-                      background: included ? color.replace(')', ' 0.12)').replace('rgb', 'rgba').replace('#', '') : 'transparent',
-                    }}
-                  >
-                    {TIER_LABELS[tier]}
-                  </span>
-                )
-              })}
-            </div>
+            <table className="data-table budget-tier-table">
+              <thead>
+                <tr>
+                  <th scope="col">Tier</th>
+                  <th scope="col">Items</th>
+                  <th scope="col">Tier total</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tierBreakdown.map((row) => (
+                  <tr key={row.tier}>
+                    <td data-label="Tier">
+                      <span className="tier-dot" style={{ background: TIER_COLORS[row.tier] || 'var(--text-tertiary)' }} aria-hidden="true" />
+                      {TIER_LABELS[row.tier]}
+                    </td>
+                    <td data-label="Items">{row.count}</td>
+                    <td data-label="Tier total">{formatCurrency(row.total)}</td>
+                    <td data-label="Status">
+                      <span className={`badge ${row.included ? 'badge--ok' : 'badge--muted'}`}>
+                        {row.tier === 'must'
+                          ? 'Always included'
+                          : row.included
+                            ? 'Included'
+                            : 'Excluded — over spendable'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
-
-        {/* Variance section (collapsible) */}
-        {budget.variance && (
-          <details style={{ marginTop: 'var(--space-3)' }}>
-            <summary style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer' }}>
-              Variance Details
-            </summary>
-            <div style={{ marginTop: 'var(--space-2)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-2)' }}>
-              <div>
-                <span className="metric__label">Running Burn</span>
-                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {formatCurrency(budget.variance.running_burn)}
-                </div>
-              </div>
-              <div>
-                <span className="metric__label">Projected Over/Under</span>
-                <div style={{
-                  fontSize: 'var(--text-md)',
-                  fontWeight: 700,
-                  color: parseFloat(budget.variance.projected_over_under || '0') < 0 ? 'var(--status-critical)' : 'var(--status-ok)'
-                }}>
-                  {formatCurrency(budget.variance.projected_over_under)}
-                </div>
-              </div>
-              <div>
-                <span className="metric__label">Projected Total</span>
-                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {formatCurrency(budget.variance.projected_total)}
-                </div>
-              </div>
-              <div>
-                <span className="metric__label">Burn Rate</span>
-                <div style={{ fontSize: 'var(--text-md)', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {formatPercent(budget.variance.burn_rate)}
-                </div>
-              </div>
-            </div>
-          </details>
         )}
       </div>
     </section>

@@ -20,7 +20,20 @@ if TYPE_CHECKING:
 
 # ---------------------------------------------------------------------------
 # Scope catalogue — rule-based proposals per event type
+#
+# Every entry carries a sizing rate (``cost_per_attendee``) plus a
+# ``qty_basis`` describing how the line is actually bought:
+#   - per_attendee:      qty = attendee count, unit cost = rate
+#   - flat:              qty = 1, unit cost = rate x attendees (lump sum
+#                        sized to headcount — venues, AV, decor, signage)
+#   - per_25_attendees:  1 unit per 25 pax (staff), unit cost = rate x 25
+#   - per_50_attendees:  1 unit per 50 pax (security/registration desks)
+#
+# Entries with ``selected: False`` are proposed but excluded from the budget
+# until the user opts in (e.g. staffing, which venues often include).
 # ---------------------------------------------------------------------------
+
+_STAFFING_NOTE = "Often included in the venue package — include only if your venue does not provide staff."
 
 _NETWORKING_SCOPE = [
     {
@@ -29,7 +42,7 @@ _NETWORKING_SCOPE = [
         "category": "venue",
         "tier": "must",
         "cost_per_attendee": Decimal("50.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Catering",
@@ -37,7 +50,7 @@ _NETWORKING_SCOPE = [
         "category": "catering",
         "tier": "must",
         "cost_per_attendee": Decimal("35.00"),
-        "currency": "USD",
+        "qty_basis": "per_attendee",
     },
     {
         "name": "AV Equipment",
@@ -45,15 +58,16 @@ _NETWORKING_SCOPE = [
         "category": "av_equipment",
         "tier": "should",
         "cost_per_attendee": Decimal("15.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Event Staffing",
-        "description": "On-site event staff and coordinators",
+        "description": f"On-site event staff and coordinators. {_STAFFING_NOTE}",
         "category": "staffing",
-        "tier": "should",
+        "tier": "could",
         "cost_per_attendee": Decimal("10.00"),
-        "currency": "USD",
+        "qty_basis": "per_25_attendees",
+        "selected": False,
     },
     {
         "name": "Decor and Signage",
@@ -61,7 +75,7 @@ _NETWORKING_SCOPE = [
         "category": "decor",
         "tier": "could",
         "cost_per_attendee": Decimal("8.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
 ]
 
@@ -72,7 +86,7 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "venue",
         "tier": "must",
         "cost_per_attendee": Decimal("75.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Catering",
@@ -80,7 +94,7 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "catering",
         "tier": "must",
         "cost_per_attendee": Decimal("50.00"),
-        "currency": "USD",
+        "qty_basis": "per_attendee",
     },
     {
         "name": "AV Equipment",
@@ -88,7 +102,7 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "av_equipment",
         "tier": "must",
         "cost_per_attendee": Decimal("30.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Stage and Set Design",
@@ -96,15 +110,16 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "staging",
         "tier": "should",
         "cost_per_attendee": Decimal("25.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Event Staffing",
-        "description": "On-site event staff, ushers, and coordinators",
+        "description": f"On-site event staff, ushers, and coordinators. {_STAFFING_NOTE}",
         "category": "staffing",
-        "tier": "should",
+        "tier": "could",
         "cost_per_attendee": Decimal("12.00"),
-        "currency": "USD",
+        "qty_basis": "per_25_attendees",
+        "selected": False,
     },
     {
         "name": "Security",
@@ -112,7 +127,7 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "security",
         "tier": "should",
         "cost_per_attendee": Decimal("10.00"),
-        "currency": "USD",
+        "qty_basis": "per_50_attendees",
     },
     {
         "name": "Decor and Branding",
@@ -120,7 +135,7 @@ _PRODUCT_LAUNCH_SCOPE = [
         "category": "decor",
         "tier": "could",
         "cost_per_attendee": Decimal("15.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
 ]
 
@@ -131,7 +146,7 @@ _CONFERENCE_SCOPE = [
         "category": "venue",
         "tier": "must",
         "cost_per_attendee": Decimal("60.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Catering",
@@ -139,7 +154,7 @@ _CONFERENCE_SCOPE = [
         "category": "catering",
         "tier": "must",
         "cost_per_attendee": Decimal("40.00"),
-        "currency": "USD",
+        "qty_basis": "per_attendee",
     },
     {
         "name": "AV Equipment",
@@ -147,15 +162,16 @@ _CONFERENCE_SCOPE = [
         "category": "av_equipment",
         "tier": "must",
         "cost_per_attendee": Decimal("20.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Event Staffing",
-        "description": "Registration desk, room monitors, and coordinators",
+        "description": f"Registration desk, room monitors, and coordinators. {_STAFFING_NOTE}",
         "category": "staffing",
-        "tier": "should",
+        "tier": "could",
         "cost_per_attendee": Decimal("10.00"),
-        "currency": "USD",
+        "qty_basis": "per_25_attendees",
+        "selected": False,
     },
     {
         "name": "Registration System",
@@ -163,7 +179,7 @@ _CONFERENCE_SCOPE = [
         "category": "registration",
         "tier": "should",
         "cost_per_attendee": Decimal("5.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Signage and Wayfinding",
@@ -171,7 +187,7 @@ _CONFERENCE_SCOPE = [
         "category": "signage",
         "tier": "could",
         "cost_per_attendee": Decimal("4.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
 ]
 
@@ -182,7 +198,7 @@ _CORPORATE_SCOPE = [
         "category": "venue",
         "tier": "must",
         "cost_per_attendee": Decimal("50.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Catering",
@@ -190,7 +206,7 @@ _CORPORATE_SCOPE = [
         "category": "catering",
         "tier": "must",
         "cost_per_attendee": Decimal("35.00"),
-        "currency": "USD",
+        "qty_basis": "per_attendee",
     },
     {
         "name": "Registration Check-In",
@@ -198,7 +214,7 @@ _CORPORATE_SCOPE = [
         "category": "registration",
         "tier": "must",
         "cost_per_attendee": Decimal("12.00"),
-        "currency": "USD",
+        "qty_basis": "per_50_attendees",
     },
     {
         "name": "AV Equipment",
@@ -206,15 +222,16 @@ _CORPORATE_SCOPE = [
         "category": "av_equipment",
         "tier": "should",
         "cost_per_attendee": Decimal("15.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
     {
         "name": "Event Staffing",
-        "description": "On-site event staff and coordinators",
+        "description": f"On-site event staff and coordinators. {_STAFFING_NOTE}",
         "category": "staffing",
-        "tier": "should",
+        "tier": "could",
         "cost_per_attendee": Decimal("10.00"),
-        "currency": "USD",
+        "qty_basis": "per_25_attendees",
+        "selected": False,
     },
     {
         "name": "Decor and Signage",
@@ -222,7 +239,7 @@ _CORPORATE_SCOPE = [
         "category": "decor",
         "tier": "could",
         "cost_per_attendee": Decimal("8.00"),
-        "currency": "USD",
+        "qty_basis": "flat",
     },
 ]
 
@@ -275,6 +292,7 @@ class BriefScopeReasonAgent:
         event_type: str = request.get("event_type", "")
         venue_type: str = request.get("venue_type", "")
         date: str = request.get("date", "")
+        currency: str = request.get("currency") or "USD"
 
         # --- Build raw EventSpec ---
         event_spec: dict = self._build_event_spec(
@@ -290,6 +308,7 @@ class BriefScopeReasonAgent:
             brief=brief,
             event_type=event_type,
             attendees=attendees,
+            currency=currency,
         )
 
         return {
@@ -363,16 +382,36 @@ class BriefScopeReasonAgent:
             "missing_fields": missing_fields,
         }
 
+    @staticmethod
+    def _qty_and_unit_cost(
+        qty_basis: str, rate: Decimal, attendees: int
+    ) -> tuple[Decimal, Decimal]:
+        """Resolve (qty, unit_cost) from a sizing rate and quantity basis."""
+        pax = max(attendees, 1)
+        if qty_basis == "per_attendee":
+            return Decimal(str(pax)), rate
+        if qty_basis == "per_25_attendees":
+            units = -(-pax // 25)  # ceil division
+            return Decimal(str(units)), (rate * Decimal("25")).quantize(Decimal("0.01"))
+        if qty_basis == "per_50_attendees":
+            units = -(-pax // 50)
+            return Decimal(str(units)), (rate * Decimal("50")).quantize(Decimal("0.01"))
+        # flat: one lump-sum line sized to the headcount
+        return Decimal("1"), (rate * Decimal(str(pax))).quantize(Decimal("0.01"))
+
     def _propose_scope_items(
         self,
         brief: str,
         event_type: str,
         attendees: int,
+        currency: str = "USD",
     ) -> list[dict]:
         """Propose scope items based on event type and attendee count.
 
-        Uses a rule-based approach: selects a scope catalogue by event_type
-        and scales estimated costs by attendee count.
+        Uses a rule-based approach: selects a scope catalogue by event_type,
+        then sizes each line by its quantity basis — per-attendee lines scale
+        with headcount, flat lines become a single lump sum, and staffing
+        lines become whole staff units.
 
         Returns a list of raw ScopeItem dicts.
         """
@@ -380,15 +419,20 @@ class BriefScopeReasonAgent:
         scope_items: list[dict] = []
 
         for entry in catalogue:
+            qty, unit_cost = self._qty_and_unit_cost(
+                str(entry.get("qty_basis", "flat")),
+                entry["cost_per_attendee"],
+                attendees,
+            )
             scope_items.append({
                 "name": entry["name"],
                 "description": entry["description"],
                 "category": entry["category"],
                 "tier": entry["tier"],
-                "estimated_cost": entry["cost_per_attendee"],
-                "currency": entry["currency"],
-                "qty": Decimal(str(attendees)),
-                "selected": True,
+                "estimated_cost": unit_cost,
+                "currency": currency,
+                "qty": qty,
+                "selected": bool(entry.get("selected", True)),
             })
 
         brief_low = brief.lower()
@@ -406,7 +450,7 @@ class BriefScopeReasonAgent:
                 "category": "catering",
                 "tier": "must",
                 "estimated_cost": Decimal("65.00"),
-                "currency": "USD",
+                "currency": currency,
                 "qty": Decimal(str(attendees)),
                 "selected": True,
             })

@@ -28,6 +28,7 @@ interface ScopeCardProps {
   items: ScopeItem[]
   eventId?: string
   budget?: BudgetSummary | null
+  currency?: string
   onMutation?: (result: ScopeMutationResult) => void
 }
 
@@ -83,16 +84,16 @@ export default function ScopeCard({
   items,
   eventId,
   budget,
+  currency = 'USD',
   onMutation,
 }: ScopeCardProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [addItem, setAddItem] = useState<ItemForm>(blankForm)
+  // Edit happens in a focused modal instead of exploding the table row.
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editItem, setEditItem] = useState<ItemForm>(blankForm)
-  const [inlineEdit, setInlineEdit] = useState<{ idx: number; field: 'name' | 'category'; value: string } | null>(null)
-  const [feedback, setFeedback] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
 
   function budgetStatus(item: ScopeItem): BudgetRowStatus {
@@ -109,12 +110,6 @@ export default function ScopeCard({
       const res = await apiFetch(url, init)
       const data: ScopeMutationResult = await res.json()
       onMutation?.(data)
-      setFeedback(
-        data.recompute_notice?.message ||
-        (data.recompute_notice?.schedule_status === 'warning'
-          ? 'Budget recalculated. Schedule warning: new item not yet scheduled.'
-          : 'Budget recalculated. Schedule recomputed.')
-      )
       setDeleteConfirm(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -136,8 +131,8 @@ export default function ScopeCard({
     if (!eventId || !addItem.name.trim() || !addItem.estimated_cost.trim()) return
     try {
       await mutate(`/event/${eventId}/scope-items`, {
-      method: 'POST',
-      body: JSON.stringify(addItem),
+        method: 'POST',
+        body: JSON.stringify({ ...addItem, currency }),
       })
       setShowAddForm(false)
       setAddItem(blankForm)
@@ -146,35 +141,17 @@ export default function ScopeCard({
     }
   }
 
-  async function saveEdit(idx: number) {
-    if (!eventId || !editItem.name.trim() || !editItem.estimated_cost.trim()) return
+  async function saveEdit() {
+    if (editingIndex === null || !eventId || !editItem.name.trim() || !editItem.estimated_cost.trim()) return
     try {
-      await mutate(`/event/${eventId}/scope-items/${idx}`, {
-      method: 'PATCH',
-      body: JSON.stringify(editItem),
+      await mutate(`/event/${eventId}/scope-items/${editingIndex}`, {
+        method: 'PATCH',
+        body: JSON.stringify(editItem),
       })
       setEditingIndex(null)
       setEditItem(blankForm)
     } catch {
-      // Keep the edit form open on failure.
-    }
-  }
-
-  async function saveInlineEdit() {
-    if (!inlineEdit) return
-    const current = items[inlineEdit.idx]
-    if (!current) return
-    try {
-      await mutate(`/event/${eventId}/scope-items/${inlineEdit.idx}`, {
-      method: 'PATCH',
-      body: JSON.stringify({
-        ...formFromItem(current),
-        [inlineEdit.field]: inlineEdit.value,
-      }),
-      })
-      setInlineEdit(null)
-    } catch {
-      // Keep the inline editor open on failure.
+      // Keep the edit modal open on failure.
     }
   }
 
@@ -201,7 +178,7 @@ export default function ScopeCard({
   }
 
   const form = (state: ItemForm, setState: (patch: Partial<ItemForm>) => void) => (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 'var(--space-2)' }}>
+    <div className="scope-form-grid">
       <label className="field-compact">
         <span>Name</span>
         <input className="input" value={state.name} onChange={(e) => setState({ name: e.target.value })} placeholder="Vendor/service name" />
@@ -218,10 +195,10 @@ export default function ScopeCard({
       </label>
       <label className="field-compact">
         <span>Quantity</span>
-        <input className="input" value={state.qty} onChange={(e) => setState({ qty: e.target.value })} placeholder="100" />
+        <input className="input" value={state.qty} onChange={(e) => setState({ qty: e.target.value })} placeholder="1" />
       </label>
       <label className="field-compact">
-        <span>Unit cost</span>
+        <span>Unit cost ({currency})</span>
         <input className="input" value={state.estimated_cost} onChange={(e) => setState({ estimated_cost: e.target.value })} placeholder="65" />
       </label>
     </div>
@@ -243,7 +220,6 @@ export default function ScopeCard({
       </div>
 
       {error && <div className="error-bar" role="alert">{error}</div>}
-      {feedback && <div className="block block--info" aria-live="polite">{feedback}</div>}
       {budget && Object.values(budget.tier_inclusion || {}).some((included) => !included) && (
         <div className="block block--warn" aria-live="polite">
           Tier gating is all-or-nothing per tier: the budget engine includes Essential items first,
@@ -272,11 +248,11 @@ export default function ScopeCard({
         <table className="data-table">
           <thead>
             <tr>
-          <th scope="col">Item</th>
-          <th scope="col">Category</th>
-          <th scope="col">Tier</th>
-          <th scope="col">Qty</th>
-          <th scope="col">Unit cost</th>
+              <th scope="col">Item</th>
+              <th scope="col">Category</th>
+              <th scope="col">Tier</th>
+              <th scope="col">Qty</th>
+              <th scope="col">Unit cost</th>
               <th scope="col">Total</th>
               <th scope="col">Actions</th>
             </tr>
@@ -284,131 +260,102 @@ export default function ScopeCard({
           <tbody>
             {items.map((item, idx) => (
               <tr key={`${item.name}-${idx}`}>
-                {editingIndex === idx ? (
-                  <td colSpan={7} data-label="Edit">
-                    {form(editItem, updateEdit)}
-                    <div style={{ marginTop: 'var(--space-2)', display: 'flex', gap: 'var(--space-2)' }}>
-                      <button className="btn btn--primary btn--sm" disabled={loading} onClick={() => saveEdit(idx)} type="button">Save</button>
-                      <button className="btn btn--ghost btn--sm" onClick={() => setEditingIndex(null)} type="button">Cancel</button>
+                <td data-label="Item">{item.name}</td>
+                <td data-label="Category">{displayLabel(item.category)}</td>
+                <td data-label="Tier">
+                  <select
+                    value={item.tier}
+                    onChange={(e) => changeTier(idx, e.target.value as ScopeItem['tier'])}
+                    disabled={loading}
+                    className="select select--compact"
+                    aria-label={`Change tier for ${item.name}`}
+                  >
+                    {TIER_OPTIONS.map((tier) => <option key={tier} value={tier}>{TIER_COPY[tier].label}</option>)}
+                  </select>
+                  <div className="muted tier-helper">{TIER_COPY[item.tier].helper}</div>
+                  {budget && (
+                    <div className={`tier-helper scope-budget-status scope-budget-status--${budgetStatus(item)}`}>
+                      {BUDGET_STATUS_COPY[budgetStatus(item)]}
                     </div>
-                  </td>
-                ) : (
-                  <>
-                    <td data-label="Item">
-                      {inlineEdit?.idx === idx && inlineEdit.field === 'name' ? (
-                        <input
-                          className="input input--inline"
-                          value={inlineEdit.value}
-                          autoFocus
-                          onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                          onBlur={saveInlineEdit}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveInlineEdit()
-                            if (e.key === 'Escape') setInlineEdit(null)
-                          }}
-                        />
-                      ) : (
-                        <button className="inline-edit-button" type="button" onClick={() => setInlineEdit({ idx, field: 'name', value: item.name })}>
-                          {item.name}
-                        </button>
-                      )}
-                    </td>
-                    <td data-label="Category">
-                      {inlineEdit?.idx === idx && inlineEdit.field === 'category' ? (
-                        <input
-                          className="input input--inline"
-                          value={inlineEdit.value}
-                          autoFocus
-                          onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                          onBlur={saveInlineEdit}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveInlineEdit()
-                            if (e.key === 'Escape') setInlineEdit(null)
-                          }}
-                        />
-                      ) : (
-                        <button className="inline-edit-button" type="button" onClick={() => setInlineEdit({ idx, field: 'category', value: item.category })}>
-                          {displayLabel(item.category)}
-                        </button>
-                      )}
-                    </td>
-                    <td data-label="Tier">
-                      <select
-                        value={item.tier}
-                        onChange={(e) => changeTier(idx, e.target.value as ScopeItem['tier'])}
-                        disabled={loading}
-                        className="select select--compact"
-                        aria-label={`Change tier for ${item.name}`}
-                      >
-                        {TIER_OPTIONS.map((tier) => <option key={tier} value={tier}>{TIER_COPY[tier].label}</option>)}
-                      </select>
-                      <div className="muted tier-helper">{TIER_COPY[item.tier].helper}</div>
-                      {budget && (
-                        <div className={`tier-helper scope-budget-status scope-budget-status--${budgetStatus(item)}`}>
-                          {BUDGET_STATUS_COPY[budgetStatus(item)]}
-                        </div>
-                      )}
-                    </td>
-                    <td data-label="Qty">{String(item.qty)}</td>
-                    <td data-label="Unit cost">{item.currency} {String(item.estimated_cost)}</td>
-                    <td data-label="Total">
-                      {item.currency} {(Number(item.qty || 0) * Number(item.estimated_cost || 0)).toLocaleString()}
-                    </td>
-                    <td data-label="Actions">
-                      <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                  )}
+                </td>
+                <td data-label="Qty">{String(item.qty)}</td>
+                <td data-label="Unit cost">{item.currency} {String(item.estimated_cost)}</td>
+                <td data-label="Total">
+                  {item.currency} {(Number(item.qty || 0) * Number(item.estimated_cost || 0)).toLocaleString()}
+                </td>
+                <td data-label="Actions">
+                  <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => {
+                        setEditingIndex(idx)
+                        setEditItem(formFromItem(item))
+                      }}
+                      disabled={loading}
+                      className="btn btn--ghost btn--sm"
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                    {deleteConfirm === idx ? (
+                      <span className="confirm-inline">
+                        <span>Delete?</span>
                         <button
-                          onClick={() => {
-                            setEditingIndex(idx)
-                            setEditItem(formFromItem(item))
-                          }}
+                          onClick={() => deleteItem(idx)}
                           disabled={loading}
+                          className="btn btn--reject btn--sm"
+                          type="button"
+                          aria-label={`Confirm delete scope item: ${item.name}`}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirm(null)}
                           className="btn btn--ghost btn--sm"
                           type="button"
                         >
-                          Edit
+                          Cancel
                         </button>
-                        {deleteConfirm === idx ? (
-                          <span className="confirm-inline">
-                            <span>Delete?</span>
-                            <button
-                              onClick={() => deleteItem(idx)}
-                              disabled={loading}
-                              className="btn btn--reject btn--sm"
-                              type="button"
-                              aria-label={`Confirm delete scope item: ${item.name}`}
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirm(null)}
-                              className="btn btn--ghost btn--sm"
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => setDeleteConfirm(idx)}
-                            disabled={loading}
-                            className="btn btn--ghost btn--sm"
-                            type="button"
-                            aria-label={`Delete scope item: ${item.name}`}
-                          >
-                            Delete
-                          </button>
-                        )}
-                        <button onClick={() => toggleItem(idx)} disabled={loading} className="btn btn--ghost btn--sm" type="button">
-                          {item.selected ? 'Exclude' : 'Include'}
-                        </button>
-                      </div>
-                    </td>
-                  </>
-                )}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirm(idx)}
+                        disabled={loading}
+                        className="btn btn--ghost btn--sm"
+                        type="button"
+                        aria-label={`Delete scope item: ${item.name}`}
+                      >
+                        Delete
+                      </button>
+                    )}
+                    <button onClick={() => toggleItem(idx)} disabled={loading} className="btn btn--ghost btn--sm" type="button">
+                      {item.selected ? 'Exclude' : 'Include'}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {editingIndex !== null && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="scope-modal-title">
+          <div className="modal-card">
+            <div className="war-panel__header">
+              <h2 id="scope-modal-title">Edit scope item</h2>
+            </div>
+            {form(editItem, updateEdit)}
+            <div className="cluster" style={{ marginTop: 'var(--space-3)' }}>
+              <button className="btn btn--primary" type="button" disabled={loading} onClick={saveEdit}>
+                {loading ? 'Saving...' : 'Save'}
+              </button>
+              <button className="btn btn--ghost" type="button" onClick={() => setEditingIndex(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   )
