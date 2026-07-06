@@ -74,6 +74,10 @@ const PROMPT_CHIPS = [
   'Confirm deposit, final balance, and payment deadline',
 ]
 
+// The activity log is append-only and can grow without bound, so it collapses
+// to the most recent entries with an opt-in "show all".
+const LOG_PREVIEW_COUNT = 4
+
 interface SuggestedVendor {
   name: string
   category: string
@@ -128,6 +132,7 @@ export default function VendorNotebook({
 
   const [logInput, setLogInput] = useState('')
   const [logType, setLogType] = useState<'vendor_response_logged' | 'note'>('vendor_response_logged')
+  const [logExpanded, setLogExpanded] = useState(false)
 
   const [profileForm, setProfileForm] = useState<Partial<VendorRecord>>({})
   const [profileOpen, setProfileOpen] = useState(false)
@@ -135,6 +140,12 @@ export default function VendorNotebook({
   const selected = useMemo(
     () => vendors.find((vendor) => vendor.id === selectedId) || null,
     [vendors, selectedId],
+  )
+
+  // Newest-first; the render slices this to a preview unless expanded.
+  const logEntries = useMemo(
+    () => (selected ? [...selected.log].reverse() : []),
+    [selected],
   )
 
   useEffect(() => {
@@ -170,6 +181,7 @@ export default function VendorNotebook({
     setDraftBody(selected?.draft?.body || '')
     setDraftDirty(false)
     setProfileForm(selected ? profileFromVendor(selected) : {})
+    setLogExpanded(false)
   }, [selectedId, selected])
 
   function profileFromVendor(vendor: VendorRecord): Partial<VendorRecord> {
@@ -261,13 +273,6 @@ export default function VendorNotebook({
     if (!eventId || !selected) return
     await withBusy(async () => {
       applyVendor(await updateVendor(eventId, selected.id, { payment_status: status }))
-    })
-  }
-
-  async function handleMarkSettled() {
-    if (!eventId || !selected) return
-    await withBusy(async () => {
-      applyVendor(await updateVendor(eventId, selected.id, { workflow_status: 'settled' }))
     })
   }
 
@@ -365,61 +370,6 @@ export default function VendorNotebook({
       {casefile && (
         <div className="vendor-notebook__layout">
           <div className="vendor-notebook__list">
-            <div className="cluster">
-              <button type="button" className="btn btn--primary btn--sm" onClick={() => setAdding(true)} disabled={busy}>
-                Add vendor
-              </button>
-              {showImport && (
-                <button type="button" className="btn btn--ghost btn--sm" onClick={handleImportSuggestions} disabled={busy}>
-                  Import {suggestedVendors.length} suggested (run fixtures)
-                </button>
-              )}
-            </div>
-
-            {adding && (
-              <div className="vendor-notebook__add">
-                <label className="field-compact">
-                  <span>Vendor name</span>
-                  <input
-                    className="input"
-                    value={addForm.name}
-                    onChange={(event) => setAddForm((current) => ({ ...current, name: event.target.value }))}
-                    placeholder="Loft Venue Co"
-                    autoFocus
-                  />
-                </label>
-                <label className="field-compact">
-                  <span>Category</span>
-                  <select
-                    className="input"
-                    value={addForm.category}
-                    onChange={(event) => setAddForm((current) => ({ ...current, category: event.target.value }))}
-                  >
-                    {CATEGORIES.map((category) => (
-                      <option key={category} value={category}>{displayLabel(category)}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field-compact">
-                  <span>Contact name</span>
-                  <input
-                    className="input"
-                    value={addForm.contact_name}
-                    onChange={(event) => setAddForm((current) => ({ ...current, contact_name: event.target.value }))}
-                    placeholder="Dana"
-                  />
-                </label>
-                <div className="cluster">
-                  <button type="button" className="btn btn--primary btn--sm" onClick={handleAddVendor} disabled={busy || !addForm.name.trim()}>
-                    Save vendor
-                  </button>
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAdding(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
             {vendors.length === 0 && !adding && (
               <div className="empty-state">
                 No vendors yet. Add the venue, caterer, and AV supplier you are talking to —
@@ -480,6 +430,61 @@ export default function VendorNotebook({
                 </div>
               )
             })}
+
+            <div className="cluster vendor-notebook__add-actions">
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => setAdding(true)} disabled={busy}>
+                Add vendor
+              </button>
+              {showImport && (
+                <button type="button" className="btn btn--ghost btn--sm" onClick={handleImportSuggestions} disabled={busy}>
+                  Import {suggestedVendors.length} suggested (run fixtures)
+                </button>
+              )}
+            </div>
+
+            {adding && (
+              <div className="vendor-notebook__add">
+                <label className="field-compact">
+                  <span>Vendor name</span>
+                  <input
+                    className="input"
+                    value={addForm.name}
+                    onChange={(event) => setAddForm((current) => ({ ...current, name: event.target.value }))}
+                    placeholder="Loft Venue Co"
+                    autoFocus
+                  />
+                </label>
+                <label className="field-compact">
+                  <span>Category</span>
+                  <select
+                    className="input"
+                    value={addForm.category}
+                    onChange={(event) => setAddForm((current) => ({ ...current, category: event.target.value }))}
+                  >
+                    {CATEGORIES.map((category) => (
+                      <option key={category} value={category}>{displayLabel(category)}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field-compact">
+                  <span>Contact name</span>
+                  <input
+                    className="input"
+                    value={addForm.contact_name}
+                    onChange={(event) => setAddForm((current) => ({ ...current, contact_name: event.target.value }))}
+                    placeholder="Dana"
+                  />
+                </label>
+                <div className="cluster">
+                  <button type="button" className="btn btn--primary btn--sm" onClick={handleAddVendor} disabled={busy || !addForm.name.trim()}>
+                    Save vendor
+                  </button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setAdding(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="vendor-notebook__workspace">
@@ -522,9 +527,6 @@ export default function VendorNotebook({
                     </button>
                     <button type="button" className="btn btn--ghost btn--xs" onClick={() => handleQuickPayment('paid_in_full')} disabled={busy}>
                       Mark paid in full
-                    </button>
-                    <button type="button" className="btn btn--ghost btn--xs" onClick={handleMarkSettled} disabled={busy || Boolean(selected.settled_at)}>
-                      {selected.settled_at ? 'Settled' : 'Mark settled'}
                     </button>
                     <button type="button" className="btn btn--ghost btn--xs" onClick={() => openProfile(selected)} disabled={busy}>
                       Edit details
@@ -648,27 +650,38 @@ export default function VendorNotebook({
                       </button>
                     </div>
                   </div>
-                  {selected.log.length === 0 ? (
+                  {logEntries.length === 0 ? (
                     <p className="small">Nothing logged yet.</p>
                   ) : (
-                    <ul className="vendor-notebook__entries">
-                      {[...selected.log].reverse().map((entry) => (
-                        <li key={entry.id}>
-                          <div className="vendor-notebook__entry-line">
-                            <span className="badge badge--muted">{displayLabel(entry.type)}</span>
-                            {entry.actor === 'agent' && <span className="badge badge--info">agent</span>}
-                            {entry.injection_flags.length > 0 && (
-                              <span className="badge badge--critical" title={`Withheld from agent prompts. Flags: ${entry.injection_flags.join(', ')}`}>
-                                injection-flagged
-                              </span>
-                            )}
-                            <span className="small">{timestampLabel(entry.timestamp)}</span>
-                          </div>
-                          <p className="vendor-notebook__entry-title">{entry.title}</p>
-                          {entry.body && <p className="small vendor-notebook__entry-body">{entry.body}</p>}
-                        </li>
-                      ))}
-                    </ul>
+                    <>
+                      <ul className="vendor-notebook__entries">
+                        {(logExpanded ? logEntries : logEntries.slice(0, LOG_PREVIEW_COUNT)).map((entry) => (
+                          <li key={entry.id}>
+                            <div className="vendor-notebook__entry-line">
+                              <span className="badge badge--muted">{displayLabel(entry.type)}</span>
+                              {entry.actor === 'agent' && <span className="badge badge--info">agent</span>}
+                              {entry.injection_flags.length > 0 && (
+                                <span className="badge badge--critical" title={`Withheld from agent prompts. Flags: ${entry.injection_flags.join(', ')}`}>
+                                  injection-flagged
+                                </span>
+                              )}
+                              <span className="small">{timestampLabel(entry.timestamp)}</span>
+                            </div>
+                            <p className="vendor-notebook__entry-title">{entry.title}</p>
+                            {entry.body && <p className="small vendor-notebook__entry-body">{entry.body}</p>}
+                          </li>
+                        ))}
+                      </ul>
+                      {logEntries.length > LOG_PREVIEW_COUNT && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm vendor-notebook__log-toggle"
+                          onClick={() => setLogExpanded((value) => !value)}
+                        >
+                          {logExpanded ? 'Show less' : `Show all ${logEntries.length} entries`}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </>

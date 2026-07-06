@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### P7R — Post-P7Q screenshot refinements
+
+- **Budget counts every selected item.** The Scope page no longer silently
+  drops whole discretionary tiers. Each included item counts toward headroom
+  (which can go negative to honestly flag over-budget), and Include/Exclude is
+  the only gate. The engine keeps its greedy tier-gating as a new, explicit
+  **Auto-fit to budget** action (`POST /event/{id}/scope-items/auto-fit`).
+  `compute_budget` gained `gate_discretionary_tiers` (default `True` preserves
+  the engine's fit capability; the app calls it with `False`). Zero-sum
+  reconciliation is unchanged.
+- **Committed demo casefiles.** Two reference events (LA product launch in USD,
+  Singapore founder networking night in SGD) ship in `event_producer/seeds/`
+  and materialize via idempotent `POST /casefiles/seed` — the **Seed Demo**
+  button and `scripts/seed_demo.py`. A fresh clone now has populated events to
+  explore even though `.local_state/` is gitignored.
+- **Casefile UX.** Removed the redundant "Open Brief Intake" button; "New
+  Casefile" → prominent **New Event**; the generate button reads **Save &
+  regenerate current event**. The editable page title now persists to the
+  casefile (previously ephemeral), and the redundant "Working title" field was
+  removed with "Event type" taking its place.
+- **Actionable metrics.** Budget Headroom (→ Budget), Schedule Tasks (→ Run
+  Sheet), and Approvals (→ Approvals) are now keyboard-accessible links with
+  "i" hints. "Tasks / N critical" was reworded to "Schedule Tasks / N on
+  critical path" to stop reading as unresolved issues, and Budget Headroom now
+  shows the contingency reserve inline.
+- **Scope / vendor / audit polish.** Scope status copy moved into an "i" hint;
+  Delete buttons are red and Include/Exclude are color-coded. The Vendor
+  Notebook's Add-vendor control moved below the vendor chips, the redundant
+  "Mark settled" quick button was removed (the Workflow selector still has it),
+  and the activity log collapses to the latest entries with an opt-in "show
+  all". The Audit Log production log renders as one panel instead of nested
+  boxes.
+
 ### P7Q — Post-P7P UI/behavior refinements
 
 - Currency truth end-to-end: the casefile currency now threads through scope

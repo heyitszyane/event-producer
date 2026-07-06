@@ -2782,6 +2782,57 @@ a:hover {
   color: var(--text-tertiary, #777);
 }
 
+/* P7R — count-all scope buttons, clickable metrics, flattened production log. */
+.war-room .btn--warn {
+  color: var(--war-accent);
+  border-color: var(--war-accent);
+  box-shadow: 2px 2px 0 var(--war-accent);
+  background: var(--paper);
+}
+
+.btn--warn {
+  background: var(--status-warn);
+  color: var(--text-inverse);
+}
+
+.war-metrics .war-metric--link {
+  cursor: pointer;
+}
+
+.war-metrics .war-metric--link:hover {
+  background: rgba(245, 241, 231, 1);
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+
+.war-metrics .war-metric--link:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+/* Flatten the production log into one panel instead of nested boxes. */
+.production-log .chat-box,
+.production-log .chat-messages {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.production-log .chat-messages {
+  padding: 0;
+  margin-bottom: 0;
+  max-height: 340px;
+}
+
+.vendor-notebook__add-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+
+.vendor-notebook__log-toggle {
+  margin-top: 8px;
+}
+
 /* P7N — Requirements confirmation compact bar. */
 .requirements-actions__hint {
   flex: 1;

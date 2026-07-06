@@ -16,6 +16,7 @@ import urllib.error
 API_BASE = "http://localhost:8080"
 
 RUN_ENDPOINT = f"{API_BASE}/run"
+SEED_CASEFILES_ENDPOINT = f"{API_BASE}/casefiles/seed"
 
 PAYLOAD = {
     "brief": "1-night networking event for tech professionals",
@@ -100,7 +101,35 @@ def print_summary(result: dict) -> None:
         print(f"pending approvals: {len(approvals)}")
 
 
+def seed_reference_casefiles() -> dict:
+    """POST to /casefiles/seed to materialize the two committed demo casefiles."""
+    req = urllib.request.Request(
+        SEED_CASEFILES_ENDPOINT,
+        data=b"",
+        headers=HEADERS,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        print(f"HTTP error {exc.code}: {body}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError:
+        print(f"Cannot connect to the API server at {API_BASE}.", file=sys.stderr)
+        print("Please start the server first:", file=sys.stderr)
+        print("    python -m event_producer.main", file=sys.stderr)
+        print("Or: uvicorn event_producer.api:create_app --factory --port 8080", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
+    print("Seeding reference casefiles via POST /casefiles/seed ...")
+    seeded = seed_reference_casefiles()
+    for event_id in seeded.get("seeded_ids", []):
+        print(f"  - {event_id}")
+    print()
     print("Seeding demo event via POST /run ...")
     result = seed_demo_event()
     print()

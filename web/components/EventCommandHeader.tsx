@@ -53,6 +53,7 @@ export default function EventCommandHeader({
             <span className="war-eyebrow">Event Basics</span>
             <p className="event-constraints__sub">
               Saved casefile fields are the source of truth for the production crew.
+              Set the event title in the page header above.
             </p>
           </div>
         </div>
@@ -62,14 +63,17 @@ export default function EventCommandHeader({
         <form onSubmit={onRun} className="event-constraints__form">
           <div className="event-constraints__grid">
             <label className="event-field">
-              <span>Working title</span>
-              <input
-                type="text"
-                value={basics.working_title}
-                onChange={(e) => update('working_title', e.target.value)}
-                placeholder="AI Industry Networking Night"
-                className="input"
-              />
+              <span>Event type</span>
+              <select
+                value={basics.event_type}
+                onChange={(e) => update('event_type', e.target.value)}
+                className="select"
+              >
+                <option value="">Not set</option>
+                {EVENT_TYPES.map((eventType) => (
+                  <option key={eventType.value} value={eventType.value}>{eventType.label}</option>
+                ))}
+              </select>
             </label>
 
             <label className="event-field">
@@ -168,20 +172,6 @@ export default function EventCommandHeader({
               />
               {fieldErrors.expectedTurnout && <span className="field-error" role="alert">{fieldErrors.expectedTurnout}</span>}
             </label>
-
-            <label className="event-field">
-              <span>Event type</span>
-              <select
-                value={basics.event_type}
-                onChange={(e) => update('event_type', e.target.value)}
-                className="select"
-              >
-                <option value="">Not set</option>
-                {EVENT_TYPES.map((eventType) => (
-                  <option key={eventType.value} value={eventType.value}>{eventType.label}</option>
-                ))}
-              </select>
-            </label>
           </div>
 
           <label className="event-field event-field--wide">
@@ -206,8 +196,8 @@ export default function EventCommandHeader({
               {loading
                 ? 'Generating...'
                 : hasCasefile
-                ? 'Save casefile and generate first pass'
-                : 'Create casefile and generate first pass'}
+                ? 'Save & regenerate current event'
+                : 'Create event & generate first pass'}
             </button>
           </div>
         </form>

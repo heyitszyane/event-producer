@@ -31,6 +31,18 @@ export async function listCasefiles(): Promise<CasefileSummary[]> {
   return res.json()
 }
 
+export interface SeedCasefilesResult {
+  seeded_ids: string[]
+  casefiles: CasefileSummary[]
+}
+
+// Materialize the two committed demo casefiles (idempotent). Fresh clones use
+// this to get reference events without hand-entering a brief.
+export async function seedCasefiles(): Promise<SeedCasefilesResult> {
+  const res = await apiFetch('/casefiles/seed', { method: 'POST' })
+  return res.json()
+}
+
 export async function getCasefile(eventId: string): Promise<CasefileState> {
   const res = await apiFetch(`/casefiles/${eventId}`)
   return res.json()
