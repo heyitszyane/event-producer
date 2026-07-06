@@ -59,6 +59,10 @@ class BudgetManagerReasonAgent:
         budget_cap = Decimal(str(request["budget_cap"]))
         contingency_pct = Decimal(str(request["contingency_pct"]))
         reporting_currency = request.get("reporting_currency", "USD")
+        # Interactive callers pass gate_discretionary_tiers=False so every
+        # selected item counts and headroom reflects any overrun. The default
+        # stays True to preserve the engine's "fit to budget" capability.
+        gate_discretionary_tiers = bool(request.get("gate_discretionary_tiers", True))
 
         # Convert scope item dicts to BudgetLine objects
         lines: list[BudgetLine] = []
@@ -89,6 +93,7 @@ class BudgetManagerReasonAgent:
             contingency_pct=contingency_pct,
             fx_provider=self._fx_provider,
             reporting_currency=reporting_currency,
+            gate_discretionary_tiers=gate_discretionary_tiers,
         )
 
         # Build human-readable explanation

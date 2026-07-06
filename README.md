@@ -19,7 +19,7 @@ Business**.
 
 **P7H — Live-agentic showcase upgrade** · Branch: `codex/p7h5-structured-output-hardening` · [CHANGELOG](CHANGELOG.md)
 
-- **268 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
+- **340 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
   and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
 - **Messy-brief hero.** The primary product input is a messy event brief; the
   structured fields are optional manual overrides. Placeholder/default values
@@ -98,9 +98,12 @@ Messy event brief
 ## What is implemented
 
 - **Budget Engine** — Pure Python, Decimal arithmetic, deterministic. Budget
-  reconciles to zero (inflows minus outflows minus contingency). Tier-gating
-  (must/should/could/wow). Multi-currency with line-total-first FX rounding.
-  Receipt variance aggregation. 30+ tests.
+  reconciles to zero (inflows minus outflows minus contingency). Every
+  selected scope item counts toward the plan (headroom can go negative to flag
+  over-budget); Include/Exclude is the gate, and the engine's greedy tier
+  allocation (must/should/could/wow) powers the explicit "Auto-fit to budget"
+  action. Multi-currency with line-total-first FX rounding. Receipt variance
+  aggregation. 30+ tests.
 - **CPM Scheduler** — Pure Python, deterministic. Forward/backward pass,
   dependency resolution, lead-time validation, anchor constraints, cycle
   detection, conflict reporting. 25+ tests.
@@ -172,8 +175,12 @@ Messy event brief
   budget/schedule engines remain the source of truth.
 - **Chat / production log** — Messages generated from agent step summaries,
   not from live LLM chat.
-- **Demo seed data** — `scripts/seed_demo.py` runs the networking event
-  pipeline against a running API server.
+- **Demo seed data** — two committed reference casefiles (an LA product launch
+  in USD and a Singapore founder networking night in SGD) ship in
+  `event_producer/seeds/`. Click **Seed Demo** in the app (or run
+  `scripts/seed_demo.py`) to materialize them via `POST /casefiles/seed`;
+  seeding is idempotent and runs the deterministic first pass so a fresh clone
+  has fully populated events to explore.
 
 ## What is a structural seam
 

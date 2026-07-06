@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
+import { useEffect, useState, type FormEvent, type ChangeEvent, type KeyboardEvent } from 'react'
 import Head from 'next/head'
 import EventCommandHeader, { type FieldErrors } from '../components/EventCommandHeader'
 import AgentCrewTrace from '../components/AgentCrewTrace'
@@ -23,6 +23,7 @@ import {
   getStorageInfo,
   listCasefiles,
   runCasefileFirstPass,
+  seedCasefiles,
   updateCasefileBasics,
   updateCasefileBrief,
   type StorageInfo,
@@ -452,6 +453,7 @@ export default function Dashboard() {
   const [providerTesting, setProviderTesting] = useState(false)
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   const [copiedCasefileId, setCopiedCasefileId] = useState(false)
+  const [seeding, setSeeding] = useState(false)
 
   function formatApiError(err: unknown): string {
     if (err instanceof ApiRequestError && err.payload.code === 'LIVE_MODEL_PROVIDER_FAILED') {
@@ -586,6 +588,54 @@ export default function Dashboard() {
     setEventNameOverride('')
     setRecomputeNotice(null)
     navigate('brief')
+  }
+
+  // Materialize the committed demo casefiles (LA + Singapore) and open one so a
+  // fresh clone has real reference events to explore.
+  async function seedDemo() {
+    setSeeding(true)
+    setError(null)
+    try {
+      const data = await seedCasefiles()
+      await refreshCasefiles()
+      const firstId = data.seeded_ids[0]
+      if (firstId) await selectCasefile(firstId)
+      navigate('brief')
+    } catch (err) {
+      setError(formatApiError(err))
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  // The event title is edited on the page hero and is the single source of
+  // truth for the casefile's working title — persist it so it survives reload.
+  async function commitEventName() {
+    setEditingEventName(false)
+    const trimmed = eventNameOverride.trim()
+    setEventNameOverride(trimmed)
+    // Patch only the title so any unsaved brief-form edits are preserved.
+    setBasics((prev) => ({ ...prev, working_title: trimmed }))
+    if (activeCasefile && trimmed && trimmed !== activeCasefile.basics.working_title) {
+      try {
+        const updated = await updateCasefileBasics(activeCasefile.event_id, {
+          ...activeCasefile.basics,
+          working_title: trimmed,
+        })
+        setActiveCasefile(updated)
+        setResult((prev) => prev ? {
+          ...prev,
+          event_id: updated.event_id,
+          casefile: updated,
+          resolved_event_state: updated.resolved,
+          requirements: updated.requirements,
+          next_step: updated.next_step,
+        } : prev)
+        void refreshCasefiles()
+      } catch (err) {
+        setError(formatApiError(err))
+      }
+    }
   }
 
   function applyModelSettings(data: ModelSettings) {
@@ -996,6 +1046,28 @@ export default function Dashboard() {
       )}
     </section>
   ) : null
+
+  // Shared props that turn a metric tile into a keyboard-accessible link to
+  // the route where that number can actually be acted on.
+  function metricNav(section: SectionId, hint: string) {
+    return {
+      role: 'button' as const,
+      tabIndex: 0,
+      className: 'war-metric--link',
+      title: hint,
+      onClick: () => navigate(section),
+      onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          navigate(section)
+        }
+      },
+    }
+  }
+
+  const contingencyDetail = budgetSummary
+    ? `${Number(budgetSummary.contingency_pct)}% contingency ${resolvedBasics.currency} ${Number(budgetSummary.contingency_reserve).toLocaleString()}`
+    : null
 
   function navigateToTarget(target: string) {
     if (WAR_ROOM_SECTIONS.some((section) => section.id === target)) {
@@ -1450,11 +1522,11 @@ export default function Dashboard() {
                   value={eventNameOverride}
                   autoFocus
                   onChange={(e) => setEventNameOverride(e.target.value)}
-                  onBlur={() => setEditingEventName(false)}
+                  onBlur={() => void commitEventName()}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') setEditingEventName(false)
+                    if (e.key === 'Enter') void commitEventName()
                     if (e.key === 'Escape') {
-                      setEventNameOverride('')
+                      setEventNameOverride(activeCasefile?.basics.working_title || '')
                       setEditingEventName(false)
                     }
                   }}
@@ -1478,50 +1550,36 @@ export default function Dashboard() {
               <p>{activeMeta.desc}</p>
             </div>
             <div className="top-actions">
-              <button className="btn btn--ghost" type="button" onClick={newCasefile}>New Casefile</button>
-              <button className="btn btn--ghost" type="button" onClick={() => {
-                setBasics({
-                  working_title: 'AI Founder Networking Night',
-                  country: 'Singapore',
-                  city: 'Singapore',
-                  currency: 'SGD',
-                  budget_cap: '10000',
-                  start_date: '2026-07-10',
-                  end_date: '2026-07-10',
-                  expected_turnout: 100,
-                  event_type: 'networking',
-                })
-                setBrief([
-                  'Need a 50 pax AI founder networking night in Singapore.',
-                  'Budget is around 10k SGD. Want it to feel premium but not flashy.',
-                  'Light F&B, a short fireside chat, and a few structured networking prompts.',
-                  'No full conference setup. Audience is founders, investors, and AI builders.',
-                ].join(' '))
-                navigate('brief')
-              }}>Seed Conflict Demo</button>
-              <button className="btn btn--primary" type="button" onClick={() => navigate('brief')}>Open Brief Intake</button>
+              <button className="btn btn--primary" type="button" onClick={newCasefile}>New Event</button>
+              <button className="btn btn--ghost" type="button" onClick={seedDemo} disabled={seeding}>
+                {seeding ? 'Seeding...' : 'Seed Demo'}
+              </button>
             </div>
           </header>
 
           <section className="war-metrics" aria-label="Top metrics">
-            <div>
+            <div {...(budgetSummary ? metricNav('budget', 'Open the Budget ledger') : {})}>
               <label>Budget Headroom</label>
               <span className={budgetSummary?.over_budget ? 'metric-value--red' : 'metric-value--green'}>
                 {headroomNumber !== null ? formatMoney(resolvedBasics.currency, headroomNumber) : '-'}
               </span>
-              <small>{budgetSummary ? (budgetSummary.over_budget ? 'over cap' : 'computed') : 'awaiting run'}</small>
+              <small>
+                {budgetSummary
+                  ? `${budgetSummary.over_budget ? 'over cap' : 'computed'}${contingencyDetail ? ` · ${contingencyDetail}` : ''}`
+                  : 'awaiting run'}
+              </small>
             </div>
             <div>
               <label>Production Status</label>
               <span className={eventState === 'ON TRACK' ? 'metric-value--green' : eventState === 'AT RISK' ? 'metric-value--gold' : 'metric-value--red'}>{eventState}</span>
               <small>{result ? 'current casefile' : 'no event yet'}</small>
             </div>
-            <div>
-              <label>Tasks</label>
+            <div {...(scheduleResult ? metricNav('run-sheet', 'Open the Run Sheet') : {})}>
+              <label>Schedule Tasks</label>
               <span>{scheduleResult?.ordered_tasks?.length || 0}</span>
-              <small>{criticalCount} critical</small>
+              <small>{criticalCount} on critical path</small>
             </div>
-            <div>
+            <div {...(pendingApprovalCount > 0 ? metricNav('approvals', 'Open the Approval wall') : {})}>
               <label>Approvals</label>
               <span className={pendingApprovalCount > 0 ? 'metric-value--red' : 'metric-value--green'}>{pendingApprovalCount}</span>
               <small>pending wall</small>

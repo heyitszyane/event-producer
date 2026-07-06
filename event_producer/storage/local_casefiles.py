@@ -444,8 +444,12 @@ class LocalCasefileStore:
     def index_path(self) -> Path:
         return self.root / "index.json"
 
-    def create_casefile(self, basics: EventBasics, brief: str = "") -> CasefileState:
-        event_id = str(uuid.uuid4())
+    def create_casefile(
+        self, basics: EventBasics, brief: str = "", event_id: str | None = None
+    ) -> CasefileState:
+        # A caller may supply a stable id (e.g. seed demos) so the casefile is
+        # reproducible across clones; otherwise a fresh UUID is minted.
+        event_id = event_id or str(uuid.uuid4())
         now = utc_now()
         state = CasefileState(
             event_id=event_id,

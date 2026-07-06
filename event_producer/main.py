@@ -825,6 +825,9 @@ class EventProducerApp:
             "budget_cap": resolved_budget_cap,
             "contingency_pct": resolved_contingency_pct,
             "reporting_currency": resolved_currency,
+            # Count every selected item; the Scope page uses Include/Exclude
+            # (not silent tier gating) to control what lands in the budget.
+            "gate_discretionary_tiers": False,
         }
         budget_raw = self._budget_reason.run(budget_request)
         budget_validated = self._budget_formatter.run(budget_raw)

@@ -189,6 +189,37 @@ def test_tier_gating_fits_partial(fx: StaticFxRateProvider) -> None:
     assert result.headroom == Decimal("2000.00")
 
 
+def test_count_all_without_gating(fx: StaticFxRateProvider) -> None:
+    """gate_discretionary_tiers=False counts every tier; headroom can go negative.
+
+    Same inputs as test_tier_gating_fits_partial (spendable=$17k, total=$25k)
+    but with gating disabled, so every item counts and the plan is over budget.
+    The zero-sum reconciliation invariant must still hold with a negative headroom.
+    """
+    lines = [
+        BudgetLine(label="Venue", qty=Decimal("1"), unit_cost=Decimal("10000.00"), currency="USD", category="venue", tier="must"),
+        BudgetLine(label="AV Setup", qty=Decimal("1"), unit_cost=Decimal("5000.00"), currency="USD", category="av", tier="should"),
+        BudgetLine(label="Photo Booth", qty=Decimal("1"), unit_cost=Decimal("5000.00"), currency="USD", category="entertainment", tier="could"),
+        BudgetLine(label="Fireworks", qty=Decimal("1"), unit_cost=Decimal("5000.00"), currency="USD", category="entertainment", tier="wow"),
+    ]
+    result = compute_budget(
+        lines=lines,
+        budget_cap=Decimal("20000.00"),
+        contingency_pct=Decimal("15"),
+        fx_provider=fx,
+        gate_discretionary_tiers=False,
+    )
+
+    # Every tier is included when gating is off.
+    assert all(result.tier_inclusion[tier] is True for tier in ("must", "should", "could", "wow"))
+    assert result.included_totals == Decimal("25000.00")
+    # Spendable is $17k, so headroom is negative and the plan is over budget.
+    assert result.headroom == Decimal("-8000.00")
+    assert result.over_budget is True
+    # Zero-sum reconciliation still holds even when headroom is negative.
+    assert (result.spendable - result.included_totals - result.headroom) == Decimal("0")
+
+
 def test_tier_gating_fits_all(fx: StaticFxRateProvider) -> None:
     """Budget cap $100k, 15% (spendable=$85k). All tiers fit."""
     lines = [

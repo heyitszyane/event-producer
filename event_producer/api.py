@@ -30,6 +30,7 @@ from event_producer.config.model_settings import (
 )
 from event_producer.agents.cards import load_agent_cards
 from event_producer.main import EventProducerApp
+from event_producer.seeds import ensure_demo_casefiles
 from event_producer.models.schemas import (
     Approval,
     BudgetSummary,
@@ -289,6 +290,21 @@ def create_app() -> FastAPI:
         producer: EventProducerApp = app.state.event_producer
         summaries: list[CasefileSummary] = producer.casefile_store.list_casefiles()
         return [summary.model_dump(mode="json") for summary in summaries]
+
+    @app.post("/casefiles/seed")
+    async def seed_casefiles() -> dict[str, Any]:
+        """Materialize the committed demo casefiles (idempotent) and list them.
+
+        The two seeds ship with the repo so a fresh clone has reference events
+        to explore. Existing seeds are left untouched.
+        """
+        producer: EventProducerApp = app.state.event_producer
+        seeded_ids = ensure_demo_casefiles(producer)
+        summaries = producer.casefile_store.list_casefiles()
+        return {
+            "seeded_ids": seeded_ids,
+            "casefiles": [summary.model_dump(mode="json") for summary in summaries],
+        }
 
     @app.get("/casefiles/{event_id}")
     async def get_casefile(event_id: str) -> dict[str, Any]:
@@ -958,6 +974,8 @@ def create_app() -> FastAPI:
             "budget_cap": budget_cap,
             "contingency_pct": contingency_pct,
             "reporting_currency": reporting_currency,
+            # Count every selected item; Include/Exclude is the only gate.
+            "gate_discretionary_tiers": False,
         }
         budget_raw = producer._budget_reason.run(budget_request)
         budget_validated = producer._budget_formatter.run(budget_raw)
@@ -999,11 +1017,11 @@ def create_app() -> FastAPI:
         if headroom_changed:
             headroom_message = f"Headroom changed from {previous_headroom_text} to {current_headroom_text}."
         else:
-            # Tier gating is all-or-nothing per tier, so edits to items in
-            # tiers the budget engine already excludes leave headroom as-is.
+            # Every selected item counts, so an unchanged headroom means the
+            # edit touched an excluded item (or left the counted total as-is).
             headroom_message = (
                 f"Headroom unchanged at {current_headroom_text} — this edit did not change "
-                "the items counted in the included tiers (see Tier Inclusion on the Budget page)."
+                "the items counted toward the budget."
             )
 
         payload = {
@@ -1180,6 +1198,67 @@ def create_app() -> FastAPI:
             action="retier_scope_item",
             actor="demo-user",
             details=f"Retiered scope item '{scope[idx].name}' to '{new_tier}' in event {event_id}",
+            event_id=event_id,
+        )
+
+        return _recompute_event(event_id)
+
+    @app.post("/event/{event_id}/scope-items/auto-fit")
+    async def auto_fit_scope(event_id: str) -> dict[str, Any]:
+        """Select the highest-priority scope items that fit the budget.
+
+        Runs the Budget Engine in "fit to budget" mode (greedy tier gating)
+        over every item to decide which whole tiers fit the spendable pool,
+        then sets each item's selected flag to match. Nothing is deleted, so
+        the user can re-include any item afterward. Budget and schedule are
+        then recomputed in count-all mode so headroom reflects the selection.
+        """
+        producer: EventProducerApp = app.state.event_producer
+
+        producer.ensure_event_runtime(event_id)
+        scope = producer.event_store.get_scope(event_id)
+        if not scope and event_id != _DEMO_EVENT_ID:
+            raise HTTPException(status_code=404, detail="Event not found")
+        if not scope:
+            return _recompute_event(event_id)
+
+        existing_budget = producer.event_store.get_budget(event_id)
+        budget_cap = (
+            existing_budget.budget_cap if existing_budget
+            else Decimal(str(DEFAULT_EVENT_CONSTRAINTS["budget_cap"]))
+        )
+        contingency_pct = (
+            existing_budget.contingency_pct if existing_budget
+            else Decimal(str(DEFAULT_EVENT_CONSTRAINTS["contingency_pct"]))
+        )
+        reporting_currency = "USD"
+        try:
+            reporting_currency = (
+                producer.casefile_store.get_casefile(event_id).resolved.basics.currency
+                or "USD"
+            )
+        except FileNotFoundError:
+            reporting_currency = scope[0].currency or "USD"
+
+        # Consider every item (ignore current selection) and let the engine
+        # greedily gate whole tiers to fit the spendable pool.
+        fit_request = {
+            "scope_items": [{**s.model_dump(), "selected": True} for s in scope],
+            "budget_cap": budget_cap,
+            "contingency_pct": contingency_pct,
+            "reporting_currency": reporting_currency,
+            "gate_discretionary_tiers": True,
+        }
+        fit_raw = producer._budget_reason.run(fit_request)
+        tier_inclusion = fit_raw["budget_summary"]["tier_inclusion"]
+
+        for item in scope:
+            item.selected = bool(tier_inclusion.get(item.tier, item.tier == "must"))
+        producer.event_store.save_scope(event_id, scope)
+        producer.audit_log.log(
+            action="auto_fit_scope",
+            actor="demo-user",
+            details=f"Auto-fit scope to budget for event {event_id}",
             event_id=event_id,
         )
 

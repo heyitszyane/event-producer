@@ -42,13 +42,25 @@ def compute_budget(
     fx_provider: FxRateProvider,
     reporting_currency: str = "USD",
     receipts: list[Receipt] | None = None,
+    gate_discretionary_tiers: bool = True,
 ) -> BudgetSummary:
     """Reconcile an event budget to zero.
 
     Contingency is reserved *first* — before any discretionary allocation.
-    Remaining spendable funds are then allocated greedily by tier priority
-    (must -> should -> could -> wow). Each tier is either fully included or
-    fully excluded.
+
+    Two allocation policies are supported, both of which preserve the
+    zero-sum reconciliation invariant:
+
+    - ``gate_discretionary_tiers=True`` (default): remaining spendable funds
+      are allocated greedily by tier priority (must -> should -> could ->
+      wow). Each discretionary tier is either fully included or fully
+      excluded depending on whether it fits the spendable pool. This is the
+      engine's "fit to budget" capability (used by the Auto-fit action).
+    - ``gate_discretionary_tiers=False``: every line counts toward the
+      budget regardless of tier. ``headroom`` may go negative, which flags
+      the plan as over budget. This is the interactive default — the caller
+      controls inclusion explicitly via each item's selected state rather
+      than having whole tiers silently dropped.
 
     Args:
         lines: Budget line items, each with qty, unit_cost, currency, tier.
@@ -58,6 +70,9 @@ def compute_budget(
         fx_provider: FX rate provider for currency normalization.
         reporting_currency: Target ISO 4217 currency code (default ``"USD"``).
         receipts: Optional list of vendor receipts for variance tracking.
+        gate_discretionary_tiers: When True (default), greedily gate whole
+            discretionary tiers to fit the spendable pool. When False, count
+            every line and let ``headroom`` reflect any overrun.
 
     Returns:
         ``BudgetSummary`` with rollups, tier gating, and variance.
@@ -116,10 +131,12 @@ def compute_budget(
         )
         normalized_totals.append(normalized_total)
 
-    # -- Step 3: Tier-gating (greedy by tier priority) ----------------------
+    # -- Step 3: Tier allocation --------------------------------------------
     # Tier order: must -> should -> could -> wow
-    # "must" is ALWAYS included (mandatory spend).  should/could/wow are
-    # gated greedily: each tier is either fully included or fully excluded.
+    # "must" is ALWAYS included (mandatory spend). When gating is on,
+    # should/could/wow are gated greedily: each tier is either fully
+    # included or fully excluded. When gating is off, every tier is
+    # included and headroom absorbs any overrun.
     tier_inclusion: dict[str, bool] = {}
     cumulative_included = Decimal("0.00")
 
@@ -131,8 +148,9 @@ def compute_budget(
                 tier_total += normalized_totals[idx]
         tier_total = tier_total.quantize(_CENT)
 
-        if tier_name == "must":
-            # Mandatory tier: always included, even if it exceeds spendable
+        if tier_name == "must" or not gate_discretionary_tiers:
+            # Mandatory tier — or every tier when gating is disabled — is
+            # always included, even if it pushes the plan over spendable.
             tier_inclusion[tier_name] = True
             cumulative_included += tier_total
         else:

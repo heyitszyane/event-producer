@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { apiFetch } from '../lib/api'
 import { displayLabel } from '../lib/humanize'
+import InfoHint from './InfoHint'
 import type { RecomputeNotice } from '../types/agentic'
 import type { BudgetSummary } from './BudgetCard'
 import type { ScheduleResult, CallSheetEntry } from './RunOfShowCard'
@@ -50,11 +51,10 @@ const TIER_COPY: Record<ScopeItem['tier'], { label: string; helper: string }> = 
   wow: { label: 'Stretch', helper: 'Premium or brand-building upgrade.' },
 }
 
-type BudgetRowStatus = 'included' | 'tier_excluded' | 'user_excluded'
+type BudgetRowStatus = 'included' | 'user_excluded'
 
 const BUDGET_STATUS_COPY: Record<BudgetRowStatus, string> = {
   included: 'Counted in budget',
-  tier_excluded: 'Not counted — tier excluded by budget engine',
   user_excluded: 'Not counted — excluded by you',
 }
 
@@ -97,9 +97,8 @@ export default function ScopeCard({
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
 
   function budgetStatus(item: ScopeItem): BudgetRowStatus {
-    if (!item.selected) return 'user_excluded'
-    if (budget && budget.tier_inclusion && budget.tier_inclusion[item.tier] === false) return 'tier_excluded'
-    return 'included'
+    // Include/Exclude is the only gate now — every included item counts.
+    return item.selected ? 'included' : 'user_excluded'
   }
 
   async function mutate(url: string, init: RequestInit): Promise<void> {
@@ -177,6 +176,13 @@ export default function ScopeCard({
     })
   }
 
+  // Let the deterministic engine greedily trim the lowest-priority tiers until
+  // the plan fits the spendable pool; items are excluded, never deleted.
+  async function autoFit() {
+    if (!eventId) return
+    await mutate(`/event/${eventId}/scope-items/auto-fit`, { method: 'POST' })
+  }
+
   const form = (state: ItemForm, setState: (patch: Partial<ItemForm>) => void) => (
     <div className="scope-form-grid">
       <label className="field-compact">
@@ -207,8 +213,22 @@ export default function ScopeCard({
   return (
     <section className="card" id="scope" aria-labelledby="scope-heading">
       <div className="card__header">
-        <h2 id="scope-heading">Scope</h2>
+        <h2 id="scope-heading">
+          Scope{' '}
+          <InfoHint text="Every included item counts toward the budget — headroom can go negative when the plan is over cap. Use Exclude to drop an item from the total, or Auto-fit to budget to let the deterministic engine trim the lowest-priority tiers until the plan fits. Tiers are priority labels, not silent budget gates." />
+        </h2>
         <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexWrap: 'wrap' }}>
+          {budget && items && items.length > 0 && (
+            <button
+              onClick={autoFit}
+              disabled={loading}
+              className="btn btn--ghost btn--sm"
+              type="button"
+              title="Exclude the lowest-priority tiers that don't fit the budget"
+            >
+              Auto-fit to budget
+            </button>
+          )}
           <button
             onClick={() => setShowAddForm((v) => !v)}
             className="btn btn--primary btn--sm"
@@ -220,13 +240,6 @@ export default function ScopeCard({
       </div>
 
       {error && <div className="error-bar" role="alert">{error}</div>}
-      {budget && Object.values(budget.tier_inclusion || {}).some((included) => !included) && (
-        <div className="block block--warn" aria-live="polite">
-          Tier gating is all-or-nothing per tier: the budget engine includes Essential items first,
-          then adds whole tiers only if they fit the spendable pool. Rows marked &ldquo;tier excluded&rdquo;
-          below do not count toward headroom.
-        </div>
-      )}
 
       {showAddForm && (
         <div style={{ padding: 'var(--space-3)', borderTop: '1px solid var(--border-subtle)', background: 'var(--surface-tertiary)' }}>
@@ -273,8 +286,8 @@ export default function ScopeCard({
                     {TIER_OPTIONS.map((tier) => <option key={tier} value={tier}>{TIER_COPY[tier].label}</option>)}
                   </select>
                   <div className="muted tier-helper">{TIER_COPY[item.tier].helper}</div>
-                  {budget && (
-                    <div className={`tier-helper scope-budget-status scope-budget-status--${budgetStatus(item)}`}>
+                  {!item.selected && (
+                    <div className="tier-helper scope-budget-status scope-budget-status--user_excluded">
                       {BUDGET_STATUS_COPY[budgetStatus(item)]}
                     </div>
                   )}
@@ -321,14 +334,19 @@ export default function ScopeCard({
                       <button
                         onClick={() => setDeleteConfirm(idx)}
                         disabled={loading}
-                        className="btn btn--ghost btn--sm"
+                        className="btn btn--reject btn--sm"
                         type="button"
                         aria-label={`Delete scope item: ${item.name}`}
                       >
                         Delete
                       </button>
                     )}
-                    <button onClick={() => toggleItem(idx)} disabled={loading} className="btn btn--ghost btn--sm" type="button">
+                    <button
+                      onClick={() => toggleItem(idx)}
+                      disabled={loading}
+                      className={`btn btn--sm ${item.selected ? 'btn--warn' : 'btn--approve'}`}
+                      type="button"
+                    >
                       {item.selected ? 'Exclude' : 'Include'}
                     </button>
                   </div>
