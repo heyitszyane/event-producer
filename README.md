@@ -1,577 +1,290 @@
 # Event Producer
 
-> Live-agentic event production when a provider is configured — deterministic
-> budget/schedule engines, structural human approval wall, and honest degraded
-> fallback when live calls are unavailable.
+> **Submission note:** Kaggle does not require a live public endpoint for judging. A public GitHub repository with complete setup instructions is acceptable. If the hosted demo is unstable, use the repo as the primary project link and treat deployment documentation/video proof as the deployability evidence.
 
-## What this is
 
-Event Producer is a **capstone prototype** for agentic event production.
-It demonstrates how an event can be taken from a messy brief to a scoped,
-costed, scheduled, and approval-gated run-of-show. The intended capstone demo
-uses a configured live provider for the AI agents, while deterministic fallback
-is treated as degraded/resilience mode for clone setups without a working key.
+**An AI production crew for working event casefiles.**
 
-It was built as a Google x Kaggle 2026 capstone project under **Agents for
-Business**.
+Event Producer is a Kaggle x Google AI Agents capstone project for **Agents for Business**. It helps a solo event producer turn an event brief into a saved, costed, scheduled, approval-gated working casefile.
 
-## Current status
+The product is not a generic event-planning chatbot. It is a production-control workspace where:
 
-**P7H — Live-agentic showcase upgrade** · Branch: `codex/p7h5-structured-output-hardening` · [CHANGELOG](CHANGELOG.md)
+- structured event facts are saved as casefile truth;
+- specialist agents propose concepts, scope tradeoffs, vendor copy, and risk reviews;
+- deterministic engines compute budget and run-sheet logic;
+- vendor-facing and state-changing actions remain human-reviewed.
 
-- **340 backend tests passing.** Deterministic Budget Engine (zero-sum, Decimal-only)
-  and CPM Scheduler (dependency/lead-time/anchor/cycle validation).
-- **Messy-brief hero.** The primary product input is a messy event brief; the
-  structured fields are optional manual overrides. Placeholder/default values
-  do not win unless explicitly submitted as manual constraints; the response
-  exposes provenance via `source_map` and `constraint_resolution`.
-- **Stress-brief realism.** The Singapore 100-pax open-bar/canapes scenario
-  resolves to 100 attendees end-to-end, costs per-attendee scope at quantity
-  100, and flags the budget as at risk/over budget instead of showing a clean
-  green plan.
-- **Live model provider seam** (P7A/P7F/P7H). Server-side, lazy-loaded, and
-  selectable through Settings or `.env`. Gemini, OpenRouter, hosted
-  OpenAI-compatible endpoints, LM Studio, Ollama, and local OpenAI-compatible
-  servers are supported. Provider diagnostics expose non-secret status and a
-  one-click provider test from the UI. OpenRouter/OpenAI-compatible calls use
-  JSON Schema response format where supported and retry JSON object mode if the
-  provider rejects that parameter; Gemini uses response schemas when the
-  installed SDK supports them.
-- **Structured-output hardening** (P7H.5). Live provider JSON is repaired only
-  for safe deterministic shape issues before Pydantic validation: missing brief
-  text can be filled from the original brief, numeric-as-string fields can be
-  stringified, missing optional lists become `[]`, and object values inside
-  string lists become compact strings. The repair layer does not invent
-  attendees, money, dates, vendors, or executable state-changing actions.
-- **Editable scope + orchestrator proposals** (P7B/P7D-FIX). Scope items can be
-  added, edited, deleted, toggled, and retiered via API endpoints. Recompute
-  responses include before/after headroom, schedule status, and a notice when
-  risk/trace data still reflects the last full run. Explicit deselect-all
-  budgets zero included spend. The top "Ask the AI Producer" surface returns
-  proposals that can be applied or dismissed.
-- **Security action-gate is structural** — enforced in code (`action_gate.py`),
-  not in prompts. No financial or state-changing action executes without a
-  human-approved `Approval` object.
-- **Scripted deterministic security beat** — 3 vendor/payment-change fixtures
-  treated as untrusted data; no external action executed, no state mutation
-  executed. Generated on every run and asserted by `test_p6f_security_demo.py`;
-  the live security story is shown interactively through the Approvals wall and
-  the injection-flagged vendor replies in the Vendor Notebook.
-- **Paper War Room frontend** — Next.js 14 static export with a persistent
-  side nav and route-like sections for Overview, Brief Intake, AI Crew, Scope,
-  Budget, Run Sheet, Approvals, Vendors, Risks, and Audit Log. FastAPI backend
-  remains the API source. Event title edits and vendor rows are
-  frontend-session drafts only; they do not mutate backend event identity or
-  persist vendor records.
-- **AI Production Crew surface** — Brief Intake, Creative Concept, Scope
-  Strategy, AI Event Producer/Orchestrator, Vendor Draft, Budget
-  Engine/Manager, Run-of-Show/Production Manager, Approval Wall/Vendor
-  Coordinator, and Risk/Gap Flagger are visible as crew cards with Runtime
-  badges, model names, fallback reasons, and trace-derived task summaries.
-- **Honest-claims rule:** all public docs distinguish implemented, scripted
-  deterministic demo, structural seam, and deferred work.
+> **Core rule:** agents propose and draft; deterministic engines compute; humans approve consequential action.
 
-## Demo spine
+---
 
-```text
-Messy event brief
-  -> live/fallback Brief Intake extracts requirements
-  -> live/fallback AI Event Producer reasons over the casefile
-  -> scope catalogue proposes event-production line items
-  -> live/fallback Scope Strategy Agent reasons about tradeoffs without mutating scope
-  -> Budget Engine computes contingency / spendable / headroom (reconciles to zero)
-  -> CPM Scheduler creates run-of-show and critical path
-  -> live/fallback Vendor Draft Agent drafts outbound copy
-  -> structural approval wall blocks vendor-facing execution
-  -> vendor replies are injection-screened; payment-change text is treated as untrusted data
-  -> Paper War Room UI renders the state for human review
-```
+## Capstone rubric mapping
 
-## Demo Modes
-
-| Mode | What happens | Intended use |
+| Required concept | Where this repo demonstrates it | Notes |
 |---|---|---|
-| Live provider | AI agents call the selected provider; Budget Engine, CPM Scheduler, and Approval Wall remain deterministic/source-of-truth controls. | Primary capstone demo |
-| Strict live failure | The API returns a clear provider/model/agent error instead of silently falling back. Settings -> Test provider shows non-secret diagnostics, response format mode, and safe-repair fields. | Debugging and reviewer honesty |
-| Fallback | Live-capable agents use deterministic degraded behavior and record fallback reasons in the UI. | Resilience/no-key clone path |
+| Agent / multi-agent system | `event_producer/agents/`, `event_producer/main.py`, Agent Mission Control UI | Orchestrator plus specialist role agents with direct actions over saved casefile context. |
+| MCP server / integration seam | MCP event-store wrapper | Exposes event-store operations through a tool-facing seam. |
+| Security features | `event_producer/security/action_gate.py`, Vendor Notebook injection screening | Structural approval wall, no autonomous send/payment mutation, flagged vendor text withheld from prompts. |
+| Deployability | `deploy/`, FastAPI backend, static Next.js frontend | Cloud Run backend lane + static frontend export for Firebase Hosting or similar hosting. |
+| Agent skills | `event_producer/agents/cards/`, `event_producer/agents/cards.py` | Runtime-loaded skill-card registry drives prompts, UI cards, and contract tests. |
+| Antigravity | Video demo | Shown as part of the AI-assisted build process. |
 
-## What is implemented
+---
 
-- **Budget Engine** — Pure Python, Decimal arithmetic, deterministic. Budget
-  reconciles to zero (inflows minus outflows minus contingency). Every
-  selected scope item counts toward the plan (headroom can go negative to flag
-  over-budget); Include/Exclude is the gate, and the engine's greedy tier
-  allocation (must/should/could/wow) powers the explicit "Auto-fit to budget"
-  action. Multi-currency with line-total-first FX rounding. Receipt variance
-  aggregation. 30+ tests.
-- **CPM Scheduler** — Pure Python, deterministic. Forward/backward pass,
-  dependency resolution, lead-time validation, anchor constraints, cycle
-  detection, conflict reporting. 25+ tests.
-- **Agent crew** — role agents + orchestrator with reason->formatter splits.
-  Brief Intake, Creative Concept, Scope Strategy, Vendor Draft, and the
-  Orchestrator surface call the configured provider in live mode and degrade
-  with explicit fallback reasons when live mode is unavailable or non-strict
-  provider calls fail. Live providers request schema-shaped JSON where the
-  upstream supports it, and a conservative provider-side repair layer handles
-  recoverable type/shape drift before validation.
-- **Agent trace** — 8 structural role-agent steps recorded during the run
-  (`AgentTraceStep` schema). Rendered as a secondary technical trace.
-- **Agent skill cards (load-bearing)** — 10 versioned role contracts under
-  `event_producer/agents/cards/` (YAML frontmatter contract + instruction
-  body: capabilities, inputs/outputs, structural boundaries, prompt refs).
-  Parsed and validated at runtime by `agents/cards.py`, served by
-  `GET /agents`, rendered as the Mission Control crew board, and pinned by
-  contract tests that reject cards that drift from the runtime. The cards
-  are load-bearing, not display-only: every LLM agent's reason step
-  assembles its live system prompt as versioned prompt + the card's
-  instruction body (`cards.assemble_system_prompt`), so the registry
-  doctrine is what the model actually runs under (tested).
-- **Security action-gate** — `enforce()` blocks 8 gated actions
-  (`change_payment_details`, `mark_paid`, `reschedule`, `change_scope`,
-  `send_vendor_message`, `approve_budget`, `lock_scope`, `release_funds`)
-  without a human-approved `Approval`. Tested end-to-end.
-- **Vendor Notebook** — persistent per-vendor workspace saved as a casefile
-  artifact: workflow + payment status (user-recorded planning metadata,
-  never executed), append-only activity logs with injection-screened vendor
-  replies, and per-vendor drafts. Vendor-scoped `vendor_copy` runs receive
-  only the selected vendor's profile, recent log, and current draft;
-  flagged reply text never reaches a prompt. CRUD + log + draft endpoints
-  under `/casefiles/{id}/vendors`. Tested end-to-end.
-- **REST API** — FastAPI with `/run`, `/agents`, `/runtime/model`,
-  `/runtime/model/test`, `/settings/model`, `/event/{id}`,
-  `/event/{id}/chat`,
-  `/event/{id}/proposals/{id}/apply`, `/event/{id}/proposals/{id}/dismiss`,
-  `/event/{id}/scope-items`, `/event/{id}/scope-items/{id}`, `/approvals`,
-  `/approvals/{id}`, `/event/{id}/approvals`,
-  `/event/{id}/approvals/{approval_id}`, `/chat`, `/healthz`. HITL approval
-  flow with action-gate integration. The `/approvals` routes are legacy
-  sample-demo routes; the main run path uses event-scoped approvals.
-  Consistent error envelope. CORS driven by `ALLOWED_ORIGINS`.
-- **Frontend Paper War Room** — React components for intake, runtime summary,
-  provider Settings/test diagnostics, editable requirements provenance preview,
-  Agent Mission Control (producer console + registry-driven crew board with
-  direct specialist actions), scope, budget, run sheet, approvals, vendor
-  draft/approval wall, security, vendors, risks, and audit log. The shell
-  uses a persistent side nav and route-like sections. Static export.
-- **MCP event-store wrapper** — `McpServer` wraps the `EventStore` ABC. Honest
-  CRUD/list/delete via the provider seam. No private introspection.
-- **Deployment lane** — Cloud Run (FastAPI) + Firebase Hosting (static export).
-  Cloud Build pipeline with 4 QA gates (mypy + ruff + pytest + build).
+## Problem
 
-## What is scripted / deterministic demo
+Event production breaks when facts drift.
 
-- **Scripted security beat** — 3 seeded vendor-message fixtures (crude payment
-  change, subtle IBAN change, image-channel seeded text). All fixtures record
-  `external_action_executed: false` and `state_mutation_executed: false`.
-  Injection flags are **advisory only** — the structural action gate is the
-  load-bearing control.
-- **Vendor messages** — `InMemoryVendorSourcer` returns 5 hardcoded vendors.
-  Vendor Draft can draft copy through the live/fallback model seam, but no live
-  outbound messaging occurs.
-- **Agent reasoning fallback** — Brief Intake, Creative Concept, Scope
-  Strategy, Vendor Draft, and Orchestrator can call a configured live model
-  provider. If live mode is disabled or a non-strict provider call fails, the
-  UI marks the affected agent as degraded fallback. Deterministic
-  budget/schedule engines remain the source of truth.
-- **Chat / production log** — Messages generated from agent step summaries,
-  not from live LLM chat.
-- **Demo seed data** — two committed reference casefiles (an LA product launch
-  in USD and a Singapore founder networking night in SGD) ship in
-  `event_producer/seeds/`. Click **Seed Demo** in the app (or run
-  `scripts/seed_demo.py`) to materialize them via `POST /casefiles/seed`;
-  seeding is idempotent and runs the deterministic first pass so a fresh clone
-  has fully populated events to explore.
+A brief may say 50 people, a producer may update the casefile to 100, the budget may still be calculated for 50, and a vendor draft may be written from stale context. A generic LLM can produce confident text while planning the wrong event.
 
-## What is a structural seam
+Event Producer is designed to prevent that. User-entered casefile fields win over brief extraction. Conflicts are visible. Missing values stay missing. Defaults do not silently become product truth.
 
-- **EventStore** — `EventStore` ABC defines the persistence contract.
-  `InMemoryEventStore` is the only concrete implementation. **Firestore is
-  deferred** — the seam is in place but not wired to a production database.
-- **FxRateProvider** — `StaticFxRateProvider` returns seeded rates. Live FX feed
-  is deferred.
-- **VendorSourcer** — `InMemoryVendorSourcer` returns hardcoded vendors. Live
-  vendor directory lookup is deferred.
-- **Model routing / agent skills** — Reason/formatter split is represented
-  structurally. Live provider routing exists for Gemini plus
-  OpenAI-compatible endpoints; formal ADK Agent Skills packaging is deferred.
+---
 
-## What is deferred / not implemented
+## Product loop
 
-- Firestore persistence (in-memory only)
-- Fully managed production live-provider operations beyond the local `.env` /
-  Settings harness. ADK integration remains deferred.
-- Live Telegram relay (scripted fixtures only)
-- Production auth / multi-user (`X-Demo-User` is a demo-time header gate)
-- Receipt OCR (image-channel fixture is seeded text with `ocr_implemented: false`)
-- Live FX feed (static seeded rates only)
-- Calendar write-back
-- Formal ADK Agent Skills packaging (only skill-like role modules)
-- Live autonomous proposal execution (all proposals still require human Apply)
+1. Start or open an event casefile.
+2. Enter event basics: title, country, city, currency, budget cap, contingency percentage, dates, expected turnout, and event type.
+3. Add event notes / brief as supporting context.
+4. Save and generate a first pass.
+5. Confirm requirements and resolve visible conflicts.
+6. Ask specialist agents for creative concepts, scope strategy, vendor copy, and risk review.
+7. Review deterministic budget and run-sheet outputs.
+8. Manage vendors through draft-only copy, manual-send tracking, logs, and approval gates.
+9. Reopen the casefile later with artifacts and timeline intact.
+
+---
 
 ## Architecture
 
 ```text
-ADK-style multi-agent (Python, live/fallback role agents) on Cloud Run
-  -> role agents (brief/scope, budget, production, vendor, risk) + live-capable orchestrator
-  -> reason->formatter splits per agent
-  -> deterministic Budget Engine + CPM Scheduler (called from code, not LLM tools)
-  -> structural action gate (enforce() blocks gated actions without approval)
-  -> security beat (3 deterministic fixtures, advisory injection flags)
-  -> MCP wrapper over event-store (honest CRUD via provider seam)
-Frontend:       Next.js 14 static export on Firebase Hosting
-Backend:        FastAPI on Cloud Run
-Persistence:    InMemoryEventStore (Firestore-ready provider seam)
-Validation:     Pydantic (strict mode, float rejection for monetary fields)
-Contracts:      Typed Pydantic JSON
+Browser / Next.js Paper War Room
+  ├─ Casefile selector + New Event
+  ├─ Event Basics + Event Brief
+  ├─ Requirements confirmation + Next Best Step
+  ├─ Agent Mission Control
+  │   ├─ AI Producer / Orchestrator
+  │   ├─ Creative Concept Agent
+  │   ├─ Scope Strategy Agent
+  │   ├─ Vendor Copy Agent
+  │   └─ Risk Review Agent
+  ├─ Scope, Budget, Run Sheet
+  ├─ Vendor Notebook
+  ├─ Approvals
+  └─ Audit / Diagnostics
+
+FastAPI backend
+  ├─ LocalCasefileStore (.local_state/event_producer/events)
+  ├─ Agent skill-card registry
+  ├─ Live model provider seam + fallback mode
+  ├─ Specialist role agents
+  ├─ Deterministic Budget Engine
+  ├─ Deterministic Run Sheet / CPM Scheduler
+  ├─ Vendor Notebook store
+  └─ Structural approval/action gate
 ```
 
-The Budget Engine and Scheduler are **plain Python called from code** — never
-registered as LLM tools. Agents that both reason and emit typed JSON use a
-**reason->formatter split** to maintain this boundary.
+The backend is FastAPI with typed Pydantic contracts. The frontend is a Next.js static export. Live-capable agents call the configured provider when available; deterministic fallback is used for no-key clone setups and is labeled as degraded/resilience mode.
+
+Budget and schedule invariants are owned by Python code, not free-text model output.
+
+For a deeper structural walkthrough, see [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Source-of-truth model
+
+Casefiles are saved locally under:
+
+```text
+.local_state/event_producer/events/<event_id>/
+```
+
+Each casefile can contain:
+
+```text
+casefile.json
+timeline.jsonl
+artifacts/
+  brief-intake.json
+  creative-concept.json
+  scope-strategy.json
+  budget-summary.json
+  run-sheet.json
+  vendor-copy.json
+  vendor-notebook.json
+  risk-review.json
+  run-snapshot.json
+```
+
+Resolved event state follows this precedence:
+
+1. User-entered structured fields.
+2. User-edited saved casefile values.
+3. AI-extracted values from event notes only when the structured field is blank.
+4. Explicit missing/unknown state.
+5. Seeded demo defaults only inside seeded demos, never as hidden product truth.
+
+Example: if the event notes mention 50 pax but the saved casefile says 100 pax, the system uses 100 and records a conflict notice.
+
+---
+
+## Agent crew
+
+The crew includes:
+
+| Component | Role |
+|---|---|
+| AI Producer / Orchestrator | Routes broad user requests and returns typed proposals. |
+| Brief Intake / Requirements Agent | Extracts context and reconciles it against saved event basics. |
+| Creative Concept Agent | Generates experience directions, titles, and creative ideas. |
+| Scope Strategy Agent | Recommends additions, cuts, reductions, and tiering tradeoffs. |
+| Vendor Copy Agent | Drafts editable vendor copy from selected-vendor context. |
+| Risk Review Agent | Flags operational gaps, budget pressure, schedule risks, and vendor chase items. |
+| Budget Engine | Deterministically computes spend, contingency, headroom, and rollups. |
+| Run Sheet Engine | Deterministically computes day-of flow and scheduling logic. |
+| Approval Wall | Blocks gated external/state-changing actions without human approval. |
+
+The LLM-facing agents use a runtime-loaded skill-card registry. Each card contains a contract and instruction body. The same registry is served through `GET /agents`, rendered in Agent Mission Control, and appended into live agent system prompts.
+
+---
+
+## Vendor Notebook and safety model
+
+The Vendor Notebook is a per-casefile chase list. Each vendor can have:
+
+- profile and category;
+- workflow status;
+- payment planning fields;
+- current draft;
+- append-only activity log;
+- injection-screened vendor replies.
+
+The app does **not** send vendor messages and does **not** move money. It drafts copy, records manual workflow status, and keeps humans in the loop.
+
+Security controls:
+
+- vendor-supplied replies are treated as untrusted data;
+- suspicious replies are flagged on entry;
+- flagged vendor text is withheld from later agent prompts;
+- gated actions such as `send_vendor_message`, `change_payment_details`, `mark_paid`, `change_scope`, `approve_budget`, `lock_scope`, and `release_funds` require a valid human-approved approval object.
+
+---
 
 ## Run locally
 
+### One-command local dev harness
+
 ```bash
-# One-command local dev harness
 ./scripts/dev.sh
 ```
 
-Then open the frontend, go to **10 Settings**, choose Gemini, OpenRouter,
-LM Studio, Ollama, or another OpenAI-compatible provider, paste the provider
-key if needed, save, then click **Test provider**. The app writes only your
-local gitignored `.env`, refreshes the running backend provider, and shows
-provider/model/effective mode, success/failure, latency, sanitized error, and
-response preview.
+Then open the frontend and use **Settings** to choose a model provider or run in fallback mode.
 
-Manual commands are still available:
+### Manual backend
 
 ```bash
-# API server
 python3 -m uvicorn event_producer.main:create_app --factory --host 127.0.0.1 --port 8080 --reload
+```
 
-# API server with local secrets from .env
-python3 -m uvicorn event_producer.main:create_app --factory --host 127.0.0.1 --port 8080 --reload --env-file .env
+### Manual frontend
 
-# Frontend
+```bash
 pnpm -C web install --frozen-lockfile
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080 pnpm -C web run dev
 ```
 
-For the frontend to reach the backend at build/runtime, set:
-
-```bash
-export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8080
-```
-
-Local development may use `http://127.0.0.1:8080` or `http://localhost:8080`.
-Firebase/static deployment must set `NEXT_PUBLIC_API_BASE_URL` to the Cloud Run
-backend URL before `pnpm -C web run build`; there is no runtime server-side
-proxy in Firebase Hosting. `deploy/cloudbuild.yaml` fails deployed frontend
-builds when `_NEXT_PUBLIC_API_BASE_URL` is empty or when local backend URLs are
-found in `web/out`.
-
-### Where casefiles are stored
-
-Casefiles, artifacts, and timelines are plain JSON files under
-`.local_state/event_producer/events/<event_id>/` (override the root with
-`EVENT_PRODUCER_CASEFILE_ROOT`). This is local demo storage, not a cloud
-database; the **10 Settings** route shows the resolved root, the saved
-casefile count, and the active casefile ID. Every pipeline run also saves a
-`run-snapshot` artifact so the last run is restored after a page reload or a
-backend restart. To reset local state, delete
-`.local_state/event_producer/events` and restart.
-
-To confirm which model provider the backend loaded at startup, call
-`GET /runtime/model` with the demo header, or use **10 Settings** in the UI.
-To run a tiny provider smoke test, call `POST /runtime/model/test` or click
-**Test provider**. Both responses are non-secret: provider, mode, model name,
-base URL/status, whether a key was loaded, response format mode, safe repair
-fields, sanitized errors, and fallback reason only. Local settings writes are
-accepted only from local dev hosts.
-
-### Environment Variables
-
-| Variable | Purpose | Required |
-|----------|---------|----------|
-| `ALLOWED_ORIGINS` | CORS allowed origins (comma-separated) | No (defaults to localhost) |
-| `ENABLE_LIVE_MODEL` | Enables the selected live model provider (exact `true`; otherwise fallback) | No (default: fallback) |
-| `MODEL_PROVIDER` | `gemini`, `openrouter`, `openai_compatible`, `local`, `ollama`, or `lmstudio` | No (default: `gemini`) |
-| `MODEL_NAME` | Generic model id override for non-Gemini providers | No |
-| `ENABLE_LIVE_GEMINI` | Legacy Gemini-only toggle; still supported | No (default: fallback) |
-| `GEMINI_API_KEY` | Server-side Gemini API key. Only read by the backend; never sent to the browser. See `.env.example`. | Only for Gemini live mode |
-| `GOOGLE_API_KEY` | Legacy alias used if `GEMINI_API_KEY` is empty. | Only for Gemini live mode |
-| `GEMINI_MODEL` | Model id for the live provider (default `gemini-2.5-flash`). | No |
-| `OPENROUTER_API_KEY` | OpenRouter API key for `MODEL_PROVIDER=openrouter` | Only for OpenRouter live mode |
-| `OPENROUTER_MODEL` | OpenRouter model id | No |
-| `OPENAI_COMPATIBLE_API_KEY` | API key for a generic OpenAI-compatible endpoint | Only for hosted compatible endpoints |
-| `OPENAI_COMPATIBLE_API_BASE_URL` | Chat-completions endpoint for OpenAI-compatible providers | Only for generic compatible endpoints |
-| `LOCAL_LLM_API_BASE_URL` | Local chat-completions endpoint for `local` / `ollama` / `lmstudio` | No |
-| `LOCAL_LLM_MODEL` | Local model id | No |
-| `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL | For frontend build against backend; required for static deployment |
-
-> **Secrets rule:** Never commit `.env*`, `*.key`, or service-account JSON.
-> These are gitignored. Copy `.env.example` to `.env` to configure live mode.
-> Local OpenAI-compatible servers may run without auth. If LM Studio requires an
-> API token, set `OPENAI_COMPATIBLE_API_KEY` to that token; otherwise no
-> Authorization header is sent for local providers.
-
-## Demo seed briefs
-
-### P7D Stress-test brief (Singapore open-bar scenario)
-
-```json
-{
-  "brief": "1 night AI industry networking event with $10000 budget. Event will be held in an indoor bar or restaurant in Singapore, on 10 July 2026 between 6pm to 10pm. Open bar with canapes. Expected turnout 100 pax. Need basic AV system and banners. If budget permits, include some free merch such as branded t-shirts, caps and notebooks."
-}
-```
-
-This scenario resolves to `100` attendees, parses the date as `2026-07-10`,
-costs attendee-scaled items at quantity `100`, and triggers a prominent budget
-realism warning in fallback mode.
-
-### P7C Seed brief (calmer premium scenario)
-
-```json
-{
-  "brief": "Need a 50-pax AI founder networking night in Singapore next Thursday. Budget is around 20k SGD. Want it to feel premium but not flashy, light F&B, a short fireside chat, and a few structured networking prompts. No full conference setup. Audience is founders, investors, and AI builders."
-}
-```
-
-```json
-{
-  "brief": "Need a 50-pax AI founder networking night in Singapore next Thursday. Budget is around 20k SGD. Want it to feel premium but not flashy, light F&B, a short fireside chat, and a few structured networking prompts. No full conference setup. Audience is founders, investors, and AI builders."
-}
-```
-
-Click "Try example" in the UI to load this seed brief.
-
-## Default demo input (structured manual overrides)
-
-```json
-{
-  "brief": "1 day AI networking event",
-  "budget_cap": "10000",
-  "contingency_pct": "10",
-  "attendees": 50,
-  "event_type": "corporate",
-  "venue_type": "indoor",
-  "date": "2026-06-30",
-  "manual_constraints": {
-    "budget_cap": true,
-    "contingency_pct": true,
-    "attendees": true,
-    "event_type": true,
-    "venue_type": true,
-    "date": true
-  }
-}
-```
-
-Run it:
-
-```bash
-curl -X POST http://127.0.0.1:8080/run \
-  -H "Content-Type: application/json" \
-  -H "X-Demo-User: demo-user" \
-  -d '{
-    "brief": "1 day AI networking event",
-    "budget_cap": "10000",
-    "contingency_pct": "10",
-    "attendees": 50,
-    "event_type": "corporate",
-    "venue_type": "indoor",
-  "date": "2026-06-30",
-  "manual_constraints": {
-    "budget_cap": true,
-    "contingency_pct": true,
-    "attendees": true,
-    "event_type": true,
-    "venue_type": true,
-    "date": true
-  }
-  }'
-```
-
-### Expected output summary
-
-- **scope_items**: 6 (3 must, 2 should, 1 could), selected by default for
-  budget basis
-- **budget_summary**: populated lines, category rollups, tier rollups,
-  contingency reserve, spendable, included totals, headroom, zero-sum holds
-- **schedule_result**: 6 ordered tasks with dependencies and critical path
-- **brief_intake**: extracted requirements / assumptions / gaps / confidence +
-  `model_mode`
-- **creative_concept**: advisory concepts + ideas + suggested additions/cuts +
-  `model_mode`
-- **agent_trace**: 7 role-agent steps (added **Brief Intake Agent** and
-  **Creative Concept Agent**); each step exposes `model_mode` / `model_name` /
-  `prompt_version` / `fallback_reason`.
-- **approvals**: 1 pending approval (human-required before vendor send)
-- **chat_log**: production messages explaining pipeline steps
-- **security_beat**: `scripted_demo_ready`, 3 fixtures,
-  `external_action_executed: false`, `state_mutation_executed: false`
-- **model_mode_summary**: per-role mapping of `brief_intake`, `creative_concept`,
-  `budget_manager`, `production_manager`, `vendor_coordinator`, `security` to one
-  of `gemini_live | openai_compatible_live | rule_based_fallback | deterministic_engine | scripted_fixture | human_approval_gate`.
-
-## Security model
-
-- **Structural action gate** (`event_producer/security/action_gate.py`):
-  `enforce()` blocks any gated action (`change_payment_details`, `mark_paid`,
-  `reschedule`, `change_scope`, `send_vendor_message`, `approve_budget`,
-  `lock_scope`, `release_funds`) without a human-approved `Approval` object
-  (`status == "approved"` and `approved_by` set). Enforced in code, not in
-  prompts.
-- **Injection flagging** (`event_producer/security/injection_flag.py`):
-  heuristic detection of instruction overrides, role changes, payment-change
-  language, credential requests, urgency pressure, authority pressure, and
-  boundary markers. Flags are **advisory** — the structural action gate is
-  the load-bearing control.
-- **Audit log** (`event_producer/security/audit_log.py`): append-only trail for
-  gated actions.
-- **Data-not-instruction boundary**: vendor-supplied data is treated as
-  untrusted. It is never executed and never interpolated into instructions.
-
-This is a scripted, deterministic, test-backed security demo — not live
-Telegram, not live OCR, and not LLM-generated.
-
-## Frontend mission control
-
-The frontend (`web/`) is a Next.js 14 static export rendered in the browser
-and served by Firebase Hosting. It calls the backend via
-`NEXT_PUBLIC_API_BASE_URL`.
-
-Modules:
-- **EventCommandHeader** — event basics (including budget cap and
-  contingency %), event brief, and field-level validation
-- **AgentMissionControl** — registry-driven crew board: fetches the agent
-  skill cards from `GET /agents` and renders each role with its kind, honest
-  runtime mode, saved-artifact status, direct ask/refine actions for the
-  four specialists, compact concept/strategy output digests, and an
-  expandable role-card contract
-- **ExtractedRequirements** — read-only requirement-provenance table
-  (from-brief, you-entered, planning-default, and missing) plus realism
-  warnings and follow-up questions
-- **AgentCrewTrace** — secondary timeline of role-agent steps with statuses,
-  deterministic cores, artifacts
-- **BudgetCard** — budget basis in the casefile currency, realism warnings,
-  health bars, category rollups, and an included/excluded tier-inclusion table
-- **RunOfShowCard** — day-of ordered tasks anchored to the event date,
-  critical path, editable/added draft rows, and a vendor booking-deadlines list
-- **ApprovalInbox** — event-scoped approvals auto-expanded when pending;
-  plain-English human-gate explanation, structural gate banner, and mutation
-  error/status feedback
-- **ScopeCard** — add (modal) / edit (modal) / delete / toggle / retier scope
-  items in the casefile currency
-- **RiskCard** — risk/gap flags
-- **VendorNotebook** — persistent per-vendor chase list: workflow and
-  payment status (user-recorded, never executed), append-only activity log
-  with injection-screened vendor replies, and a per-vendor draft the Vendor
-  Copy Agent writes from that vendor's own context; copy and manual-send
-  are tracked, nothing is sent from the app
-- **ChatPane** — production log (read-only) from `chat_log`
-- **ConflictReportCard** — schedule conflicts when present
-
-Layout: two-column responsive grid (60/40), single-column on mobile, semantic
-landmarks, `aria-label`/`aria-labelledby`, `prefers-reduced-motion` support.
-
-## Tests and quality gates
-
-| Gate | Command |
-|------|---------|
-| Tests | `python3 -m pytest tests/ -v` |
-| Lint | `python3 -m ruff check .` |
-| Type check | `python3 -m mypy event_producer` |
-| Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
-
-332 tests: budget engine, CPM scheduler, agents, API, security action-gate,
-injection flag, audit log, MCP server, FX rates, default demo contract, P6F
-security demo, P7B scope mutation and orchestrator proposals, P7D constraint
-override semantics, budget realism warnings, P7D-FIX recompute/provenance
-regressions, P7J-P7N casefile state truth, P7O agent skill-card contracts +
-contingency plumbing, and P7P load-bearing card prompts + vendor notebook
-(persistence, per-vendor context isolation, injection screening). 9 Gherkin
-eval cases under `tests/eval_cases/`.
-
-## Repository map
+The browser API calls require the demo header used by the frontend harness. For direct API testing, include:
 
 ```text
-event_producer/
-├── agents/          # Role agents + reason->formatter splits
-│   ├── cards/       # Runtime-loaded agent skill cards (crew contracts)
-│   └── prompts/     # Versioned system prompts for live-capable agents
-├── engines/         # Deterministic cores (budget, scheduler)
-├── models/          # Pydantic schemas
-├── providers/       # Moat-seam interfaces (abstract)
-├── security/        # Action-gate, injection flag, audit log
-├── mcp/             # MCP wrapper over event-store (honest CRUD)
-└── main.py          # Composition root + InMemoryEventStore
+X-Demo-User: demo-user
 ```
 
-See [docs/REPO_SITEMAP.md](docs/REPO_SITEMAP.md) for the full folder-by-folder
-breakdown.
+---
 
-## QA Commands
+## Optional live model configuration
 
-| Gate | Command |
-|------|---------|
-| Tests | `python3 -m pytest tests/ -v` |
-| Lint | `python3 -m ruff check .` |
-| Type check | `python3 -m mypy event_producer` |
-| Frontend build | `pnpm -C web install --frozen-lockfile && pnpm -C web run build` |
+Fallback mode works without keys. For live provider mode, copy `.env.example` to `.env` and configure a provider.
 
-## Deployment lane
+Important environment variables:
 
-- **Backend**: Cloud Run (FastAPI + uvicorn). Container built via
-  `deploy/Dockerfile`, CI/CD via `deploy/cloudbuild.yaml` (4 QA gates:
-  mypy + ruff + pytest + build) `waitFor` all build/deploy steps.
-- **Frontend**: Firebase Hosting serves `web/out/` (static export, configured
-  in `deploy/firebase.json`). No server-side rendering.
-- Run commands: `python3 -m uvicorn event_producer.main:create_app --factory`
-  (backend), `pnpm -C web run build` (frontend).
+| Variable | Purpose |
+|---|---|
+| `ENABLE_LIVE_MODEL` | Enables live model calls when set to `true`. |
+| `MODEL_PROVIDER` | `gemini`, `openrouter`, `openai_compatible`, `local`, `ollama`, or `lmstudio`. |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini credentials. |
+| `OPENROUTER_API_KEY` | OpenRouter credentials. |
+| `OPENAI_COMPATIBLE_API_BASE_URL` | Hosted OpenAI-compatible endpoint. |
+| `LOCAL_LLM_API_BASE_URL` | Local model endpoint for LM Studio/Ollama/local servers. |
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL for build/runtime. |
+| `EVENT_PRODUCER_CASEFILE_ROOT` | Optional override for local casefile storage root. |
 
-## Capstone notes
+Secrets rule: do not commit `.env`, API keys, service-account JSON, or local state.
 
-This project demonstrates:
-- **ADK-style multi-agent architecture** — role agents with
-  reason->formatter splits (rule-based, not live ADK runtime)
-- **Agent skill cards** — versioned, runtime-loaded role contracts
-  (capabilities, inputs/outputs, structural boundaries) that the API serves,
-  the UI renders, and the live prompt assembly consumes (card instruction
-  bodies are appended to the LLM agents' system prompts); contract tests
-  keep them honest
-- **Deterministic correctness** — Budget Engine and CPM Scheduler are pure
-  Python, Decimal-only, fully testable
-- **Structural security** — action-gate enforced in code, not prompts
-- **HITL approval flow** — pending approval blocks vendor-facing actions
-- **MCP wrapper** — stable CRUD interface over the EventStore provider seam
-- **Eval framework** — Gherkin scenario files + unit tests
-- **Deployment** — Cloud Run + Firebase Hosting with QA-gated Cloud Build
+---
 
-Honesty boundaries: this is a capstone prototype. Production auth, Firestore,
-Telegram, OCR, and calendar write-back are **not implemented**. Live model calls
-are optional and limited to the configured provider seam.
+## Seed demo casefiles
 
-## Concepts Demonstrated
+A fresh clone can materialize committed demo casefiles:
 
-| Concept | Where |
-|---------|-------|
-| ADK-style multi-agent | `event_producer/agents/` -- role agents + reason->formatter splits, coordinated pipeline + direct specialist runs over saved casefile context |
-| Agent skills | `event_producer/agents/cards/` -- 10 runtime-loaded skill cards (YAML contract + instruction body, versioned, contract-tested) served by `GET /agents`, rendered as the Mission Control crew board, and appended into the LLM agents' live prompt assembly (load-bearing) |
-| Security / context hygiene | `event_producer/security/` -- structural action-gate + injection flag |
-| Deployment | Cloud Run + Firebase Hosting |
-| MCP | `event_producer/mcp/` -- wrapper over event-store via provider seam |
-| Eval framework | `tests/` -- Gherkin eval cases + unit tests |
-| Separated evaluation | Build itself runs planner->generator->evaluator |
-| Model-routing seam | Reason/formatter split plus optional Gemini/OpenAI-compatible live provider routing |
+```bash
+python3 scripts/seed_demo.py
+```
 
-## Safety Rules
+Or click **Seed Demo** in the app.
 
-- **No secrets in code.** Ever. `.env*` is gitignored.
-- **No force-push.** Ever.
-- **Stage explicitly.** Never `git add -A`.
-- **`main` stays green.** Branch per phase -> QA gate -> merge --no-ff -> push.
+The seed cases are intended to make the product explorable even when `.local_state/` is empty.
+
+---
+
+## Quality gates
+
+Run before submission or merge:
+
+```bash
+git status --short
+git diff --check
+bash -n scripts/dev.sh
+python3 -m pytest tests/ -v
+python3 -m ruff check .
+python3 -m mypy event_producer
+pnpm -C web install --frozen-lockfile
+pnpm -C web run lint
+pnpm -C web run build
+```
+
+Use the latest local QA output as the source of truth for exact test counts.
+
+For the regression model and manual smoke path, see
+[docs/evaluation-and-quality.md](docs/evaluation-and-quality.md).
+
+---
+
+## Known limitations
+
+This is a capstone prototype, not production SaaS.
+
+Deferred / not implemented:
+
+- production authentication and multi-user accounts;
+- Firestore/Supabase production persistence;
+- live vendor directory lookup;
+- live email, Telegram, or WhatsApp sending;
+- autonomous vendor negotiation;
+- payment execution;
+- receipt OCR;
+- live FX feeds;
+- calendar writeback;
+- full global location database;
+- formal ADK runtime / Agents CLI packaging, unless added later.
+
+These are deliberate boundaries. The implemented product demonstrates the core agentic workflow: saved casefiles, specialist agents, deterministic planning engines, draft-only vendor work, and structural safety gates.
+
+See also [docs/security-and-limitations.md](docs/security-and-limitations.md) and
+[docs/build-journey.md](docs/build-journey.md).
+
+---
 
 ## License
 
-CC-BY-4.0. See `LICENSE`.
+This project is licensed under **CC BY 4.0**.
