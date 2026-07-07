@@ -43,7 +43,12 @@ class ScopeStrategyFormatterAgent:
             parsed["model_mode"] = model_mode
             if fallback_reason:
                 parsed["fallback_reason"] = fallback_reason
-            return ScopeStrategyResult(**parsed)
+            try:
+                return ScopeStrategyResult(**parsed)
+            except (TypeError, ValueError):
+                # Wrong-shape live output -> deterministic fallback below
+                # instead of crashing. (ValidationError subclasses ValueError.)
+                fallback_reason = fallback_reason or "live output did not match the expected schema"
 
         return self._fallback_from_request(
             request=request,

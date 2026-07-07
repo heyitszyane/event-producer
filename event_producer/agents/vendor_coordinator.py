@@ -349,8 +349,13 @@ class VendorDraftFormatterAgent:
             parsed["model_mode"] = model_mode
             if fallback_reason:
                 parsed["fallback_reason"] = fallback_reason
-            result = VendorDraftResult(**parsed)
-            return self._scrub_payment_instructions(result)
+            try:
+                result = VendorDraftResult(**parsed)
+                return self._scrub_payment_instructions(result)
+            except (TypeError, ValueError):
+                # Wrong-shape live output -> deterministic fallback below
+                # instead of crashing. (ValidationError subclasses ValueError.)
+                fallback_reason = fallback_reason or "live output did not match the expected schema"
 
         return self.fallback_from_request(
             request=request,

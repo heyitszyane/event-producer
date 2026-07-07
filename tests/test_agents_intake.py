@@ -90,6 +90,26 @@ def test_brief_intake_fallback_surfaces_missing() -> None:
     assert res.confidence == "low"
 
 
+def test_brief_intake_formatter_falls_back_on_wrong_shape_live_output() -> None:
+    # Regression: a live model can return valid JSON that does not match the
+    # result schema. The formatter must fall back to the deterministic
+    # interpretation instead of raising and turning /run into a 500.
+    fmt = BriefIntakeFormatterAgent()
+    brief = (
+        "Need a 50-pax AI founder networking night in Singapore. Budget 20k."
+    )
+    res = fmt.run(
+        provider_text='{"confidence": "definitely-not-a-valid-enum", "attendees": "many"}',
+        brief=brief,
+        model_mode="openai_compatible_live",
+        fallback_reason=None,
+    )
+    assert isinstance(res, BriefIntakeResult)
+    # Deterministic fallback ran (extracted 50 from the brief) rather than
+    # crashing on the malformed live payload.
+    assert res.attendees == 50
+
+
 def _make_intake() -> BriefIntakeResult:
     return BriefIntakeResult(
         normalized_brief="50-pax AI networking night in Singapore. Budget 20k.",

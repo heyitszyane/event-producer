@@ -170,7 +170,13 @@ class BriefIntakeFormatterAgent:
             parsed["model_mode"] = model_mode
             if fallback_reason:
                 parsed["fallback_reason"] = fallback_reason
-            return BriefIntakeResult(**parsed)
+            try:
+                return BriefIntakeResult(**parsed)
+            except (TypeError, ValueError):
+                # Live output was valid JSON but the wrong shape; fall through
+                # to the deterministic interpretation instead of crashing the
+                # pipeline. (Pydantic ValidationError subclasses ValueError.)
+                fallback_reason = fallback_reason or "live output did not match the expected schema"
 
         # Fallback path: derive an honest, brief-aware interpretation from the
         # raw brief, but record fallback telemetry so the UI stays honest.
