@@ -15,8 +15,9 @@ constraints:
 - ``seed-la-product-launch`` — a USD brand product launch in Los Angeles with
   a comfortable brief that matches its basics (a clean happy-path demo).
 - ``seed-sg-networking`` — an SGD founder networking night in Singapore whose
-  brief disagrees with the saved headcount, so the requirement-provenance and
-  conflict-detection surfaces have something real to show.
+  brief includes a realistic 50-80 attendee planning tension against the saved
+  100-pax target, so the requirement-provenance and advisory-warning surfaces
+  have something real to show.
 """
 
 from __future__ import annotations
@@ -77,19 +78,52 @@ SEED_CASEFILES: list[SeedSpec] = [
             contingency_pct=Decimal("10"),
             start_date="2026-08-14",
             end_date="2026-08-14",
-            expected_turnout=80,
+            expected_turnout=100,
             event_type="networking",
         ),
         "brief": (
-            "AI founder networking night in Singapore. Expecting around 60 guests: "
-            "founders, investors, and AI builders. Budget is around SGD 10,000. Want it "
-            "to feel premium but not flashy: light F&B, a short fireside chat, and a few "
-            "structured networking prompts. No full conference setup. Evening event on "
-            "14 Aug 2026, roughly 6:30pm to 9:30pm. Good venue acoustics matter for the "
-            "fireside segment."
+            "We need something for AI founders / builders in Singapore. Maybe 80 people? "
+            "Actually could be 50 if budget is tight but ideally enough density. Evening "
+            "event, not too formal, want it to feel premium but not like a hotel ballroom "
+            "conference.\n"
+            "Budget is around $10,000 SGD all-in if possible. Need venue, some drinks, "
+            "maybe light canapes, basic AV for a few 5-min demos. No full dinner. Good "
+            "photos would be useful. It should feel like a curated invite-only founder "
+            "salon.\n"
+            "Date: Friday 14 Aug 2026. Maybe CBD or somewhere central. Please avoid "
+            "anything that looks like a generic corporate seminar."
         ),
     },
 ]
+
+
+def _sync_existing_singapore_seed(
+    producer: EventProducerApp,
+    spec: SeedSpec,
+) -> None:
+    """Upgrade the stable recording seed to the current committed brief."""
+    store = producer.casefile_store
+    casefile = store.get_casefile(SINGAPORE_SEED_ID)
+    if casefile.basics != spec["basics"]:
+        store.update_basics(SINGAPORE_SEED_ID, spec["basics"])
+    if casefile.brief != spec["brief"]:
+        store.update_brief(SINGAPORE_SEED_ID, spec["brief"])
+    refreshed = store.get_casefile(SINGAPORE_SEED_ID)
+    if refreshed.basics == spec["basics"] and refreshed.brief == spec["brief"]:
+        if "run-snapshot" not in refreshed.artifacts:
+            producer.run_casefile(SINGAPORE_SEED_ID)
+        else:
+            try:
+                snapshot = store.read_artifact(SINGAPORE_SEED_ID, "run-snapshot")
+            except FileNotFoundError:
+                snapshot = None
+            event_title = (
+                snapshot.get("event_spec", {}).get("name")
+                if isinstance(snapshot, dict)
+                else None
+            )
+            if event_title != spec["basics"].working_title:
+                producer.run_casefile(SINGAPORE_SEED_ID)
 
 
 def ensure_demo_casefiles(producer: EventProducerApp) -> list[str]:
@@ -108,14 +142,7 @@ def ensure_demo_casefiles(producer: EventProducerApp) -> list[str]:
         seeded_ids.append(event_id)
         if event_id in existing:
             if event_id == SINGAPORE_SEED_ID:
-                casefile = store.get_casefile(event_id)
-                if casefile.basics.working_title == LEGACY_SINGAPORE_TITLE:
-                    store.update_basics(
-                        event_id,
-                        casefile.basics.model_copy(
-                            update={"working_title": spec["basics"].working_title}
-                        ),
-                    )
+                _sync_existing_singapore_seed(producer, spec)
             continue
         store.create_casefile(spec["basics"], spec["brief"], event_id=event_id)
         try:

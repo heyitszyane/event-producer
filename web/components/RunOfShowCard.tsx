@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import InfoHint from './InfoHint'
 import { displayLabel } from '../lib/humanize'
-import type { BookingDeadline } from '../types/agentic'
+import type { BookingDeadline, RunSheetTaskOverride } from '../types/agentic'
 
 export interface ScheduledTask {
   id: string
@@ -32,6 +32,8 @@ interface RunOfShowCardProps {
   schedule: ScheduleResult | null | undefined
   callSheet: CallSheetEntry[]
   bookingDeadlines?: BookingDeadline[]
+  taskOverrides?: Record<string, RunSheetTaskOverride>
+  onTaskStatusChange?: (taskId: string, status: string, notes?: string) => Promise<void> | void
 }
 
 interface DraftTask {
@@ -80,26 +82,37 @@ function formatDate(isoString: string | undefined): string {
   }
 }
 
-export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = [] }: RunOfShowCardProps) {
+export default function RunOfShowCard({
+  schedule,
+  callSheet,
+  bookingDeadlines = [],
+  taskOverrides = {},
+  onTaskStatusChange,
+}: RunOfShowCardProps) {
   const taskNamesById = useMemo(() => {
     const entries = (schedule?.ordered_tasks || []).map((task) => [task.id, task.name] as const)
     return new Map(entries)
   }, [schedule])
 
-  const sourceTasks = useMemo<DraftTask[]>(() => (schedule?.ordered_tasks || []).map((task, idx) => ({
-    id: task.id || `task-${idx}`,
-    name: task.name,
-    start: task.earliest_start,
-    end: task.earliest_finish,
-    duration: String(task.duration),
-    owner: task.anchor || 'Production',
-    dependencies: task.dependencies.map((dependency) => taskNamesById.get(dependency) || dependency).join(', '),
-    status: schedule?.critical_path?.includes(task.id) ? 'Critical path' : 'Scheduled',
-    notes: task.lead_time ? `Lead time: ${task.lead_time}` : '',
-  })), [schedule, taskNamesById])
+  const sourceTasks = useMemo<DraftTask[]>(() => (schedule?.ordered_tasks || []).map((task, idx) => {
+    const id = task.id || `task-${idx}`
+    const saved = taskOverrides[id] || {}
+    return {
+      id,
+      name: task.name,
+      start: task.earliest_start,
+      end: task.earliest_finish,
+      duration: String(task.duration),
+      owner: task.anchor || 'Production',
+      dependencies: task.dependencies.map((dependency) => taskNamesById.get(dependency) || dependency).join(', '),
+      status: saved.status || (schedule?.critical_path?.includes(task.id) ? 'Critical path' : 'Scheduled'),
+      notes: saved.notes ?? (task.lead_time ? `Lead time: ${task.lead_time}` : ''),
+    }
+  }), [schedule, taskNamesById, taskOverrides])
   const [draftTasks, setDraftTasks] = useState<DraftTask[]>(sourceTasks)
   const [editing, setEditing] = useState<DraftTask | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     setDraftTasks(sourceTasks)
@@ -124,6 +137,7 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
   const tasks = draftTasks
   const criticalPath = schedule?.critical_path || []
   const criticalCount = criticalPath.length
+  const completedCount = tasks.filter((task) => task.status === 'Complete').length
   const sheetEntries = (callSheet || []).filter((entry) => {
     if (!schedule) return true
     return !tasks.some((t) => t.name === entry.task_name)
@@ -131,6 +145,18 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
 
   const hasConflicts = false // Conflict report is handled separately
   const totalTasks = tasks.length + sheetEntries.length
+
+  async function saveTaskStatus(task: DraftTask, status: string, notes: string = task.notes) {
+    const nextTask = { ...task, status, notes }
+    setDraftTasks((prev) => prev.map((row) => row.id === task.id ? nextTask : row))
+    if (!onTaskStatusChange || task.id.startsWith('draft-')) return
+    setSavingTaskId(task.id)
+    try {
+      await onTaskStatusChange(task.id, status, notes)
+    } finally {
+      setSavingTaskId(null)
+    }
+  }
 
   if (tasks.length === 0 && sheetEntries.length === 0) {
     return (
@@ -157,6 +183,9 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
             {hasConflicts ? 'Conflicts detected' : 'Schedule valid'}
           </span>
           <span className="badge badge--info">{totalTasks} tasks</span>
+          {tasks.length > 0 && (
+            <span className="badge badge--ok">{completedCount}/{tasks.length} complete</span>
+          )}
           {criticalCount > 0 && (
             <span className="badge badge--critical">{criticalCount} critical</span>
           )}
@@ -198,7 +227,24 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
               <td data-label="Owner/Role"><button className="table-cell-button" type="button" onClick={() => setEditing(task)}>{task.owner}</button></td>
               <td data-label="Dependency"><button className="table-cell-button" type="button" onClick={() => setEditing(task)}>{task.dependencies || '-'}</button></td>
               <td data-label="Status"><button className="table-cell-button" type="button" onClick={() => setEditing(task)}>{task.status}</button></td>
-              <td data-label="Action"><button className="btn btn--ghost btn--sm" type="button" onClick={() => setEditing(task)}>Edit</button></td>
+              <td data-label="Action">
+                <div className="cluster" style={{ gap: 'var(--space-1)' }}>
+                  <button
+                    className={task.status === 'Complete' ? 'btn btn--ghost btn--sm' : 'btn btn--primary btn--sm'}
+                    type="button"
+                    disabled={savingTaskId === task.id}
+                    onClick={() => void saveTaskStatus(
+                      task,
+                      task.status === 'Complete'
+                        ? (criticalPath.includes(task.id) ? 'Critical path' : 'Scheduled')
+                        : 'Complete',
+                    )}
+                  >
+                    {task.status === 'Complete' ? 'Reopen' : 'Complete'}
+                  </button>
+                  <button className="btn btn--ghost btn--sm" type="button" onClick={() => setEditing(task)}>Edit</button>
+                </div>
+              </td>
             </tr>
           )
         })}
@@ -292,6 +338,7 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
             <div className="cluster">
               <button className="btn btn--primary" type="button" onClick={() => {
                 setDraftTasks((prev) => prev.map((task) => task.id === editing.id ? editing : task))
+                void saveTaskStatus(editing, editing.status, editing.notes)
                 setEditing(null)
                 setConfirmDelete(false)
               }}>Save</button>

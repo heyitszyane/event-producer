@@ -95,6 +95,18 @@ export interface CasefileArtifact {
   updated_at: string
 }
 
+export interface RunSheetTaskOverride {
+  status?: string
+  notes?: string
+  updated_at?: string
+}
+
+export interface PlanningAssumptions {
+  dismissed_market_realism_warnings?: string[]
+  run_sheet_task_overrides?: Record<string, RunSheetTaskOverride>
+  [key: string]: unknown
+}
+
 export interface CasefileState {
   event_id: string
   created_at: string
@@ -108,7 +120,7 @@ export interface CasefileState {
   requirements?: RequirementsPayload | null
   next_step?: NextBestStep | null
   artifacts: Record<string, CasefileArtifact>
-  planning_assumptions?: Record<string, unknown>
+  planning_assumptions?: PlanningAssumptions
 }
 
 export interface CasefileSummary {

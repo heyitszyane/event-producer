@@ -6,6 +6,8 @@ import { humanizeKey } from '../lib/humanize'
 interface Props {
   intake: BriefIntake | null
   resolution?: ConstraintResolution
+  dismissedWarnings?: string[]
+  onDismissWarning?: (warning: string) => void
 }
 
 interface ProvenanceRow {
@@ -52,7 +54,12 @@ function SourceBadge({ source }: { source?: RequirementSource }) {
   )
 }
 
-export default function ExtractedRequirements({ intake, resolution }: Props) {
+export default function ExtractedRequirements({
+  intake,
+  resolution,
+  dismissedWarnings = [],
+  onDismissWarning,
+}: Props) {
   const rows = useMemo<ProvenanceRow[]>(() => {
     if (!intake) return []
     const readValue = (key: string): string => {
@@ -86,7 +93,7 @@ export default function ExtractedRequirements({ intake, resolution }: Props) {
   }
 
   const mode = intake.model_mode
-  const warnings = intake.market_realism_warnings ?? []
+  const warnings = (intake.market_realism_warnings ?? []).filter((warning) => !dismissedWarnings.includes(warning))
   const missing = intake.missing_questions ?? []
   const contradictions = intake.contradictions ?? []
 
@@ -133,7 +140,19 @@ export default function ExtractedRequirements({ intake, resolution }: Props) {
           <h3 className="block__title">Market realism warnings</h3>
           <ul className="bullets">
             {warnings.map((w) => (
-              <li key={w}>{w}</li>
+              <li key={w}>
+                <span>{w}</span>
+                {onDismissWarning && (
+                  <button
+                    className="dismiss-btn"
+                    type="button"
+                    onClick={() => onDismissWarning(w)}
+                    aria-label="Ignore market realism warning"
+                  >
+                    x
+                  </button>
+                )}
+              </li>
             ))}
           </ul>
         </div>

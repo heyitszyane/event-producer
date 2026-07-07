@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -27,9 +28,20 @@ from event_producer.models.schemas import (
 _PAX_RE = re.compile(
     r"(?i)\b(\d{1,5})\s*[-]?\s*(?:pax|people|persons|guests|attendees|heads)\b"
 )
+# Currency codes and headcount nouns that anchor / disqualify a budget amount.
+_CURRENCY_CODES = "SGD|USD|EUR|GBP|MYR|AUD|JPY|INR|CAD|HKD|CNY|NZD|CHF|THB|PHP|IDR|KRW"
+_PAX_NOUNS = "pax|people|persons|guests|attendees|heads|founders|investors|builders|crew"
+# A budget amount must be anchored to an explicit money signal: the word
+# "budget", a currency symbol, or a currency code. Soft quantifiers such as
+# "around"/"about"/"up to" are deliberately NOT budget triggers on their own —
+# otherwise a phrase like "around 60 guests" is misread as a budget of 60. A
+# number immediately followed by a headcount noun is also rejected, and the
+# amount cannot be split mid-number (the (?=\D|\Z) guard).
 _BUDGET_RE = re.compile(
-    r"(?i)(?:budget(?:\s+is)?|around|about|up to|max|cap|[$\£€])\s*[:\-]?\s*"
-    r"(\d[\d,]*\.?\d*)\s*(k|m|million|thousand)?"
+    r"(?i)(?:budget|[$\£€]|\b(?:" + _CURRENCY_CODES + r"))"
+    r"[^.\d]{0,40}?"
+    r"(\d[\d,]*\.?\d*)\s*(k|m|million|thousand)?(?=\D|\Z)"
+    r"(?!\s*(?:" + _PAX_NOUNS + r"))"
 )
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 
@@ -115,18 +127,13 @@ def resolve_event_state(
     sources["currency"] = source_for("currency") if resolved.currency else "missing"
 
     if resolved.budget_cap is not None:
+        # Fill-only: the structured Budget Cap field is authoritative and is
+        # already captured explicitly, so we do NOT re-parse the free-text brief
+        # to cross-check it. Money is written too many ways ("$40k", "SGD 10,000",
+        # "around ten grand") for regex extraction to be reliable enough to raise
+        # a conflict on — a false "budget of 60" is worse than no notice. When the
+        # user leaves the field blank we still opportunistically fill it below.
         sources["budget_cap"] = source_for("budget_cap")
-        if extracted_budget is not None and extracted_budget != resolved.budget_cap:
-            notices.append(CasefileNotice(
-                type="conflict",
-                field="budget_cap",
-                message=(
-                    f"Your brief mentions a budget of {extracted_budget}, but this "
-                    f"casefile is set to {resolved.budget_cap}. Using {resolved.budget_cap}."
-                ),
-                brief_value=extracted_budget,
-                casefile_value=resolved.budget_cap,
-            ))
     elif extracted_budget is not None:
         resolved.budget_cap = extracted_budget
         sources["budget_cap"] = "brief_extracted"
@@ -470,6 +477,18 @@ class LocalCasefileStore:
         self._write_index()
         return self.get_casefile(event_id)
 
+    def delete_casefile(self, event_id: str) -> None:
+        """Remove a casefile directory (state, artifacts, timeline) from disk.
+
+        Raises ``FileNotFoundError`` if the casefile does not exist so callers
+        can surface a 404. The index is rebuilt from the surviving directories.
+        Seed casefiles can be re-created afterwards via ``ensure_demo_casefiles``.
+        """
+        if not self._casefile_path(event_id).exists():
+            raise FileNotFoundError(event_id)
+        shutil.rmtree(self._casefile_dir(event_id), ignore_errors=True)
+        self._write_index()
+
     def list_casefiles(self) -> list[CasefileSummary]:
         self._ensure_index()
         summaries: list[CasefileSummary] = []
@@ -522,9 +541,65 @@ class LocalCasefileStore:
         state = self.get_casefile(event_id)
         if state.status != "requirements_confirmed":
             state.status = "generated"
-        state.planning_assumptions = planning_assumptions
+        state.planning_assumptions = {
+            **(state.planning_assumptions or {}),
+            **planning_assumptions,
+        }
         state.updated_at = utc_now()
         self._write_state(state)
+        self._write_index()
+        return self.get_casefile(event_id)
+
+    def dismiss_market_realism_warning(self, event_id: str, warning: str) -> CasefileState:
+        """Persist a user-dismissed budget realism advisory for a casefile."""
+        state = self.get_casefile(event_id)
+        planning = dict(state.planning_assumptions or {})
+        dismissed = [
+            str(item)
+            for item in planning.get("dismissed_market_realism_warnings", [])
+            if str(item).strip()
+        ]
+        if warning not in dismissed:
+            dismissed.append(warning)
+        planning["dismissed_market_realism_warnings"] = dismissed
+        state.planning_assumptions = planning
+        state.updated_at = utc_now()
+        self._write_state(state)
+        self.append_timeline(event_id, "market_realism_warning_dismissed", {"warning": warning})
+        self._write_index()
+        return self.get_casefile(event_id)
+
+    def update_run_sheet_task_status(
+        self,
+        event_id: str,
+        task_id: str,
+        *,
+        status: str,
+        notes: str | None = None,
+    ) -> CasefileState:
+        """Persist operator status/notes for a generated run-of-show task."""
+        state = self.get_casefile(event_id)
+        planning = dict(state.planning_assumptions or {})
+        overrides = {
+            str(key): dict(value)
+            for key, value in (planning.get("run_sheet_task_overrides") or {}).items()
+            if isinstance(value, dict)
+        }
+        current = dict(overrides.get(task_id, {}))
+        current["status"] = status
+        if notes is not None:
+            current["notes"] = notes
+        current["updated_at"] = utc_now()
+        overrides[task_id] = current
+        planning["run_sheet_task_overrides"] = overrides
+        state.planning_assumptions = planning
+        state.updated_at = utc_now()
+        self._write_state(state)
+        self.append_timeline(
+            event_id,
+            "run_sheet_task_status_updated",
+            {"task_id": task_id, "status": status},
+        )
         self._write_index()
         return self.get_casefile(event_id)
 
@@ -619,6 +694,19 @@ class LocalCasefileStore:
         )
 
     def _enrich_state(self, state: CasefileState) -> CasefileState:
+        # Resolved state (and its conflict/missing notices) is derived purely
+        # from basics + brief, so recompute it on every load. This self-heals
+        # casefiles persisted by an older extractor — otherwise a stale notice
+        # (e.g. a since-fixed budget mis-read) lingers until the next edit.
+        state.resolved = resolve_event_state(
+            state.basics,
+            state.brief,
+            user_fields={
+                field
+                for field, value in state.basics.model_dump().items()
+                if value not in ("", None)
+            },
+        )
         state.requirements = build_requirements_payload(state)
         state.next_step = build_next_best_step(state)
         return state

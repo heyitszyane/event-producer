@@ -51,9 +51,19 @@ _EVENT_TYPE_KEYWORDS: list[tuple[list[str], str]] = [
 _PAX_RE = re.compile(
     r"(?i)\b(\d{1,5})\s*[-]?\s*(?:pax|people|persons|guests|attendees|heads|crew|people)\b"
 )
+# A budget amount must be anchored to an explicit money signal: the word
+# "budget", a currency symbol, or a currency code. Soft quantifiers such as
+# "around"/"about"/"up to" are deliberately NOT budget triggers on their own —
+# otherwise a phrase like "around 60 guests" is misread as a budget of 60. A
+# number immediately followed by a headcount noun is also rejected, and the
+# amount cannot be split mid-number (the (?=\D|\Z) guard).
+_CURRENCY_CODES = "SGD|USD|EUR|GBP|MYR|AUD|JPY|INR|CAD|HKD|CNY|NZD|CHF|THB|PHP|IDR|KRW"
+_PAX_NOUNS = "pax|people|persons|guests|attendees|heads|founders|investors|builders|crew"
 _BUDGET_RE = re.compile(
-    r"(?i)(?:budget(?:\s+is)?|around|about|up to|max|cap|[$\£€])\s*[:\-]?\s*"
-    r"(\d[\d,]*\.?\d*)\s*(k|m|million|thousand)?"
+    r"(?i)(?:budget|[$\£€]|\b(?:" + _CURRENCY_CODES + r"))"
+    r"[^.\d]{0,40}?"
+    r"(\d[\d,]*\.?\d*)\s*(k|m|million|thousand)?(?=\D|\Z)"
+    r"(?!\s*(?:" + _PAX_NOUNS + r"))"
 )
 _DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _NATURAL_DATE_RE = re.compile(

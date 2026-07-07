@@ -126,6 +126,19 @@ class CasefileBriefUpdateRequest(BaseModel):
     brief: str = ""
 
 
+class MarketRealismWarningDismissRequest(BaseModel):
+    """Request body for dismissing a soft market-realism advisory."""
+
+    warning: str
+
+
+class RunSheetTaskStatusUpdateRequest(BaseModel):
+    """Persisted operator state for a generated run-of-show task."""
+
+    status: Literal["Scheduled", "Critical path", "In progress", "Blocked", "Complete", "At risk"]
+    notes: str | None = None
+
+
 class VendorCopyArtifactResponse(BaseModel):
     """Reviewable vendor-copy draft plus casefile artifact metadata."""
 
@@ -322,6 +335,20 @@ def create_app() -> FastAPI:
         """Load a full local casefile."""
         return _casefile_or_404(event_id).model_dump(mode="json")
 
+    @app.delete("/casefiles/{event_id}")
+    async def delete_casefile(event_id: str) -> dict[str, Any]:
+        """Delete a local casefile and all of its artifacts.
+
+        This is local demo-data management: casefiles live in the gitignored
+        local store, so removing one touches no vendor comms or financial
+        state and needs no approval gate. A missing casefile returns 404.
+        Seed casefiles can be restored later via the "Seed Demo" action.
+        """
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        producer.casefile_store.delete_casefile(event_id)
+        return {"event_id": event_id, "deleted": True}
+
     @app.patch("/casefiles/{event_id}/basics")
     async def update_casefile_basics(event_id: str, basics: EventBasics) -> dict[str, Any]:
         """Update canonical event basics and re-resolve state."""
@@ -338,6 +365,49 @@ def create_app() -> FastAPI:
         producer: EventProducerApp = app.state.event_producer
         _casefile_or_404(event_id)
         return producer.casefile_store.update_brief(event_id, req.brief).model_dump(mode="json")
+
+    @app.post("/casefiles/{event_id}/warnings/market-realism/dismiss")
+    async def dismiss_casefile_market_realism_warning(
+        event_id: str,
+        req: MarketRealismWarningDismissRequest,
+    ) -> dict[str, Any]:
+        """Hide a soft budget realism warning for this casefile."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        warning = req.warning.strip()
+        if not warning:
+            raise HTTPException(status_code=422, detail="warning is required")
+        return producer.casefile_store.dismiss_market_realism_warning(
+            event_id,
+            warning,
+        ).model_dump(mode="json")
+
+    @app.patch("/casefiles/{event_id}/run-sheet/tasks/{task_id}")
+    async def update_casefile_run_sheet_task(
+        event_id: str,
+        task_id: str,
+        req: RunSheetTaskStatusUpdateRequest,
+    ) -> dict[str, Any]:
+        """Persist status/notes for a generated run-of-show task."""
+        producer: EventProducerApp = app.state.event_producer
+        _casefile_or_404(event_id)
+        snapshot = producer.get_run_snapshot(event_id)
+        schedule = (snapshot or {}).get("schedule_result") or {}
+        task_ids = {
+            str(task.get("id"))
+            for task in schedule.get("ordered_tasks", [])
+            if isinstance(task, dict) and task.get("id")
+        }
+        if not task_ids:
+            raise HTTPException(status_code=409, detail="Run sheet has not been generated yet")
+        if task_id not in task_ids:
+            raise HTTPException(status_code=404, detail="Run sheet task not found")
+        return producer.casefile_store.update_run_sheet_task_status(
+            event_id,
+            task_id,
+            status=req.status,
+            notes=req.notes,
+        ).model_dump(mode="json")
 
     @app.post("/casefiles/{event_id}/requirements/confirm")
     async def confirm_casefile_requirements(event_id: str, request: Request) -> dict[str, Any]:

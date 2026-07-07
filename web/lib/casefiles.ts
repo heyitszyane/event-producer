@@ -48,6 +48,10 @@ export async function getCasefile(eventId: string): Promise<CasefileState> {
   return res.json()
 }
 
+export async function deleteCasefile(eventId: string): Promise<void> {
+  await apiFetch(`/casefiles/${eventId}`, { method: 'DELETE' })
+}
+
 export async function updateCasefileBasics(
   eventId: string,
   basics: EventBasics,
@@ -66,6 +70,29 @@ export async function updateCasefileBrief(
   const res = await apiFetch(`/casefiles/${eventId}/brief`, {
     method: 'PUT',
     body: JSON.stringify({ brief }),
+  })
+  return res.json()
+}
+
+export async function dismissMarketRealismWarning(
+  eventId: string,
+  warning: string,
+): Promise<CasefileState> {
+  const res = await apiFetch(`/casefiles/${eventId}/warnings/market-realism/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ warning }),
+  })
+  return res.json()
+}
+
+export async function updateRunSheetTaskStatus(
+  eventId: string,
+  taskId: string,
+  payload: { status: string; notes?: string | null },
+): Promise<CasefileState> {
+  const res = await apiFetch(`/casefiles/${eventId}/run-sheet/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
   })
   return res.json()
 }

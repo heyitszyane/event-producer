@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from event_producer import api
 from event_producer.api import create_app
-from event_producer.seeds import LEGACY_SINGAPORE_TITLE, SINGAPORE_SEED_ID
+from event_producer.seeds import LEGACY_SINGAPORE_TITLE, SEED_CASEFILES, SINGAPORE_SEED_ID
 
 
 _MODEL_ENV_KEYS = (
@@ -47,18 +47,24 @@ def test_seed_demo_uses_singapore_ai_founder_title_and_migrates_old_seed(
 
     sg = client.get(f"/casefiles/{SINGAPORE_SEED_ID}").json()
     assert sg["basics"]["working_title"] == "Singapore AI Founder Networking Night"
+    expected_seed = next(spec for spec in SEED_CASEFILES if spec["event_id"] == SINGAPORE_SEED_ID)
+    assert sg["basics"] == expected_seed["basics"].model_dump(mode="json")
+    assert sg["brief"] == expected_seed["brief"]
 
     store = client.app.state.event_producer.casefile_store
     old_basics = store.get_casefile(SINGAPORE_SEED_ID).basics.model_copy(
-        update={"working_title": LEGACY_SINGAPORE_TITLE}
+        update={"working_title": LEGACY_SINGAPORE_TITLE, "expected_turnout": 80}
     )
     store.update_basics(SINGAPORE_SEED_ID, old_basics)
+    store.update_brief(SINGAPORE_SEED_ID, "Old Singapore seed brief for 60 guests.")
 
     reseeded = client.post("/casefiles/seed")
     assert reseeded.status_code == 200
 
     migrated = client.get(f"/casefiles/{SINGAPORE_SEED_ID}").json()
     assert migrated["basics"]["working_title"] == "Singapore AI Founder Networking Night"
+    assert migrated["basics"] == expected_seed["basics"].model_dump(mode="json")
+    assert migrated["brief"] == expected_seed["brief"]
 
 
 def test_event_approval_status_persists_to_run_snapshot(client: TestClient) -> None:
@@ -100,6 +106,81 @@ def test_event_approval_status_persists_to_run_snapshot(client: TestClient) -> N
     )
     assert saved["status"] == "approved"
     assert nested["status"] == "approved"
+
+
+def test_market_realism_warning_can_be_dismissed_persistently(client: TestClient) -> None:
+    created = client.post(
+        "/casefiles",
+        json={
+            "basics": {
+                "working_title": "Dismiss Warning Demo",
+                "country": "Singapore",
+                "city": "Singapore",
+                "currency": "SGD",
+                "budget_cap": "10000",
+                "expected_turnout": 80,
+                "event_type": "networking",
+            },
+            "brief": "Premium founder networking night for 80 guests with SGD 10,000 budget.",
+        },
+    )
+    assert created.status_code == 200
+    event_id = created.json()["event_id"]
+    warning = "Budget realism risk: tight but acceptable for this recording."
+
+    dismissed = client.post(
+        f"/casefiles/{event_id}/warnings/market-realism/dismiss",
+        json={"warning": warning},
+    )
+    assert dismissed.status_code == 200
+    planning = dismissed.json()["planning_assumptions"]
+    assert planning["dismissed_market_realism_warnings"] == [warning]
+
+    reloaded = client.get(f"/casefiles/{event_id}")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["planning_assumptions"]["dismissed_market_realism_warnings"] == [warning]
+
+
+def test_run_sheet_task_status_persists_to_casefile(client: TestClient) -> None:
+    created = client.post(
+        "/casefiles",
+        json={
+            "basics": {
+                "working_title": "Run Sheet Completion Demo",
+                "country": "Singapore",
+                "city": "Singapore",
+                "currency": "SGD",
+                "budget_cap": "10000",
+                "expected_turnout": 80,
+                "event_type": "networking",
+                "start_date": "2026-08-14",
+                "end_date": "2026-08-14",
+            },
+            "brief": "Founder networking night for 80 guests with SGD 10,000 budget.",
+        },
+    )
+    assert created.status_code == 200
+    event_id = created.json()["event_id"]
+
+    run = client.post("/run", json={"casefile_id": event_id})
+    assert run.status_code == 200
+    task_id = run.json()["schedule_result"]["ordered_tasks"][0]["id"]
+
+    updated = client.patch(
+        f"/casefiles/{event_id}/run-sheet/tasks/{task_id}",
+        json={"status": "Complete", "notes": "Load-in done."},
+    )
+    assert updated.status_code == 200
+    override = updated.json()["planning_assumptions"]["run_sheet_task_overrides"][task_id]
+    assert override["status"] == "Complete"
+    assert override["notes"] == "Load-in done."
+
+    snapshot = client.get(f"/casefiles/{event_id}/run-snapshot")
+    assert snapshot.status_code == 200
+    saved_casefile = snapshot.json()["casefile"]
+    saved_override = saved_casefile["planning_assumptions"]["run_sheet_task_overrides"][task_id]
+    assert saved_override["status"] == "Complete"
+    assert saved_override["notes"] == "Load-in done."
 
 
 def test_create_app_loads_repo_env_without_settings_resave(

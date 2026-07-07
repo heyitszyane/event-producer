@@ -18,6 +18,8 @@ import pkg from '../package.json'
 import { ApiRequestError, apiFetch, getApiBase } from '../lib/api'
 import {
   createCasefile,
+  deleteCasefile,
+  dismissMarketRealismWarning,
   getCasefile,
   getRunSnapshot,
   getStorageInfo,
@@ -26,6 +28,7 @@ import {
   seedCasefiles,
   updateCasefileBasics,
   updateCasefileBrief,
+  updateRunSheetTaskStatus,
   type StorageInfo,
 } from '../lib/casefiles'
 import { humanizeValue } from '../lib/humanize'
@@ -48,6 +51,7 @@ import type {
   RequirementsPayload,
   NextBestStep as NextBestStepData,
   BookingDeadline,
+  PlanningAssumptions,
 } from '../types/agentic'
 
 const SEED_DEMO_CASEFILE_ID = 'seed-sg-networking'
@@ -73,7 +77,7 @@ export interface RunEventResponse {
   resolved_event_state?: ResolvedEventState
   requirements?: RequirementsPayload | null
   next_step?: NextBestStepData | null
-  planning_assumptions?: Record<string, unknown>
+  planning_assumptions?: PlanningAssumptions
   brief_intake?: BriefIntake | null
   creative_concept?: CreativeConceptData | null
   scope_strategy?: ScopeStrategyData | null
@@ -456,6 +460,8 @@ export default function Dashboard() {
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
   const [copiedCasefileId, setCopiedCasefileId] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false)
+  const [deletingEvent, setDeletingEvent] = useState(false)
 
   function formatApiError(err: unknown): string {
     if (err instanceof ApiRequestError && err.payload.code === 'LIVE_MODEL_PROVIDER_FAILED') {
@@ -566,6 +572,7 @@ export default function Dashboard() {
   }
 
   function applyCasefileState(casefile: CasefileState) {
+    setConfirmDeleteEvent(false)
     setActiveCasefile(casefile)
     setBasics(casefile.basics)
     setResult((prev) => prev ? ({
@@ -581,6 +588,7 @@ export default function Dashboard() {
   }
 
   function newCasefile() {
+    setConfirmDeleteEvent(false)
     setActiveCasefile(null)
     setBasics({ ...EMPTY_BASICS })
     setBrief('')
@@ -609,6 +617,27 @@ export default function Dashboard() {
       setError(formatApiError(err))
     } finally {
       setSeeding(false)
+    }
+  }
+
+  // Delete the active casefile (local demo-data management). Seeds can be
+  // re-created afterwards via "Seed Demo"; the app resets to the New Event
+  // state and reopens the next casefile if one remains.
+  async function deleteActiveCasefile() {
+    if (!activeCasefile) return
+    setDeletingEvent(true)
+    setError(null)
+    try {
+      await deleteCasefile(activeCasefile.event_id)
+      const remaining = await listCasefiles()
+      setCasefiles(remaining)
+      newCasefile()
+      if (remaining[0]) await selectCasefile(remaining[0].event_id)
+    } catch (err) {
+      setError(formatApiError(err))
+    } finally {
+      setDeletingEvent(false)
+      setConfirmDeleteEvent(false)
     }
   }
 
@@ -786,11 +815,20 @@ export default function Dashboard() {
   const visibleArtifacts = casefileArtifacts.filter((artifact) => artifact.name !== 'run-snapshot')
   const turnoutLabel = resolvedBasics.expected_turnout ? `${resolvedBasics.expected_turnout} pax` : 'Expected turnout not set'
   const attendeeSource = resolvedState?.sources?.expected_turnout || result?.constraint_resolution?.attendees?.source
+  const planningAssumptions = activeCasefile?.planning_assumptions
+    || result?.casefile?.planning_assumptions
+    || result?.planning_assumptions
+    || {}
+  const dismissedRealismWarnings = planningAssumptions.dismissed_market_realism_warnings || []
+  const runSheetTaskOverrides = planningAssumptions.run_sheet_task_overrides || {}
 
   // Hero strip budget health
   const budgetSummary = result?.budget_summary
   const scheduleResult = result?.schedule_result
   const criticalCount = scheduleResult?.critical_path?.length || 0
+  const completedScheduleTasks = (scheduleResult?.ordered_tasks || []).filter((task) => {
+    return runSheetTaskOverrides[task.id]?.status === 'Complete'
+  }).length
   const pendingApprovalCount = approvals.filter((a) => a.status === 'pending').length
   const activeMeta = ROUTE_META[activeSection]
   const headroomNumber = budgetSummary?.headroom ? Number(budgetSummary.headroom) : null
@@ -862,6 +900,48 @@ export default function Dashboard() {
     }) : prev)
   }
 
+  function applyCasefileUpdate(casefile: CasefileState) {
+    setActiveCasefile(casefile)
+    setBasics(casefile.basics)
+    setEventNameOverride(casefile.resolved.basics.working_title)
+    setResult((prev) => prev ? ({
+      ...prev,
+      casefile,
+      resolved_event_state: casefile.resolved,
+      requirements: casefile.requirements,
+      next_step: casefile.next_step,
+      planning_assumptions: casefile.planning_assumptions,
+    }) : prev)
+    void refreshCasefiles()
+  }
+
+  async function ignoreRealismWarning(warning: string) {
+    const eventId = activeCasefile?.event_id || result?.event_id
+    if (!eventId) return
+    setError(null)
+    try {
+      const updated = await dismissMarketRealismWarning(eventId, warning)
+      applyCasefileUpdate(updated)
+    } catch (err) {
+      setError(formatApiError(err))
+    }
+  }
+
+  async function saveRunSheetTaskStatus(taskId: string, status: string, notes?: string) {
+    const eventId = activeCasefile?.event_id || result?.event_id
+    if (!eventId) return
+    setError(null)
+    try {
+      const updated = await updateRunSheetTaskStatus(eventId, taskId, {
+        status,
+        notes: notes ?? null,
+      })
+      applyCasefileUpdate(updated)
+    } catch (err) {
+      setError(formatApiError(err))
+    }
+  }
+
   // P7B — apply a proposal
   async function applyProposal(proposal: ProposedAction) {
     if (!result?.event_id) return
@@ -928,18 +1008,16 @@ export default function Dashboard() {
     }
   }
 
-  const realismWarnings = result?.brief_intake?.market_realism_warnings ?? []
-  const hasRealismRisk = realismWarnings.length > 0
-  const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : hasRealismRisk ? 'AT RISK' : result ? 'ON TRACK' : 'AWAITING BRIEF'
+  const realismWarnings = (result?.brief_intake?.market_realism_warnings ?? [])
+    .filter((warning) => !dismissedRealismWarnings.includes(warning))
+  const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : result ? 'ON TRACK' : 'AWAITING BRIEF'
   const eventStateDetail = budgetSummary?.over_budget
     ? 'Budget total is over cap'
-    : hasRealismRisk
-      ? `${realismWarnings.length} budget realism warning${realismWarnings.length === 1 ? '' : 's'}`
-      : result
-        ? 'No budget or realism warning'
-        : 'No event yet'
+    : result
+      ? 'Budget and schedule computed'
+      : 'No event yet'
   const scheduleMetricDetail = scheduleResult
-    ? `${scheduleResult.ordered_tasks.length} generated tasks; ${criticalCount} zero-slack task${criticalCount === 1 ? '' : 's'}`
+    ? `${scheduleResult.ordered_tasks.length} generated tasks; ${completedScheduleTasks}/${scheduleResult.ordered_tasks.length} complete; ${criticalCount} zero-slack task${criticalCount === 1 ? '' : 's'}`
     : 'awaiting run'
   const eventTitle = generateDisplayEventTitle({
     manual: eventNameOverride,
@@ -1260,6 +1338,8 @@ export default function Dashboard() {
             schedule={result?.schedule_result}
             callSheet={result?.call_sheet || []}
             bookingDeadlines={result?.booking_deadlines || []}
+            taskOverrides={runSheetTaskOverrides}
+            onTaskStatusChange={saveRunSheetTaskStatus}
           />
         )
       case 'approvals':
@@ -1292,7 +1372,21 @@ export default function Dashboard() {
             {realismWarnings.length > 0 && (
               <section className="war-panel">
                 <div className="war-panel__header"><h2>Budget Realism Risks</h2></div>
-                <ul className="bullets">{realismWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                <ul className="bullets">
+                  {realismWarnings.map((warning) => (
+                    <li key={warning}>
+                      <span>{warning}</span>
+                      <button
+                        className="dismiss-btn"
+                        type="button"
+                        onClick={() => void ignoreRealismWarning(warning)}
+                        aria-label="Ignore budget realism warning"
+                      >
+                        x
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </section>
             )}
           </div>
@@ -1307,7 +1401,12 @@ export default function Dashboard() {
               </div>
               <ChatPane messages={chatLog} showHeader={false} />
             </section>
-            <ExtractedRequirements intake={result?.brief_intake ?? null} resolution={result?.constraint_resolution} />
+            <ExtractedRequirements
+              intake={result?.brief_intake ?? null}
+              resolution={result?.constraint_resolution}
+              dismissedWarnings={dismissedRealismWarnings}
+              onDismissWarning={(warning) => void ignoreRealismWarning(warning)}
+            />
             <AgentCrewTrace steps={agentTrace} />
           </div>
         )
@@ -1453,7 +1552,9 @@ export default function Dashboard() {
                 </table>
                 <p className="body-copy">
                   Casefiles and artifacts are JSON files on this machine — not a cloud
-                  database. Delete a casefile folder under the root above to remove it.
+                  database, and the store directory is gitignored, so nothing you create
+                  here is committed or shared. Use &ldquo;Delete Event&rdquo; in the header
+                  to remove a casefile (or delete its folder under the root above).
                 </p>
               </section>
             </div>
@@ -1580,6 +1681,39 @@ export default function Dashboard() {
               <button className="btn btn--ghost" type="button" onClick={seedDemo} disabled={seeding}>
                 {seeding ? 'Seeding...' : 'Seed Demo'}
               </button>
+              {activeCasefile && (
+                confirmDeleteEvent ? (
+                  <span className="confirm-inline">
+                    <span>Delete event?</span>
+                    <button
+                      className="btn btn--reject"
+                      type="button"
+                      onClick={deleteActiveCasefile}
+                      disabled={deletingEvent}
+                      aria-label={`Confirm delete event: ${eventTitle}`}
+                    >
+                      {deletingEvent ? 'Deleting...' : 'Confirm'}
+                    </button>
+                    <button
+                      className="btn btn--ghost"
+                      type="button"
+                      onClick={() => setConfirmDeleteEvent(false)}
+                      disabled={deletingEvent}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="btn btn--reject"
+                    type="button"
+                    onClick={() => setConfirmDeleteEvent(true)}
+                    aria-label={`Delete event: ${eventTitle}`}
+                  >
+                    Delete Event
+                  </button>
+                )
+              )}
             </div>
           </header>
 
@@ -1597,7 +1731,7 @@ export default function Dashboard() {
             </div>
             <div>
               <label>Production Status</label>
-              <span className={eventState === 'ON TRACK' ? 'metric-value--green' : eventState === 'AT RISK' ? 'metric-value--gold' : 'metric-value--red'}>{eventState}</span>
+              <span className={eventState === 'ON TRACK' ? 'metric-value--green' : 'metric-value--red'}>{eventState}</span>
               <small>{eventStateDetail}</small>
             </div>
             <div {...(scheduleResult ? metricNav('run-sheet', 'Open the Run Sheet') : {})}>
@@ -1627,6 +1761,20 @@ export default function Dashboard() {
           {degradedSteps.length > 0 && (
             <div className="callout callout--warning runtime-degraded" role="status">
               Degraded mode: {degradedSteps[0].role} used fallback because {degradedSteps[0].fallback_reason}.
+            </div>
+          )}
+
+          {realismWarnings.length > 0 && (
+            <div className="callout callout--warning runtime-degraded" role="status">
+              <span>{realismWarnings.length} budget realism advisory: {realismWarnings[0]}</span>
+              <button
+                onClick={() => void ignoreRealismWarning(realismWarnings[0])}
+                className="dismiss-btn"
+                type="button"
+                aria-label="Ignore budget realism advisory"
+              >
+                x
+              </button>
             </div>
           )}
 
