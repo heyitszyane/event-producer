@@ -114,6 +114,40 @@ def test_firestore_store_persists_casefile_artifact_and_operator_state() -> None
         reset_demo_user(token)
 
 
+def test_firestore_store_sanitizes_decimal_artifact_payload() -> None:
+    # Regression: the Budget Engine emits Decimal values, which the Firestore
+    # client cannot encode. write_artifact must coerce them to Firestore-safe
+    # types (matching the local JSON store, which serialises money as strings)
+    # instead of raising and turning /run into an unhandled 500.
+    store = FirestoreCasefileStore(client=FakeFirestoreClient())
+    token = set_demo_user("browser-decimal")
+    try:
+        casefile = store.create_casefile(_basics(), "Brief says 50 people.")
+        payload = {
+            "total": Decimal("10000"),
+            "lines": [{"label": "venue", "amount": Decimal("2500.50")}],
+        }
+        store.write_artifact(casefile.event_id, "budget-summary", payload)
+        stored = store.read_artifact(casefile.event_id, "budget-summary")
+        assert stored == {
+            "total": "10000",
+            "lines": [{"label": "venue", "amount": "2500.50"}],
+        }
+
+        def _no_decimal(value: Any) -> None:
+            assert not isinstance(value, Decimal)
+            if isinstance(value, dict):
+                for item in value.values():
+                    _no_decimal(item)
+            elif isinstance(value, list):
+                for item in value:
+                    _no_decimal(item)
+
+        _no_decimal(stored)
+    finally:
+        reset_demo_user(token)
+
+
 def test_firestore_store_scopes_casefiles_by_demo_user() -> None:
     store = FirestoreCasefileStore(client=FakeFirestoreClient())
 

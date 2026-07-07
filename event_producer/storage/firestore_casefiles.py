@@ -8,6 +8,7 @@ captured in ``casefile_context``.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from typing import Any
@@ -27,6 +28,17 @@ from event_producer.storage.local_casefiles import (
 )
 
 DEFAULT_COLLECTION = "event_producer_demo_users"
+
+
+def _firestore_safe(payload: Any) -> Any:
+    """Coerce an arbitrary artifact/timeline payload into Firestore-safe types.
+
+    The Firestore client cannot encode values such as ``Decimal`` (used by the
+    Budget Engine for exact money math). Round-tripping through JSON with
+    ``default=str`` mirrors exactly what the local JSON store persists, so both
+    stores hand the frontend the same shape (e.g. money values as strings).
+    """
+    return json.loads(json.dumps(payload, default=str))
 
 
 class FirestoreCasefileStore:
@@ -220,7 +232,9 @@ class FirestoreCasefileStore:
             path=f"artifacts/{name}",
             updated_at=now,
         )
-        self._artifact_ref(event_id, name).set({"payload": payload, "updated_at": now})
+        self._artifact_ref(event_id, name).set(
+            {"payload": _firestore_safe(payload), "updated_at": now}
+        )
         state = self.get_casefile(event_id)
         state.artifacts[name] = artifact
         state.updated_at = utc_now()
@@ -239,7 +253,7 @@ class FirestoreCasefileStore:
         entry = {
             "timestamp": utc_now(),
             "type": event_type,
-            "payload": payload or {},
+            "payload": _firestore_safe(payload or {}),
         }
         self._casefile_ref(event_id).collection("timeline").document().set(entry)
 
