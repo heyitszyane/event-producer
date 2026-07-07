@@ -851,6 +851,17 @@ export default function Dashboard() {
     if (data.recompute_notice) setRecomputeNotice(data.recompute_notice)
   }
 
+  function applyApprovalUpdate(nextApprovals: Approval[]) {
+    setResult((prev) => prev ? ({
+      ...prev,
+      approvals: nextApprovals,
+      run_of_show: prev.run_of_show ? {
+        ...prev.run_of_show,
+        approvals: nextApprovals,
+      } : prev.run_of_show,
+    }) : prev)
+  }
+
   // P7B — apply a proposal
   async function applyProposal(proposal: ProposedAction) {
     if (!result?.event_id) return
@@ -920,6 +931,16 @@ export default function Dashboard() {
   const realismWarnings = result?.brief_intake?.market_realism_warnings ?? []
   const hasRealismRisk = realismWarnings.length > 0
   const eventState = budgetSummary?.over_budget ? 'OVER BUDGET' : hasRealismRisk ? 'AT RISK' : result ? 'ON TRACK' : 'AWAITING BRIEF'
+  const eventStateDetail = budgetSummary?.over_budget
+    ? 'Budget total is over cap'
+    : hasRealismRisk
+      ? `${realismWarnings.length} budget realism warning${realismWarnings.length === 1 ? '' : 's'}`
+      : result
+        ? 'No budget or realism warning'
+        : 'No event yet'
+  const scheduleMetricDetail = scheduleResult
+    ? `${scheduleResult.ordered_tasks.length} generated tasks; ${criticalCount} zero-slack task${criticalCount === 1 ? '' : 's'}`
+    : 'awaiting run'
   const eventTitle = generateDisplayEventTitle({
     manual: eventNameOverride,
     creativeOptions: result?.creative_concept?.event_title_options,
@@ -1249,6 +1270,7 @@ export default function Dashboard() {
               eventId={result?.event_id}
               defaultExpanded
               vendorDraft={result?.vendor_draft ?? null}
+              onApprovalsChange={applyApprovalUpdate}
             />
           </div>
         )
@@ -1576,12 +1598,12 @@ export default function Dashboard() {
             <div>
               <label>Production Status</label>
               <span className={eventState === 'ON TRACK' ? 'metric-value--green' : eventState === 'AT RISK' ? 'metric-value--gold' : 'metric-value--red'}>{eventState}</span>
-              <small>{result ? 'current casefile' : 'no event yet'}</small>
+              <small>{eventStateDetail}</small>
             </div>
             <div {...(scheduleResult ? metricNav('run-sheet', 'Open the Run Sheet') : {})}>
               <label>Schedule Tasks</label>
               <span>{scheduleResult?.ordered_tasks?.length || 0}</span>
-              <small>{criticalCount} on critical path</small>
+              <small>{scheduleMetricDetail}</small>
             </div>
             <div {...(pendingApprovalCount > 0 ? metricNav('approvals', 'Open the Approval wall') : {})}>
               <label>Approvals</label>

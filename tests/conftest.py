@@ -20,6 +20,7 @@ def _isolate_casefile_storage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 @pytest.fixture(autouse=True)
 def _default_model_env_to_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent developer live-model env from leaking into hermetic tests."""
+    monkeypatch.setenv("EVENT_PRODUCER_LOAD_DOTENV", "false")
     for key in (
         "ENABLE_LIVE_MODEL",
         "ENABLE_LIVE_GEMINI",

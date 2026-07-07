@@ -46,6 +46,15 @@ interface DraftTask {
   notes: string
 }
 
+const STATUS_OPTIONS = [
+  'Scheduled',
+  'Critical path',
+  'In progress',
+  'Blocked',
+  'Complete',
+  'At risk',
+]
+
 function formatTime(isoString: string | undefined): string {
   if (!isoString) return '—'
   try {
@@ -269,7 +278,14 @@ export default function RunOfShowCard({ schedule, callSheet, bookingDeadlines = 
               <label className="field-compact"><span>Duration</span><input className="input" value={editing.duration} onChange={(e) => setEditing({ ...editing, duration: e.target.value })} /></label>
               <label className="field-compact"><span>Owner/role</span><input className="input" value={editing.owner} onChange={(e) => setEditing({ ...editing, owner: e.target.value })} /></label>
               <label className="field-compact"><span>Dependencies</span><input className="input" value={editing.dependencies} onChange={(e) => setEditing({ ...editing, dependencies: e.target.value })} /></label>
-              <label className="field-compact"><span>Status</span><input className="input" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })} /></label>
+              <label className="field-compact">
+                <span>Status</span>
+                <select className="select" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}>
+                  {STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </label>
               <label className="field-compact modal-grid__full"><span>Notes</span><textarea className="input" value={editing.notes} onChange={(e) => setEditing({ ...editing, notes: e.target.value })} rows={3} /></label>
             </div>
             {confirmDelete && <div className="block block--warn">Delete this draft row? This affects the visible draft table only.</div>}

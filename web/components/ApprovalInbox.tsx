@@ -26,13 +26,20 @@ interface ApprovalInboxProps {
   eventId?: string
   defaultExpanded?: boolean
   vendorDraft?: ApprovalVendorDraft | null
+  onApprovalsChange?: (approvals: Approval[]) => void
 }
 
 function isVendorMessageAction(action: string): boolean {
   return /send_vendor_message|vendor/i.test(action)
 }
 
-export default function ApprovalInbox({ approvals, eventId, defaultExpanded = false, vendorDraft = null }: ApprovalInboxProps) {
+export default function ApprovalInbox({
+  approvals,
+  eventId,
+  defaultExpanded = false,
+  vendorDraft = null,
+  onApprovalsChange,
+}: ApprovalInboxProps) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [acting, setActing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -58,9 +65,9 @@ export default function ApprovalInbox({ approvals, eventId, defaultExpanded = fa
         body: JSON.stringify({ action }),
       })
       const updated: Approval = await res.json()
-      setLocalApprovals((prev) =>
-        prev.map((a) => (a.id === id ? updated : a))
-      )
+      const next = localApprovals.map((a) => (a.id === id ? updated : a))
+      setLocalApprovals(next)
+      onApprovalsChange?.(next)
       setStatusMessage(`${displayLabel(updated.action)} ${updated.status}.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

@@ -56,6 +56,16 @@ from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
 from event_producer.storage.vendor_notebook import VendorNotFoundError
 
+
+def _load_repo_env() -> None:
+    """Load gitignored local .env values without overriding shell-provided env."""
+    if (os.environ.get("EVENT_PRODUCER_LOAD_DOTENV", "true") or "").strip().lower() == "false":
+        return
+    for key, value in read_env_file().items():
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
@@ -209,6 +219,7 @@ def create_app() -> FastAPI:
     Returns:
         A configured ``FastAPI`` instance with all routes registered.
     """
+    _load_repo_env()
     app = FastAPI(title="Event Producer API")
 
     # ---- Demo auth middleware ---------------------------------------------
@@ -837,6 +848,19 @@ def create_app() -> FastAPI:
         if approval is None:
             raise HTTPException(status_code=404, detail="Approval not found")
 
+        def persist_approval_state() -> None:
+            saved = [
+                a.model_dump(mode="json")
+                for a in producer.event_store.get_approvals(event_id)
+            ]
+            snapshot_updates: dict[str, Any] = {"approvals": saved}
+            snapshot = producer.get_run_snapshot(event_id)
+            if isinstance(snapshot, dict) and isinstance(snapshot.get("run_of_show"), dict):
+                run_of_show = dict(snapshot["run_of_show"])
+                run_of_show["approvals"] = saved
+                snapshot_updates["run_of_show"] = run_of_show
+            producer.update_run_snapshot(event_id, snapshot_updates)
+
         if body.action == "reject":
             approval.status = "rejected"
             approval.approved_by = actor
@@ -848,6 +872,7 @@ def create_app() -> FastAPI:
                 event_id=event_id,
             )
             producer.event_store.save_approval(event_id, approval)
+            persist_approval_state()
             return approval.model_dump()
 
         approval.status = "approved"
@@ -873,6 +898,7 @@ def create_app() -> FastAPI:
             )
 
         producer.event_store.save_approval(event_id, approval)
+        persist_approval_state()
         return approval.model_dump()
 
     @app.get("/event/{event_id}/approvals")

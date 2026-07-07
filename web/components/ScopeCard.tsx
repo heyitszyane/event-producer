@@ -94,7 +94,6 @@ export default function ScopeCard({
   // Edit happens in a focused modal instead of exploding the table row.
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editItem, setEditItem] = useState<ItemForm>(blankForm)
-  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
 
   function budgetStatus(item: ScopeItem): BudgetRowStatus {
     // Include/Exclude is the only gate now — every included item counts.
@@ -109,7 +108,6 @@ export default function ScopeCard({
       const res = await apiFetch(url, init)
       const data: ScopeMutationResult = await res.json()
       onMutation?.(data)
-      setDeleteConfirm(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       throw err
@@ -310,37 +308,15 @@ export default function ScopeCard({
                     >
                       Edit
                     </button>
-                    {deleteConfirm === idx ? (
-                      <span className="confirm-inline">
-                        <span>Delete?</span>
-                        <button
-                          onClick={() => deleteItem(idx)}
-                          disabled={loading}
-                          className="btn btn--reject btn--sm"
-                          type="button"
-                          aria-label={`Confirm delete scope item: ${item.name}`}
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirm(null)}
-                          className="btn btn--ghost btn--sm"
-                          type="button"
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => setDeleteConfirm(idx)}
-                        disabled={loading}
-                        className="btn btn--reject btn--sm"
-                        type="button"
-                        aria-label={`Delete scope item: ${item.name}`}
-                      >
-                        Delete
-                      </button>
-                    )}
+                    <button
+                      onClick={() => deleteItem(idx)}
+                      disabled={loading}
+                      className="btn btn--reject btn--sm"
+                      type="button"
+                      aria-label={`Delete scope item: ${item.name}`}
+                    >
+                      Delete
+                    </button>
                     <button
                       onClick={() => toggleItem(idx)}
                       disabled={loading}

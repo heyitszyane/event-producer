@@ -5,6 +5,9 @@ no data to explore. These seed specs are checked into the repo and
 materialized on demand via ``ensure_demo_casefiles`` (exposed by the
 ``POST /casefiles/seed`` endpoint and the "Seed Demo" button). Seeding is
 idempotent: an existing seed is left untouched so user edits survive.
+One narrow exception is the recorded Singapore seed title migration: the prior
+committed title is upgraded in place only when the local seed still has that
+exact old title.
 
 The two seeds intentionally cover different currencies and a different mix of
 constraints:
@@ -31,6 +34,10 @@ class SeedSpec(TypedDict):
     event_id: str
     basics: EventBasics
     brief: str
+
+
+SINGAPORE_SEED_ID = "seed-sg-networking"
+LEGACY_SINGAPORE_TITLE = "AI Founder Networking Night"
 
 
 SEED_CASEFILES: list[SeedSpec] = [
@@ -60,9 +67,9 @@ SEED_CASEFILES: list[SeedSpec] = [
         ),
     },
     {
-        "event_id": "seed-sg-networking",
+        "event_id": SINGAPORE_SEED_ID,
         "basics": EventBasics(
-            working_title="AI Founder Networking Night",
+            working_title="Singapore AI Founder Networking Night",
             country="Singapore",
             city="Singapore",
             currency="SGD",
@@ -100,6 +107,15 @@ def ensure_demo_casefiles(producer: EventProducerApp) -> list[str]:
         event_id = spec["event_id"]
         seeded_ids.append(event_id)
         if event_id in existing:
+            if event_id == SINGAPORE_SEED_ID:
+                casefile = store.get_casefile(event_id)
+                if casefile.basics.working_title == LEGACY_SINGAPORE_TITLE:
+                    store.update_basics(
+                        event_id,
+                        casefile.basics.model_copy(
+                            update={"working_title": spec["basics"].working_title}
+                        ),
+                    )
             continue
         store.create_casefile(spec["basics"], spec["brief"], event_id=event_id)
         try:
