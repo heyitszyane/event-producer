@@ -216,6 +216,7 @@ Infrastructure-as-code for deployment targets.
 |---|---|
 | `Dockerfile` | Container image definition for Cloud Run |
 | `cloudbuild.yaml` | Google Cloud Build pipeline config (includes all 4 QA gates: mypy + ruff + pytest + build) |
+| `cloudbuild.backend.yaml` | First-pass backend image build for new hosted environments before frontend URLs exist |
 | `firebase.json` | Firebase Hosting config (serves `web/out` from static export) |
 
 ---

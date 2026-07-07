@@ -251,6 +251,10 @@ gcloud builds submit \
   --substitutions=_NEXT_PUBLIC_API_BASE_URL=https://<cloud-run-url>,_ALLOWED_ORIGINS=https://<frontend-origin>
 ```
 
+For a first hosted environment where the Cloud Run URL is not known yet, use
+`deploy/cloudbuild.backend.yaml` to build the backend image first, deploy Cloud
+Run, then rerun the full deploy with the final Cloud Run and frontend origins.
+
 Notes:
 
 - `deploy/cloudbuild.yaml` deploys the backend to Cloud Run and the static
