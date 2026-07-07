@@ -127,13 +127,13 @@ def test_env_openrouter_provider_without_key_records_fallback(monkeypatch) -> No
 
 def test_env_request_timeout_default_and_invalid(monkeypatch) -> None:
     _clean_env(monkeypatch)
-    assert ModelEnv.from_env().request_timeout_seconds == 12
+    assert ModelEnv.from_env().request_timeout_seconds == 45
 
     _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="0")
-    assert ModelEnv.from_env().request_timeout_seconds == 12
+    assert ModelEnv.from_env().request_timeout_seconds == 45
 
     _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="not-a-number")
-    assert ModelEnv.from_env().request_timeout_seconds == 12
+    assert ModelEnv.from_env().request_timeout_seconds == 45
 
     _clean_env(monkeypatch, MODEL_REQUEST_TIMEOUT_SECONDS="7")
     assert ModelEnv.from_env().request_timeout_seconds == 7

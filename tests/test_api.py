@@ -86,7 +86,7 @@ class TestRuntimeModel:
             "model_name": "local-test-model",
             "api_base_url": "http://127.0.0.1:1234/v1/chat/completions",
             "has_api_key": True,
-            "request_timeout_seconds": 12,
+            "request_timeout_seconds": 45,
             "fallback_reason": None,
         }
         assert "should-not-leak" not in str(data)
@@ -130,7 +130,7 @@ class TestModelSettings:
         assert data["effective_mode"] == "openai_compatible_live"
         assert data["has_api_key"] is True
         assert data["strict_live_model"] is True
-        assert data["request_timeout_seconds"] == 12
+        assert data["request_timeout_seconds"] == 45
         assert data["env_path"] == str(env_file)
         assert "secret-lmst" not in str(data)
 

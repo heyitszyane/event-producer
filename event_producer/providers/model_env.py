@@ -32,8 +32,11 @@ _KEY_NAMES = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 _OPENAI_COMPATIBLE_KEYS = ("OPENAI_COMPATIBLE_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY")
 _LOCAL_PROVIDERS = {"local", "ollama", "lmstudio"}
 _OPENAI_COMPATIBLE_PROVIDERS = {"openai_compatible", "openrouter", *_LOCAL_PROVIDERS}
-_DEFAULT_TIMEOUT_SECONDS = 12
-_DEFAULT_MAX_OUTPUT_TOKENS = 900
+_DEFAULT_TIMEOUT_SECONDS = 45
+# Large enough for a full structured agent object even when a "thinking" model
+# (e.g. gemini-2.5-flash) spends part of its output budget on reasoning tokens.
+# A lower cap can truncate the JSON mid-object, which then fails to parse.
+_DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
 
 def _provider_label(provider: str) -> str:
