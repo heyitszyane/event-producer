@@ -212,12 +212,16 @@ evidence or screenshot blocker, and final verdict.
 
 Infrastructure-as-code for deployment targets.
 
+The root `firebase.json` is the active Firebase Hosting config used for deploys
+from the repository root. `deploy/firebase.json` is retained as a deploy-folder
+reference copy.
+
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Container image definition for Cloud Run |
 | `cloudbuild.yaml` | Google Cloud Build pipeline config (includes all 4 QA gates: mypy + ruff + pytest + build) |
 | `cloudbuild.backend.yaml` | First-pass backend image build for new hosted environments before frontend URLs exist |
-| `firebase.json` | Firebase Hosting config (serves `web/out` from static export) |
+| `firebase.json` | Firebase Hosting reference config (active config is root `firebase.json`) |
 
 ---
 

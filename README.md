@@ -258,7 +258,7 @@ Run, then rerun the full deploy with the final Cloud Run and frontend origins.
 Notes:
 
 - `deploy/cloudbuild.yaml` deploys the backend to Cloud Run and the static
-  frontend to Firebase Hosting.
+  frontend to Firebase Hosting using the root `firebase.json` Hosting config.
 - The Cloud Run service account needs Firestore access if
   `_CASEFILE_STORE=firestore`.
 - The frontend sends a browser-local `X-Demo-User` id so hosted demo casefiles
