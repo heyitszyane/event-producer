@@ -3,7 +3,7 @@
     "public": "web/out",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "**", "destination": "/index.html" }
+      { "regex": "^/([^.].*)?$", "destination": "/index.html" }
     ],
     "headers": [
       {
