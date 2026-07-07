@@ -8,12 +8,35 @@ substitutions:
   _REGION: us-central1
   _SERVICE_NAME: event-producer-api
   _NEXT_PUBLIC_API_BASE_URL: ""
+  _ALLOWED_ORIGINS: ""
+  _CASEFILE_STORE: firestore
 
 options:
   logging: CLOUD_LOGGING_ONLY
   machineType: E2_MEDIUM
 
 steps:
+  # ---------------------------------------------------------------
+  # Hosted deploy guard: no localhost/static-host mismatch
+  # ---------------------------------------------------------------
+  - id: validate-deploy-env
+    name: bash:5.2
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -z "${_NEXT_PUBLIC_API_BASE_URL}" ]; then
+          echo "_NEXT_PUBLIC_API_BASE_URL is required for deployed frontend builds"
+          exit 1
+        fi
+        if [ -z "${_ALLOWED_ORIGINS}" ]; then
+          echo "_ALLOWED_ORIGINS is required so the hosted frontend can call Cloud Run"
+          exit 1
+        fi
+        if [ "${_CASEFILE_STORE}" = "firestore" ]; then
+          echo "Hosted casefiles will use Firestore."
+        fi
+
   # ---------------------------------------------------------------
   # QA Gate 1: Type check (mypy)
   # ---------------------------------------------------------------
@@ -95,9 +118,9 @@ steps:
       - --port=8080
       - --memory=512Mi
       - --max-instances=1
-      - --set-env-vars=PYTHONUNBUFFERED=1
+      - --set-env-vars=PYTHONUNBUFFERED=1,EVENT_PRODUCER_LOAD_DOTENV=false,CASEFILE_STORE=${_CASEFILE_STORE},ALLOWED_ORIGINS=${_ALLOWED_ORIGINS}
       - --service-account=event-producer-runtime@$PROJECT_ID.iam.gserviceaccount.com
-    waitFor: [push-backend]
+    waitFor: [validate-deploy-env, push-backend]
     timeout: 300s
 
   # ---------------------------------------------------------------
@@ -109,17 +132,13 @@ steps:
     args:
       - -c
       - |
-        if [ -z "${_NEXT_PUBLIC_API_BASE_URL}" ]; then
-          echo "_NEXT_PUBLIC_API_BASE_URL is required for deployed frontend builds"
-          exit 1
-        fi
         export NEXT_PUBLIC_API_BASE_URL="${_NEXT_PUBLIC_API_BASE_URL}"
         corepack enable &&
         pnpm -C web install --frozen-lockfile &&
         pnpm -C web run build &&
         ! grep -R "http://127.0.0.1:8080" web/out &&
         ! grep -R "http://localhost:8080" web/out
-    waitFor: [qa-typecheck, qa-lint, qa-test]
+    waitFor: [validate-deploy-env, qa-typecheck, qa-lint, qa-test]
     timeout: 600s
 
   # ---------------------------------------------------------------
@@ -135,7 +154,7 @@ steps:
       - -c
       - |
         if [ -f web/out/index.html ]; then
-          firebase deploy --only hosting --project $PROJECT_ID
+          firebase deploy --config deploy/firebase.json --only hosting --project $PROJECT_ID
         else
           echo "Frontend build artifact not found (web/out/index.html) -- skipping Firebase deploy."
         fi

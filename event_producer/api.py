@@ -54,6 +54,8 @@ from event_producer.models.schemas import (
 )
 from event_producer.providers.agent_model import LiveModelProviderError
 from event_producer.security.action_gate import enforce, requires_approval
+from event_producer.storage.casefile_context import reset_demo_user, set_demo_user
+from event_producer.storage.casefile_store import storage_info
 from event_producer.storage.vendor_notebook import VendorNotFoundError
 
 
@@ -244,7 +246,8 @@ def create_app() -> FastAPI:
         async def dispatch(self, request: Request, call_next):
             if request.url.path == "/healthz":
                 return await call_next(request)
-            if "x-demo-user" not in request.headers:
+            demo_user = request.headers.get("x-demo-user")
+            if not demo_user:
                 return JSONResponse(
                     status_code=401,
                     content={
@@ -254,7 +257,11 @@ def create_app() -> FastAPI:
                         }
                     },
                 )
-            return await call_next(request)
+            token = set_demo_user(demo_user)
+            try:
+                return await call_next(request)
+            finally:
+                reset_demo_user(token)
 
     app.add_middleware(DemoAuthMiddleware)
 
@@ -481,14 +488,9 @@ def create_app() -> FastAPI:
 
     @app.get("/settings/storage")
     async def get_storage_info() -> dict[str, Any]:
-        """Describe where casefiles are stored locally (demo storage, not cloud)."""
+        """Describe the configured demo casefile store without exposing secrets."""
         producer: EventProducerApp = app.state.event_producer
-        store = producer.casefile_store
-        return {
-            "root": str(store.root.resolve()),
-            "casefile_count": len(store.list_casefiles()),
-            "storage_kind": "local_json",
-        }
+        return storage_info(producer.casefile_store)
 
     @app.get("/agents")
     async def get_agent_registry() -> dict[str, Any]:

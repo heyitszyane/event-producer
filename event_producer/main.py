@@ -77,7 +77,7 @@ from event_producer.providers.model_router import build_agent_model
 from event_producer.providers.rate_card import FxRateProvider, StaticFxRateProvider
 from event_producer.providers.vendor_sourcer import VendorSourcer
 from event_producer.security.audit_log import AuditLog
-from event_producer.storage.local_casefiles import LocalCasefileStore
+from event_producer.storage.casefile_store import CasefileStore, build_casefile_store
 from event_producer.storage.vendor_notebook import ARTIFACT_NAME as VENDOR_NOTEBOOK_ARTIFACT
 from event_producer.storage.vendor_notebook import VendorNotebook
 
@@ -291,12 +291,12 @@ class EventProducerApp:
     def __init__(
         self,
         event_store: EventStore | None = None,
-        casefile_store: LocalCasefileStore | None = None,
+        casefile_store: CasefileStore | None = None,
         env: ModelEnv | None = None,
     ) -> None:
         # --- Providers ---
         self._event_store = event_store if event_store is not None else InMemoryEventStore()
-        self._casefile_store = casefile_store if casefile_store is not None else LocalCasefileStore()
+        self._casefile_store = casefile_store if casefile_store is not None else build_casefile_store()
         self._vendor_notebook = VendorNotebook(self._casefile_store)
         self._vendor_sourcer = InMemoryVendorSourcer()
         self._fx_provider: FxRateProvider = StaticFxRateProvider()
@@ -350,7 +350,7 @@ class EventProducerApp:
         return self._event_store
 
     @property
-    def casefile_store(self) -> LocalCasefileStore:
+    def casefile_store(self) -> CasefileStore:
         return self._casefile_store
 
     @property

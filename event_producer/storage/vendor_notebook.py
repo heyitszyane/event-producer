@@ -29,7 +29,7 @@ from event_producer.storage.local_casefiles import utc_now
 
 if TYPE_CHECKING:
     from event_producer.models.schemas import CasefileArtifact
-    from event_producer.storage.local_casefiles import LocalCasefileStore
+    from event_producer.storage.casefile_store import CasefileStore
 
 ARTIFACT_NAME = "vendor-notebook"
 
@@ -77,7 +77,7 @@ def _advance(current: VendorWorkflowStatus, target: VendorWorkflowStatus) -> Ven
 class VendorNotebook:
     """Load/mutate the vendor-notebook artifact through the casefile store."""
 
-    def __init__(self, store: LocalCasefileStore) -> None:
+    def __init__(self, store: CasefileStore) -> None:
         self._store = store
 
     # -- reads ---------------------------------------------------------------

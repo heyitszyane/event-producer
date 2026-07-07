@@ -1,4 +1,5 @@
 const LOCAL_API_BASE = 'http://127.0.0.1:8080'
+const DEMO_USER_STORAGE_KEY = 'event_producer_demo_user'
 
 export interface ApiErrorPayload {
   code?: string
@@ -22,6 +23,15 @@ export class ApiRequestError extends Error {
 
 export function getApiBase(): string {
   return process.env.NEXT_PUBLIC_API_BASE_URL || LOCAL_API_BASE
+}
+
+export function getDemoUser(): string {
+  if (typeof window === 'undefined') return 'demo-user'
+  const existing = window.localStorage.getItem(DEMO_USER_STORAGE_KEY)
+  if (existing) return existing
+  const generated = `demo-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`
+  window.localStorage.setItem(DEMO_USER_STORAGE_KEY, generated)
+  return generated
 }
 
 export async function parseApiErrorPayload(res: Response): Promise<ApiErrorPayload> {
@@ -56,7 +66,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (!headers.has('Content-Type') && init.body) {
     headers.set('Content-Type', 'application/json')
   }
-  headers.set('X-Demo-User', headers.get('X-Demo-User') || 'demo-user')
+  headers.set('X-Demo-User', headers.get('X-Demo-User') || getDemoUser())
   const res = await fetch(`${getApiBase()}${path}`, { ...init, headers })
   if (!res.ok) {
     throw new ApiRequestError(res.status, await parseApiErrorPayload(res))

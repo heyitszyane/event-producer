@@ -15,6 +15,7 @@ mypy-extensions==1.1.0
 ruff==0.15.18
 pytest==9.1.1
 google-genai==2.10.0
+google-cloud-firestore==2.21.0
 # P7O: agent skill-card frontmatter parsing (previously transitive via uvicorn[standard]).
 PyYAML==6.0.3
 types-PyYAML==6.0.12.20260518

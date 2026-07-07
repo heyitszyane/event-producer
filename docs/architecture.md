@@ -22,10 +22,19 @@ Next.js Paper War Room
         v
 FastAPI backend
   |
-  +- LocalCasefileStore
+  +- CasefileStore
+  |    +- LocalCasefileStore (default clone/dev mode)
+  |    +- FirestoreCasefileStore (hosted demo mode)
+  |
+  +- Local JSON layout
   |    +- casefile.json
   |    +- timeline.jsonl
   |    +- artifacts/*.json
+  |
+  +- Firestore layout
+  |    +- event_producer_demo_users/{demo_user}/casefiles/{event_id}
+  |    +- artifacts subcollection
+  |    +- timeline subcollection
   |
   +- Agent crew
   |    +- AI Producer / Orchestrator
@@ -59,7 +68,8 @@ FastAPI backend
 ## Core state flow
 
 1. User creates a casefile.
-2. Backend writes a local `casefile.json` immediately.
+2. Backend writes a casefile immediately: local JSON by default, Firestore when
+   `CASEFILE_STORE=firestore`.
 3. User saves structured event basics and event notes.
 4. Backend resolves state with structured fields first.
 5. Agent run generates typed artifacts.
@@ -87,14 +97,15 @@ This prevents defaults or LLM extraction from silently overriding the casefile.
 | LLM agents | judgment, language, proposals, drafts, risk framing | money invariants, schedule mechanics, external action |
 | Deterministic engines | arithmetic, budget headroom, contingency, schedule mechanics | vendor prose, creative framing |
 | Approval wall | permission to execute gated actions | model reasoning |
-| Casefile store | durable local state and artifacts | production multi-user persistence |
+| Casefile store | durable demo state and artifacts | production authentication |
 
 ## Deployment shape
 
 - Backend: FastAPI, Cloud Run-compatible.
 - Frontend: Next.js static export, Firebase/Vercel-compatible when built with
   `NEXT_PUBLIC_API_BASE_URL`.
-- Storage: local JSON for capstone demo.
+- Storage: local JSON by default; Firestore opt-in for hosted demos because
+  Cloud Run filesystem state is ephemeral.
 - Live model mode: optional provider seam.
 - Fallback mode: deterministic/degraded behavior for clone reviewers without
   API keys.
@@ -103,7 +114,7 @@ This prevents defaults or LLM extraction from silently overriding the casefile.
 
 - production auth;
 - multi-user tenancy;
-- production cloud database;
+- production-grade authenticated multi-tenant database;
 - live vendor messaging;
 - payment execution;
 - autonomous vendor negotiation;

@@ -50,6 +50,7 @@ Avoid claiming live outbound messaging.
 ## What is implemented
 
 - Local saved casefiles.
+- Opt-in Firestore casefile persistence for hosted demos.
 - Structured event facts and conflict notices.
 - Agent Mission Control with direct specialist-agent actions.
 - Runtime-loaded skill-card registry.
@@ -63,8 +64,8 @@ Avoid claiming live outbound messaging.
 ## What is not implemented
 
 - Production authentication.
-- Multi-user tenancy.
-- Production cloud database.
+- Production multi-user accounts.
+- Production-grade authenticated tenancy.
 - Live vendor directory lookup.
 - Live email / Telegram / WhatsApp sending.
 - Autonomous vendor negotiation.

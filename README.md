@@ -218,8 +218,48 @@ Important environment variables:
 | `LOCAL_LLM_API_BASE_URL` | Local model endpoint for LM Studio/Ollama/local servers. |
 | `NEXT_PUBLIC_API_BASE_URL` | Frontend API base URL for build/runtime. |
 | `EVENT_PRODUCER_CASEFILE_ROOT` | Optional override for local casefile storage root. |
+| `CASEFILE_STORE` | `local` by default; set to `firestore` for hosted Cloud Run demos. |
+| `EVENT_PRODUCER_FIRESTORE_COLLECTION` | Optional Firestore owner collection override. |
+| `ALLOWED_ORIGINS` | Required for hosted frontend origins calling Cloud Run. |
 
 Secrets rule: do not commit `.env`, API keys, service-account JSON, or local state.
+
+---
+
+## Hosted demo deployment
+
+This repo has a Cloud Run backend lane and a static frontend lane. It does not
+prove that your project is already deployed; deployment still requires a Google
+Cloud/Firebase project, an authenticated deploy operator, and the required
+project services/IAM.
+
+Hosted mode should use Firestore because Cloud Run container filesystems are
+ephemeral:
+
+```text
+CASEFILE_STORE=firestore
+EVENT_PRODUCER_LOAD_DOTENV=false
+ALLOWED_ORIGINS=https://<your-frontend-host>
+NEXT_PUBLIC_API_BASE_URL=https://<your-cloud-run-service-url>
+```
+
+The Cloud Build file expects:
+
+```bash
+gcloud builds submit \
+  --config deploy/cloudbuild.yaml \
+  --substitutions=_NEXT_PUBLIC_API_BASE_URL=https://<cloud-run-url>,_ALLOWED_ORIGINS=https://<frontend-origin>
+```
+
+Notes:
+
+- `deploy/cloudbuild.yaml` deploys the backend to Cloud Run and the static
+  frontend to Firebase Hosting.
+- The Cloud Run service account needs Firestore access if
+  `_CASEFILE_STORE=firestore`.
+- The frontend sends a browser-local `X-Demo-User` id so hosted demo casefiles
+  are scoped per browser session.
+- This is demo isolation, not production authentication.
 
 ---
 
@@ -267,7 +307,7 @@ This is a capstone prototype, not production SaaS.
 Deferred / not implemented:
 
 - production authentication and multi-user accounts;
-- Firestore/Supabase production persistence;
+- production-grade authenticated tenancy;
 - live vendor directory lookup;
 - live email, Telegram, or WhatsApp sending;
 - autonomous vendor negotiation;
